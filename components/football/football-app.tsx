@@ -49,6 +49,7 @@ import {
   finishMatchWithScore,
   minutesBetween,
   playerFor,
+  reopenFinishedMatch,
   reorder,
   scheduleMetrics,
   scheduleWindowMetrics,
@@ -886,6 +887,19 @@ function ScheduleScreen({
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
+  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
+  const [showAllFinished, setShowAllFinished] = useState(false);
+  const current = tournament.matches.find(
+    (match) => match.status === 'current',
+  );
+  const upcoming = tournament.matches.filter(
+    (match) => match.status === 'upcoming',
+  );
+  const finished = tournament.matches
+    .filter((match) => match.status === 'finished')
+    .reverse();
+  const visibleUpcoming = showAllUpcoming ? upcoming : upcoming.slice(0, 5);
+  const visibleFinished = showAllFinished ? finished : finished.slice(0, 5);
   return (
     <>
       <PageHeader
@@ -902,16 +916,87 @@ function ScheduleScreen({
           </Button>
         }
       />
-      <div className="space-y-3 px-4 py-4 pb-6">
-        {tournament.matches.map((match) => (
-          <MatchCard
-            key={match.id}
-            match={match}
-            teams={tournament.teams}
-            onClick={() => onOpenMatch(match.id)}
-            onFinish={() => onOpenMatch(match.id)}
-          />
-        ))}
+      <div className="space-y-6 px-4 py-4 pb-6">
+        {current && (
+          <section>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-base font-black text-[#087632]">กำลังแข่ง</h2>
+              <span className="rounded-full bg-[#11823b] px-2.5 py-1 text-xs font-black text-white">
+                LIVE
+              </span>
+            </div>
+            <MatchCard
+              match={current}
+              teams={tournament.teams}
+              onClick={() => onOpenMatch(current.id)}
+              onFinish={() => onOpenMatch(current.id)}
+            />
+          </section>
+        )}
+        {upcoming.length > 0 && (
+          <section>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-base font-black">คิวถัดไป</h2>
+              <span className="text-sm font-bold text-slate-400">
+                {upcoming.length} เกม
+              </span>
+            </div>
+            <div className="space-y-2">
+              {visibleUpcoming.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  teams={tournament.teams}
+                  onClick={() => onOpenMatch(match.id)}
+                  onFinish={() => onOpenMatch(match.id)}
+                />
+              ))}
+            </div>
+            {upcoming.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setShowAllUpcoming((value) => !value)}
+                className="mt-2 h-11 w-full rounded-xl font-black text-[#087632]"
+              >
+                {showAllUpcoming
+                  ? 'ย่อรายการ'
+                  : `ดูคิวทั้งหมดอีก ${upcoming.length - 5} เกม`}
+              </button>
+            )}
+          </section>
+        )}
+        {finished.length > 0 && (
+          <section>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-base font-black">แข่งแล้ว</h2>
+              <span className="text-sm font-bold text-slate-400">
+                {finished.length} เกม
+              </span>
+            </div>
+            <div className="space-y-2">
+              {visibleFinished.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  teams={tournament.teams}
+                  onClick={() => onOpenMatch(match.id)}
+                  onFinish={() => onOpenMatch(match.id)}
+                />
+              ))}
+            </div>
+            {finished.length > 5 && (
+              <button
+                type="button"
+                onClick={() => setShowAllFinished((value) => !value)}
+                className="mt-2 h-11 w-full rounded-xl font-black text-[#087632]"
+              >
+                {showAllFinished
+                  ? 'ย่อรายการ'
+                  : `ดูผลย้อนหลังอีก ${finished.length - 5} เกม`}
+              </button>
+            )}
+          </section>
+        )}
         <section className="rounded-[22px] border border-dashed border-[#72bf88] bg-[#eef9f1] p-4 text-center">
           <p className="font-black text-[#087632]">ยังเล่นต่อกันอยู่?</p>
           <p className="mt-1 text-sm font-semibold text-slate-600">
@@ -1394,33 +1479,16 @@ function MatchDetailScreen({
   match,
   onBack,
   onUpdate,
-  onEditGk,
 }: {
   tournament: Tournament;
   match: Match;
   onBack: () => void;
   onUpdate: (value: Tournament) => void;
-  onEditGk: (teamId: string) => void;
 }) {
   const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
   const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
   const [scoreA, setScoreA] = useState(match.teamAScore ?? 0);
   const [scoreB, setScoreB] = useState(match.teamBScore ?? 0);
-  function adjacentGk(team: Team, offset: -1 | 1) {
-    const teamMatches = tournament.matches.filter(
-      (item) => item.teamAId === team.id || item.teamBId === team.id,
-    );
-    const index = teamMatches.findIndex((item) => item.id === match.id);
-    const target = teamMatches[index + offset];
-    return target
-      ? playerFor(
-          team,
-          target.teamAId === team.id
-            ? target.teamAGkPlayerId
-            : target.teamBGkPlayerId,
-        )?.name
-      : undefined;
-  }
   return (
     <>
       <PageHeader
@@ -1491,64 +1559,6 @@ function MatchDetailScreen({
             </label>
           </div>
         </section>
-        {[teamA, teamB].map((team) => {
-          const gkId =
-            match.teamAId === team.id
-              ? match.teamAGkPlayerId
-              : match.teamBGkPlayerId;
-          return (
-            <section key={team.id} className="settings-card">
-              <div className="flex items-center gap-3">
-                <TeamShirtIcon color={team.color} size="sm" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black uppercase text-slate-400">
-                    Goalkeeper · {team.name}
-                  </p>
-                  <p className="truncate text-2xl font-black">
-                    {playerFor(team, gkId)?.name ?? 'ยังไม่มี GK'}
-                  </p>
-                </div>
-                <Goal className="h-7 w-7 text-[#11823b]" />
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-2 text-xs font-bold">
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-slate-400">คนก่อนหน้า</p>
-                  <p className="mt-1 truncate text-sm text-slate-800">
-                    {adjacentGk(team, -1) ?? '—'}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-slate-50 p-3">
-                  <p className="text-slate-400">คนถัดไป</p>
-                  <p className="mt-1 truncate text-sm text-slate-800">
-                    {adjacentGk(team, 1) ?? '—'}
-                  </p>
-                </div>
-              </div>
-              {match.status !== 'finished' && (
-                <div className="mt-3 grid grid-cols-2 gap-2">
-                  <Button
-                    onClick={() =>
-                      onUpdate(skipGoalkeeper(tournament, match.id, team.id))
-                    }
-                    variant="outline"
-                    className="h-11 rounded-xl border-amber-300 font-black text-amber-700"
-                  >
-                    <UserMinus />
-                    ข้ามคิว
-                  </Button>
-                  <Button
-                    onClick={() => onEditGk(team.id)}
-                    variant="outline"
-                    className="h-11 rounded-xl font-black"
-                  >
-                    <Pencil />
-                    แก้ GK
-                  </Button>
-                </div>
-              )}
-            </section>
-          );
-        })}
         {match.status === 'upcoming' && (
           <Button
             onClick={() =>
@@ -1582,6 +1592,16 @@ function MatchDetailScreen({
               className="h-12 w-full rounded-xl font-black"
             >
               บันทึกสกอร์ใหม่
+            </Button>
+            <Button
+              onClick={() =>
+                onUpdate(reopenFinishedMatch(tournament, match.id))
+              }
+              variant="outline"
+              className="h-12 w-full rounded-xl border-amber-300 font-black text-amber-700"
+            >
+              <RotateCcw />
+              ยกเลิกผล · กลับมาแข่งต่อ
             </Button>
             <div className="rounded-2xl bg-[#e5f5e9] p-4 text-center font-black text-[#087632]">
               <CircleCheck className="mr-2 inline h-5 w-5" />
@@ -2014,10 +2034,6 @@ export default function FootballApp() {
               match={selectedMatch}
               onBack={() => setView('schedule')}
               onUpdate={setTournament}
-              onEditGk={(teamId) => {
-                setSelectedTeamId(teamId);
-                setView('gk');
-              }}
             />
           )}
           {tournament && view === 'gk' && selectedTeam && (

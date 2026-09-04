@@ -6,6 +6,7 @@ import {
   extendTournamentToEndTime,
   finishMatchWithScore,
   minutesBetween,
+  reopenFinishedMatch,
   scheduleMetrics,
   scheduleWindowMetrics,
   skipGoalkeeper,
@@ -149,6 +150,13 @@ assert(
     standings[0].points === 3 &&
     standings[0].goalDifference === 2,
   'A saved result must update the standings',
+);
+const reopened = reopenFinishedMatch(afterFinish, afterFinish.matches[0].id);
+assert(
+  reopened.matches[0].status === 'current' &&
+    reopened.matches[1].status === 'upcoming' &&
+    calculateStandings(reopened)[0].points === 0,
+  'Undoing a finished match must restore it as current and recalculate standings',
 );
 const continuedTournament = extendTournamentByMatches(afterFinish, 1);
 assert(

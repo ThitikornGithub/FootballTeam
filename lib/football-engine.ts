@@ -371,6 +371,21 @@ export function finishMatchWithScore(
   );
 }
 
+export function reopenFinishedMatch(
+  tournament: Tournament,
+  matchId: string,
+): Tournament {
+  const target = tournament.matches.find((match) => match.id === matchId);
+  if (!target || target.status !== 'finished') return tournament;
+  const matches = tournament.matches.map((match) => {
+    if (match.id === matchId) return { ...match, status: 'current' as const };
+    if (match.status === 'current')
+      return { ...match, status: 'upcoming' as const };
+    return match;
+  });
+  return assignGoalkeepers({ ...tournament, matches });
+}
+
 export type TeamStanding = {
   teamId: string;
   played: number;
