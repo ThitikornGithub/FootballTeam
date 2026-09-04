@@ -43,10 +43,12 @@ import {
   assignGoalkeepers,
   createPlayer,
   createTournament,
+  extendTournamentToEndTime,
   minutesBetween,
   playerFor,
   reorder,
   scheduleMetrics,
+  scheduleWindowMetrics,
   setMatchStatus,
   shuffle,
   skipGoalkeeper,
@@ -218,11 +220,9 @@ function HomeScreen({
   const finished = tournament.matches.filter(
     (match) => match.status === 'finished',
   ).length;
-  const metrics = scheduleMetrics(
-    tournament.teams.length,
-    tournament.matchDurationMinutes,
-    tournament.breakDurationMinutes,
+  const endTime = addMinutes(
     tournament.startTime,
+    tournament.availableTimeMinutes,
   );
   const actions = [
     {
@@ -348,7 +348,7 @@ function HomeScreen({
             [String(tournament.teams.length), 'ทีม'],
             ['1', 'สนาม'],
             [String(tournament.matches.length), 'แมตช์'],
-            [metrics.endTime, 'จบ'],
+            [endTime, 'จบ'],
           ].map(([value, label]) => (
             <div key={label}>
               <p className="font-black">{value}</p>
@@ -399,6 +399,12 @@ function SetupScreen({
     startTime,
   );
   const availableMinutes = minutesBetween(startTime, endTime);
+  const windowMetrics = scheduleWindowMetrics(
+    matchMinutes,
+    breakMinutes,
+    startTime,
+    availableMinutes,
+  );
   const hasValidTimeRange = availableMinutes > 0;
   const enough =
     hasValidTimeRange && availableMinutes >= metrics.requiredMinutes;
@@ -583,13 +589,15 @@ function SetupScreen({
                     : 'เวลาไม่เพียงพอ'}
               </p>
               <p className="mt-1 text-sm font-semibold text-slate-600">
-                {metrics.matchCount} แมตช์ · ต้องใช้ {metrics.requiredMinutes} นาที
-                {hasValidTimeRange && ` · มีเวลา ${availableMinutes} นาที`}
+                ครบทุกคู่รอบแรก {metrics.matchCount} แมตช์ · ต้องใช้{' '}
+                {metrics.requiredMinutes} นาที
               </p>
               {enough && (
                 <p className="mt-1 text-sm font-black text-[#087632]">
-                  คาดว่าแข่งเสร็จ {metrics.endTime} · เหลือ{' '}
-                  {availableMinutes - metrics.requiredMinutes} นาที
+                  จัดได้ {windowMetrics.matchCount} แมตช์ · วนคู่แข่งถึง{' '}
+                  {windowMetrics.endTime}
+                  {windowMetrics.remainingMinutes > 0 &&
+                    ` · เหลือ ${windowMetrics.remainingMinutes} นาที`}
                 </p>
               )}
               {hasValidTimeRange && !enough && (
@@ -842,9 +850,11 @@ function TeamDetailScreen({
 function ScheduleScreen({
   tournament,
   onOpenMatch,
+  onUpdate,
 }: {
   tournament: Tournament;
   onOpenMatch: (id: string) => void;
+  onUpdate: (value: Tournament) => void;
 }) {
   return (
     <>
@@ -859,6 +869,9 @@ function ScheduleScreen({
             match={match}
             teams={tournament.teams}
             onClick={() => onOpenMatch(match.id)}
+            onFinish={() =>
+              onUpdate(setMatchStatus(tournament, match.id, 'finished'))
+            }
           />
         ))}
       </div>
@@ -1340,7 +1353,7 @@ function MatchDetailScreen({
             className="h-14 w-full rounded-2xl bg-[#11823b] text-base font-black"
           >
             <Check />
-            จบ Match นี้
+            แข่งไปแล้ว
           </Button>
         )}
         {match.status === 'finished' && (
@@ -1551,7 +1564,10 @@ export default function FootballApp() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) setTournament(JSON.parse(stored) as Tournament);
+      if (stored) {
+        const savedTournament = JSON.parse(stored) as Tournament;
+        setTournament(extendTournamentToEndTime(savedTournament));
+      }
     } catch {
       localStorage.removeItem(STORAGE_KEY);
     } finally {
@@ -1752,7 +1768,11 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'schedule' && (
-            <ScheduleScreen tournament={tournament} onOpenMatch={openMatch} />
+            <ScheduleScreen
+              tournament={tournament}
+              onOpenMatch={openMatch}
+              onUpdate={setTournament}
+            />
           )}
           {tournament && view === 'match-detail' && selectedMatch && (
             <MatchDetailScreen

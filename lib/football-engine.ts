@@ -109,6 +109,63 @@ function fairRoundRobin(teamIds: string[]): Pair[] {
   return flattened;
 }
 
+function repeatedRoundRobin(teamIds: string[], matchCount: number): Pair[] {
+  if (teamIds.length < 2 || matchCount <= 0) return [];
+  const roundsPerCycle =
+    teamIds.length % 2 === 0 ? teamIds.length - 1 : teamIds.length;
+  const pairs: Pair[] = [];
+  let cycle = 0;
+
+  while (pairs.length < matchCount) {
+    const orders = teamIds.flatMap((_, offset) => {
+      const rotated = [...teamIds.slice(offset), ...teamIds.slice(0, offset)];
+      return [rotated, [...rotated].reverse()];
+    });
+    const previous = pairs.at(-1);
+    const candidates = orders.map((order) => fairRoundRobin(order));
+    const cyclePairs =
+      cycle === 0
+        ? candidates[0]
+        : (candidates.find((candidate) => {
+            const first = candidate[0];
+            return (
+              !previous ||
+              ![previous.teamAId, previous.teamBId].some(
+                (id) => id === first.teamAId || id === first.teamBId,
+              )
+            );
+          }) ?? candidates[cycle % candidates.length]);
+
+    pairs.push(
+      ...cyclePairs.map((pair) => ({
+        ...pair,
+        roundNumber: pair.roundNumber + cycle * roundsPerCycle,
+      })),
+    );
+    cycle += 1;
+  }
+
+  return pairs.slice(0, matchCount);
+}
+
+export function scheduleWindowMetrics(
+  matchMinutes: number,
+  breakMinutes: number,
+  startTime: string,
+  availableMinutes: number,
+) {
+  const slotMinutes = matchMinutes + breakMinutes;
+  const matchCount =
+    slotMinutes > 0 ? Math.floor(availableMinutes / slotMinutes) : 0;
+  const scheduledMinutes = matchCount * slotMinutes;
+  return {
+    matchCount,
+    scheduledMinutes,
+    endTime: addMinutes(startTime, scheduledMinutes),
+    remainingMinutes: Math.max(0, availableMinutes - scheduledMinutes),
+  };
+}
+
 function normalizedCycleOrders(
   team: Team,
   eligibleIds: string[],
@@ -201,8 +258,17 @@ export function assignGoalkeepers(tournament: Tournament): Tournament {
 }
 
 export function createTournament(config: ScheduleConfig): Tournament {
-  const pairs = fairRoundRobin(config.teams.map((team) => team.id));
   const slotMinutes = config.matchDurationMinutes + config.breakDurationMinutes;
+  const windowMetrics = scheduleWindowMetrics(
+    config.matchDurationMinutes,
+    config.breakDurationMinutes,
+    config.startTime,
+    config.availableTimeMinutes,
+  );
+  const pairs = repeatedRoundRobin(
+    config.teams.map((team) => team.id),
+    windowMetrics.matchCount,
+  );
   const matches: Match[] = pairs.map((pair, index) => ({
     id: makeId('match'),
     matchNumber: index + 1,
@@ -225,6 +291,40 @@ export function createTournament(config: ScheduleConfig): Tournament {
     matches,
     createdAt: new Date().toISOString(),
   });
+}
+
+export function extendTournamentToEndTime(tournament: Tournament): Tournament {
+  const windowMetrics = scheduleWindowMetrics(
+    tournament.matchDurationMinutes,
+    tournament.breakDurationMinutes,
+    tournament.startTime,
+    tournament.availableTimeMinutes,
+  );
+  if (tournament.matches.length >= windowMetrics.matchCount) return tournament;
+
+  const slotMinutes =
+    tournament.matchDurationMinutes + tournament.breakDurationMinutes;
+  const pairs = repeatedRoundRobin(
+    tournament.teams.map((team) => team.id),
+    windowMetrics.matchCount,
+  );
+  const matches = [
+    ...tournament.matches,
+    ...pairs.slice(tournament.matches.length).map((pair, offset) => {
+      const index = tournament.matches.length + offset;
+      return {
+        id: makeId('match'),
+        matchNumber: index + 1,
+        roundNumber: pair.roundNumber,
+        teamAId: pair.teamAId,
+        teamBId: pair.teamBId,
+        startTime: addMinutes(tournament.startTime, index * slotMinutes),
+        status: 'upcoming' as const,
+      };
+    }),
+  ];
+
+  return assignGoalkeepers({ ...tournament, matches });
 }
 
 export function setMatchStatus(

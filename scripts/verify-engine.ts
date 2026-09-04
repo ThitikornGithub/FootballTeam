@@ -1,8 +1,11 @@
 import { createDemoTournament } from '../lib/demo-data';
 import {
   assignGoalkeepers,
+  createTournament,
+  extendTournamentToEndTime,
   minutesBetween,
   scheduleMetrics,
+  scheduleWindowMetrics,
   setMatchStatus,
   skipGoalkeeper,
 } from '../lib/football-engine';
@@ -12,7 +15,10 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 const tournament = createDemoTournament();
-assert(tournament.matches.length === 15, 'Six teams must create 15 matches');
+assert(
+  tournament.matches.length === 20,
+  'Six teams must fill the four-hour window with 20 matches',
+);
 assert(
   tournament.matches.filter((match) => match.status === 'current').length === 1,
   'Exactly one match starts current',
@@ -21,13 +27,19 @@ assert(
 const pairKeys = tournament.matches.map((match) =>
   [match.teamAId, match.teamBId].sort().join(':'),
 );
-assert(new Set(pairKeys).size === 15, 'Every pair must appear exactly once');
+assert(
+  new Set(pairKeys.slice(0, 15)).size === 15,
+  'Every pair must appear exactly once before the next cycle',
+);
 
 for (const team of tournament.teams) {
   const teamMatches = tournament.matches.filter(
     (match) => match.teamAId === team.id || match.teamBId === team.id,
   );
-  assert(teamMatches.length === 5, `${team.name} must play five matches`);
+  assert(
+    teamMatches.length >= 5,
+    `${team.name} must play at least five matches`,
+  );
   const goalkeeperIds = teamMatches.map((match) =>
     match.teamAId === team.id ? match.teamAGkPlayerId : match.teamBGkPlayerId,
   );
@@ -60,6 +72,42 @@ assert(
   minutesBetween('18:00', '22:00') === 240 &&
     minutesBetween('22:00', '18:00') === 0,
   'End-time selection must calculate the available same-day window',
+);
+const windowMetrics = scheduleWindowMetrics(10, 2, '18:00', 240);
+assert(
+  windowMetrics.matchCount === 20 &&
+    windowMetrics.endTime === '22:00' &&
+    windowMetrics.remainingMinutes === 0,
+  'The schedule must fill the selected end-time window',
+);
+
+const fourTeamTournament = createTournament({
+  name: 'Four-team evening',
+  teams: tournament.teams.slice(0, 4),
+  matchDurationMinutes: 10,
+  breakDurationMinutes: 2,
+  startTime: '18:00',
+  availableTimeMinutes: 240,
+});
+const fourTeamFirstCycle = fourTeamTournament.matches
+  .slice(0, 6)
+  .map((match) => [match.teamAId, match.teamBId].sort().join(':'));
+assert(
+  fourTeamTournament.matches.length === 20 &&
+    new Set(fourTeamFirstCycle).size === 6 &&
+    fourTeamTournament.matches.at(-1)?.startTime === '21:48',
+  'Four teams must repeat only after every pairing and fill the window',
+);
+
+const legacyTournament = {
+  ...tournament,
+  matches: tournament.matches.slice(0, 15),
+};
+const extendedTournament = extendTournamentToEndTime(legacyTournament);
+assert(
+  extendedTournament.matches.length === 20 &&
+    extendedTournament.matches[19].startTime === '21:48',
+  'A saved one-cycle schedule must extend to the selected end time',
 );
 
 const first = tournament.matches[0];
