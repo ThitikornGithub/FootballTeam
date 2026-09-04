@@ -41,14 +41,18 @@ import { createDemoTournament, makeTeam } from '@/lib/demo-data';
 import {
   addMinutes,
   assignGoalkeepers,
+  calculateStandings,
   createPlayer,
   createTournament,
+  extendTournamentByMatches,
   extendTournamentToEndTime,
+  finishMatchWithScore,
   minutesBetween,
   playerFor,
   reorder,
   scheduleMetrics,
   scheduleWindowMetrics,
+  setMatchScore,
   setMatchStatus,
   shuffle,
   skipGoalkeeper,
@@ -62,7 +66,13 @@ import {
 } from '@/lib/football-types';
 
 const STORAGE_KEY = 'football-match-maker-v1';
-type AppView = MainView | 'setup' | 'team-detail' | 'match-detail' | 'share';
+type AppView =
+  | MainView
+  | 'setup'
+  | 'team-detail'
+  | 'match-detail'
+  | 'standings'
+  | 'share';
 
 function formatShareText(tournament: Tournament) {
   const lines = [`⚽ FOOTBALL TODAY — ${tournament.name}`, ''];
@@ -72,8 +82,12 @@ function formatShareText(tournament: Tournament) {
     if (!teamA || !teamB) continue;
     const gkA = playerFor(teamA, match.teamAGkPlayerId)?.name ?? '-';
     const gkB = playerFor(teamB, match.teamBGkPlayerId)?.name ?? '-';
+    const score =
+      match.teamAScore !== undefined && match.teamBScore !== undefined
+        ? `  [${match.teamAScore}-${match.teamBScore}]`
+        : '';
     lines.push(
-      `${match.startTime}  ${teamA.name} vs ${teamB.name}`,
+      `${match.startTime}  ${teamA.name} vs ${teamB.name}${score}`,
       `GK: ${gkA} / ${gkB}`,
       '',
     );
@@ -358,6 +372,14 @@ function HomeScreen({
             </div>
           ))}
         </section>
+        <Button
+          onClick={() => onNavigate('standings')}
+          variant="outline"
+          className="h-13 w-full rounded-2xl border-[#9dd2ab] font-black text-[#087632]"
+        >
+          <Trophy />
+          ดูตารางคะแนนและผลการแข่งขัน
+        </Button>
       </div>
     </>
   );
@@ -373,7 +395,7 @@ function SetupScreen({
   onCreate: (value: Tournament) => void;
 }) {
   const defaultNames = ['Green', 'Red', 'Blue', 'Yellow', 'White', 'Black'];
-  const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 6);
+  const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 4);
   const [drafts, setDrafts] = useState(() =>
     Array.from({ length: 8 }, (_, i) => ({
       name: tournament?.teams[i]?.name ?? defaultNames[i] ?? `Team ${i + 1}`,
@@ -386,7 +408,7 @@ function SetupScreen({
   const [breakMinutes, setBreakMinutes] = useState(
     tournament?.breakDurationMinutes ?? 2,
   );
-  const [startTime, setStartTime] = useState(tournament?.startTime ?? '18:00');
+  const [startTime, setStartTime] = useState(tournament?.startTime ?? '19:00');
   const [endTime, setEndTime] = useState(
     tournament
       ? addMinutes(tournament.startTime, tournament.availableTimeMinutes)
@@ -455,7 +477,7 @@ function SetupScreen({
         <section className="settings-card">
           <div className="mb-3">
             <h2 className="section-title">ชื่อทีมและสีเสื้อ</h2>
-            <p className="section-note">สีเสื้อช่วยให้มองออกทันทีข้างสนาม</p>
+            <p className="section-note">ตั้งชื่อและแตะวงกลมสีเพื่อเลือกสีของแต่ละทีม</p>
           </div>
           <div className="space-y-3">
             {drafts.slice(0, teamCount).map((draft, index) => (
@@ -851,16 +873,34 @@ function ScheduleScreen({
   tournament,
   onOpenMatch,
   onUpdate,
+  onStandings,
 }: {
   tournament: Tournament;
   onOpenMatch: (id: string) => void;
   onUpdate: (value: Tournament) => void;
+  onStandings: () => void;
 }) {
+  const slotMinutes =
+    tournament.matchDurationMinutes + tournament.breakDurationMinutes;
+  const endTime = addMinutes(
+    tournament.startTime,
+    tournament.availableTimeMinutes,
+  );
   return (
     <>
       <PageHeader
         title="ตารางการแข่งขัน"
-        eyebrow={`${tournament.matches.length} แมตช์ · สนาม 1`}
+        eyebrow={`${tournament.matches.length} แมตช์ · ถึง ${endTime}`}
+        action={
+          <Button
+            onClick={onStandings}
+            variant="outline"
+            className="h-10 rounded-xl border-[#9dd2ab] px-3 font-black text-[#087632]"
+          >
+            <Trophy className="h-4 w-4" />
+            ตารางคะแนน
+          </Button>
+        }
       />
       <div className="space-y-3 px-4 py-4 pb-6">
         {tournament.matches.map((match) => (
@@ -869,11 +909,134 @@ function ScheduleScreen({
             match={match}
             teams={tournament.teams}
             onClick={() => onOpenMatch(match.id)}
-            onFinish={() =>
-              onUpdate(setMatchStatus(tournament, match.id, 'finished'))
-            }
+            onFinish={() => onOpenMatch(match.id)}
           />
         ))}
+        <section className="rounded-[22px] border border-dashed border-[#72bf88] bg-[#eef9f1] p-4 text-center">
+          <p className="font-black text-[#087632]">ยังเล่นต่อกันอยู่?</p>
+          <p className="mt-1 text-sm font-semibold text-slate-600">
+            เพิ่มแมตช์ถัดไปและขยายเวลาจบอีก {slotMinutes} นาที
+          </p>
+          <Button
+            onClick={() => onUpdate(extendTournamentByMatches(tournament, 1))}
+            className="mt-3 h-12 w-full rounded-xl bg-[#11823b] font-black"
+          >
+            <Plus />
+            เล่นต่ออีก 1 เกม
+          </Button>
+        </section>
+      </div>
+    </>
+  );
+}
+
+function StandingsScreen({
+  tournament,
+  onBack,
+}: {
+  tournament: Tournament;
+  onBack: () => void;
+}) {
+  const standings = calculateStandings(tournament);
+  const results = tournament.matches.filter(
+    (match) =>
+      match.status === 'finished' &&
+      match.teamAScore !== undefined &&
+      match.teamBScore !== undefined,
+  );
+  return (
+    <>
+      <PageHeader
+        title="ตารางคะแนน"
+        eyebrow={`${results.length} ผลการแข่งขันที่บันทึกแล้ว`}
+        onBack={onBack}
+      />
+      <div className="space-y-4 px-4 py-4 pb-8">
+        <section className="overflow-x-auto rounded-[22px] border border-slate-200 bg-white">
+          <table className="w-full min-w-[430px] text-center text-sm">
+            <thead className="bg-[#e5f5e9] text-[#087632]">
+              <tr>
+                <th className="px-3 py-3 text-left">อันดับ / ทีม</th>
+                <th className="px-2 py-3">แข่ง</th>
+                <th className="px-2 py-3">ช</th>
+                <th className="px-2 py-3">ส</th>
+                <th className="px-2 py-3">พ</th>
+                <th className="px-2 py-3">+/-</th>
+                <th className="px-3 py-3">แต้ม</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standings.map((standing, index) => {
+                const team = tournament.teams.find(
+                  (item) => item.id === standing.teamId,
+                )!;
+                return (
+                  <tr
+                    key={standing.teamId}
+                    className="border-t border-slate-100"
+                  >
+                    <td className="px-3 py-3 text-left">
+                      <div className="flex items-center gap-2 font-black">
+                        <span className="w-5 text-center text-slate-400">
+                          {index + 1}
+                        </span>
+                        <TeamShirtIcon color={team.color} size="sm" />
+                        <span className="truncate">{team.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-3 font-bold">{standing.played}</td>
+                    <td className="px-2 py-3 font-bold">{standing.won}</td>
+                    <td className="px-2 py-3 font-bold">{standing.drawn}</td>
+                    <td className="px-2 py-3 font-bold">{standing.lost}</td>
+                    <td className="px-2 py-3 font-bold">
+                      {standing.goalDifference > 0 ? '+' : ''}
+                      {standing.goalDifference}
+                    </td>
+                    <td className="px-3 py-3 text-base font-black text-[#087632]">
+                      {standing.points}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </section>
+        <p className="px-1 text-sm font-semibold text-slate-500">
+          ชนะ 3 แต้ม · เสมอ 1 แต้ม · นับเฉพาะแมตช์ที่บันทึกสกอร์แล้ว
+        </p>
+        <section className="settings-card">
+          <h2 className="section-title mb-3">ผลการแข่งขัน</h2>
+          {results.length ? (
+            <div className="space-y-2">
+              {[...results].reverse().map((match) => {
+                const teamA = tournament.teams.find(
+                  (team) => team.id === match.teamAId,
+                )!;
+                const teamB = tournament.teams.find(
+                  (team) => team.id === match.teamBId,
+                )!;
+                return (
+                  <div
+                    key={match.id}
+                    className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl bg-slate-50 p-3"
+                  >
+                    <span className="truncate text-right font-black">
+                      {teamA.name}
+                    </span>
+                    <span className="rounded-lg bg-white px-3 py-1 text-lg font-black tabular-nums text-[#087632] shadow-sm">
+                      {match.teamAScore} - {match.teamBScore}
+                    </span>
+                    <span className="truncate font-black">{teamB.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-xl bg-slate-50 p-4 text-center text-sm font-semibold text-slate-500">
+              ยังไม่มีผลการแข่งขัน
+            </p>
+          )}
+        </section>
       </div>
     </>
   );
@@ -1241,6 +1404,8 @@ function MatchDetailScreen({
 }) {
   const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
   const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
+  const [scoreA, setScoreA] = useState(match.teamAScore ?? 0);
+  const [scoreB, setScoreB] = useState(match.teamBScore ?? 0);
   function adjacentGk(team: Team, offset: -1 | 1) {
     const teamMatches = tournament.matches.filter(
       (item) => item.teamAId === team.id || item.teamBId === team.id,
@@ -1275,6 +1440,55 @@ function MatchDetailScreen({
               <TeamShirtIcon color={teamB.color} size="lg" />
               <p className="mt-1 text-lg font-black">{teamB.name}</p>
             </div>
+          </div>
+        </section>
+        <section className="settings-card">
+          <div className="mb-4 text-center">
+            <h2 className="section-title">บันทึกสกอร์</h2>
+            <p className="section-note">ใส่ประตูของแต่ละทีมก่อนกดแข่งไปแล้ว</p>
+          </div>
+          <div className="grid grid-cols-[1fr_32px_1fr] items-end gap-3">
+            <label className="text-center">
+              <span className="mb-2 block truncate text-sm font-black">
+                {teamA.name}
+              </span>
+              <input
+                aria-label={`สกอร์ทีม ${teamA.name}`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={99}
+                value={scoreA}
+                onChange={(event) =>
+                  setScoreA(
+                    Math.min(99, Math.max(0, Number(event.target.value))),
+                  )
+                }
+                className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 text-center text-3xl font-black outline-none focus:border-[#35a95f]"
+              />
+            </label>
+            <span className="pb-5 text-center text-xl font-black text-slate-400">
+              -
+            </span>
+            <label className="text-center">
+              <span className="mb-2 block truncate text-sm font-black">
+                {teamB.name}
+              </span>
+              <input
+                aria-label={`สกอร์ทีม ${teamB.name}`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={99}
+                value={scoreB}
+                onChange={(event) =>
+                  setScoreB(
+                    Math.min(99, Math.max(0, Number(event.target.value))),
+                  )
+                }
+                className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 text-center text-3xl font-black outline-none focus:border-[#35a95f]"
+              />
+            </label>
           </div>
         </section>
         {[teamA, teamB].map((team) => {
@@ -1348,18 +1562,31 @@ function MatchDetailScreen({
         {match.status === 'current' && (
           <Button
             onClick={() =>
-              onUpdate(setMatchStatus(tournament, match.id, 'finished'))
+              onUpdate(
+                finishMatchWithScore(tournament, match.id, scoreA, scoreB),
+              )
             }
             className="h-14 w-full rounded-2xl bg-[#11823b] text-base font-black"
           >
             <Check />
-            แข่งไปแล้ว
+            บันทึกผล · แข่งไปแล้ว
           </Button>
         )}
         {match.status === 'finished' && (
-          <div className="rounded-2xl bg-[#e5f5e9] p-4 text-center font-black text-[#087632]">
-            <CircleCheck className="mr-2 inline h-5 w-5" />
-            แมตช์นี้จบแล้ว
+          <div className="space-y-3">
+            <Button
+              onClick={() =>
+                onUpdate(setMatchScore(tournament, match.id, scoreA, scoreB))
+              }
+              variant="outline"
+              className="h-12 w-full rounded-xl font-black"
+            >
+              บันทึกสกอร์ใหม่
+            </Button>
+            <div className="rounded-2xl bg-[#e5f5e9] p-4 text-center font-black text-[#087632]">
+              <CircleCheck className="mr-2 inline h-5 w-5" />
+              แมตช์นี้จบแล้ว
+            </div>
           </div>
         )}
       </div>
@@ -1606,7 +1833,7 @@ export default function FootballApp() {
           name: 'load_demo_tournament',
           title: 'Load demo tournament',
           description:
-            'Load a six-team football tournament with a complete round-robin schedule and per-team goalkeeper rotations into the visible app.',
+            'Load a four-team evening football tournament with a repeating round-robin schedule and per-team goalkeeper rotations into the visible app.',
           inputSchema: {
             type: 'object',
             properties: {},
@@ -1690,7 +1917,7 @@ export default function FootballApp() {
     ? (view as MainView)
     : view === 'team-detail'
       ? 'teams'
-      : view === 'match-detail'
+      : view === 'match-detail' || view === 'standings'
         ? 'schedule'
         : 'home';
   const selectedTeam =
@@ -1772,6 +1999,13 @@ export default function FootballApp() {
               tournament={tournament}
               onOpenMatch={openMatch}
               onUpdate={setTournament}
+              onStandings={() => setView('standings')}
+            />
+          )}
+          {tournament && view === 'standings' && (
+            <StandingsScreen
+              tournament={tournament}
+              onBack={() => setView('schedule')}
             />
           )}
           {tournament && view === 'match-detail' && selectedMatch && (

@@ -327,6 +327,127 @@ export function extendTournamentToEndTime(tournament: Tournament): Tournament {
   return assignGoalkeepers({ ...tournament, matches });
 }
 
+export function extendTournamentByMatches(
+  tournament: Tournament,
+  matchCount = 1,
+): Tournament {
+  const slotMinutes =
+    tournament.matchDurationMinutes + tournament.breakDurationMinutes;
+  return extendTournamentToEndTime({
+    ...tournament,
+    availableTimeMinutes:
+      tournament.availableTimeMinutes + Math.max(0, matchCount) * slotMinutes,
+  });
+}
+
+export function setMatchScore(
+  tournament: Tournament,
+  matchId: string,
+  teamAScore: number,
+  teamBScore: number,
+): Tournament {
+  const normalizedA = Math.max(0, Math.floor(teamAScore));
+  const normalizedB = Math.max(0, Math.floor(teamBScore));
+  return {
+    ...tournament,
+    matches: tournament.matches.map((match) =>
+      match.id === matchId
+        ? { ...match, teamAScore: normalizedA, teamBScore: normalizedB }
+        : match,
+    ),
+  };
+}
+
+export function finishMatchWithScore(
+  tournament: Tournament,
+  matchId: string,
+  teamAScore: number,
+  teamBScore: number,
+): Tournament {
+  return setMatchStatus(
+    setMatchScore(tournament, matchId, teamAScore, teamBScore),
+    matchId,
+    'finished',
+  );
+}
+
+export type TeamStanding = {
+  teamId: string;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDifference: number;
+  points: number;
+};
+
+export function calculateStandings(tournament: Tournament): TeamStanding[] {
+  const teamOrder = new Map(
+    tournament.teams.map((team, index) => [team.id, index]),
+  );
+  const standings = new Map<string, TeamStanding>(
+    tournament.teams.map((team) => [
+      team.id,
+      {
+        teamId: team.id,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+      },
+    ]),
+  );
+
+  for (const match of tournament.matches) {
+    if (
+      match.status !== 'finished' ||
+      match.teamAScore === undefined ||
+      match.teamBScore === undefined
+    )
+      continue;
+    const teamA = standings.get(match.teamAId);
+    const teamB = standings.get(match.teamBId);
+    if (!teamA || !teamB) continue;
+    teamA.played += 1;
+    teamB.played += 1;
+    teamA.goalsFor += match.teamAScore;
+    teamA.goalsAgainst += match.teamBScore;
+    teamB.goalsFor += match.teamBScore;
+    teamB.goalsAgainst += match.teamAScore;
+    if (match.teamAScore > match.teamBScore) {
+      teamA.won += 1;
+      teamA.points += 3;
+      teamB.lost += 1;
+    } else if (match.teamAScore < match.teamBScore) {
+      teamB.won += 1;
+      teamB.points += 3;
+      teamA.lost += 1;
+    } else {
+      teamA.drawn += 1;
+      teamB.drawn += 1;
+      teamA.points += 1;
+      teamB.points += 1;
+    }
+  }
+
+  for (const standing of standings.values()) {
+    standing.goalDifference = standing.goalsFor - standing.goalsAgainst;
+  }
+  return [...standings.values()].sort(
+    (a, b) =>
+      b.points - a.points ||
+      b.goalDifference - a.goalDifference ||
+      b.goalsFor - a.goalsFor ||
+      (teamOrder.get(a.teamId) ?? 0) - (teamOrder.get(b.teamId) ?? 0),
+  );
+}
+
 export function setMatchStatus(
   tournament: Tournament,
   matchId: string,

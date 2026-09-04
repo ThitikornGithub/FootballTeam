@@ -43,15 +43,15 @@ export function makeTeam(
 }
 
 export function createDemoTournament(): Tournament {
-  const teams = names.map((name, index) =>
-    makeTeam(name, colors[index], rosters[index]),
-  );
+  const teams = names
+    .slice(0, 4)
+    .map((name, index) => makeTeam(name, colors[index], rosters[index]));
   return createTournament({
     name: 'Friendly Match',
     teams,
     matchDurationMinutes: 10,
     breakDurationMinutes: 2,
-    startTime: '18:00',
-    availableTimeMinutes: 240,
+    startTime: '19:00',
+    availableTimeMinutes: 180,
   });
 }

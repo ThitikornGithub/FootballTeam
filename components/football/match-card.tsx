@@ -70,6 +70,11 @@ export function MatchCard({
             <TeamShirtIcon color={teamB.color} size="sm" />
           </div>
         </div>
+        {match.teamAScore !== undefined && match.teamBScore !== undefined && (
+          <div className="mt-3 rounded-xl bg-white/80 py-2 text-center text-2xl font-black tabular-nums text-[#087632]">
+            {match.teamAScore} - {match.teamBScore}
+          </div>
+        )}
         <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-200/70 pt-3 text-xs font-bold text-slate-600">
           <span className="flex items-center gap-1.5">
             <Goal className="h-4 w-4 text-[#11823b]" />

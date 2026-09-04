@@ -35,6 +35,8 @@ export type Match = {
   teamAId: string;
   teamBId: string;
   startTime: string;
+  teamAScore?: number;
+  teamBScore?: number;
   teamAGkPlayerId?: string;
   teamBGkPlayerId?: string;
   status: MatchStatus;
