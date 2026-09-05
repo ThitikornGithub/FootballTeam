@@ -1,6 +1,10 @@
 # Football Match Maker
 
-Mobile-first MVP สำหรับจัดตารางฟุตบอลแบบ Round Robin บน 1 สนาม และหมุนเวียนผู้รักษาประตูแยกตามแต่ละทีม
+Mobile-first web app สำหรับจัดตารางฟุตบอลแบบ round robin บน 1 สนาม หมุนเวียนผู้รักษาประตู บันทึกสกอร์ ตารางคะแนน และวางแผนบนกระดาน tactic
+
+- Production: <https://thitikorngithub.github.io/FootballTeam/>
+- Repository: <https://github.com/ThitikornGithub/FootballTeam>
+- เอกสาร architecture, persistence, security model, audit findings และแนวทางส่งต่องาน: [PROJECT_HANDOFF.md](./PROJECT_HANDOFF.md)
 
 ## Run locally
 
@@ -16,20 +20,26 @@ npm run dev
 ## Check before release
 
 ```bash
+npx jiti scripts/verify-engine.ts
 npm run lint
-npx tsc --noEmit
+./node_modules/.bin/tsc --noEmit
+GITHUB_PAGES=true \
+NEXT_PUBLIC_BASE_PATH=/FootballTeam \
+NEXT_PUBLIC_SITE_URL=https://thitikorngithub.github.io \
 npm run build
 ```
 
-## V1 features
+## Main features
 
 - สร้างตารางพบกันหมดด้วย circle-method แล้ววนรอบใหม่จนเต็มเวลาที่เลือก
-- ตรวจเวลาที่ต้องใช้และเวลาจบก่อนสร้างตาราง
+- เลือกเวลาเริ่ม/จบ ระยะเวลาแข่ง เวลาพัก และกำหนดคู่แรกหรือคู่ถัดไป
 - จัดการทีม ผู้เล่น ลำดับ และสถานะขาดวันนี้
 - สุ่ม GK แยกทีม พร้อมรอบใหม่และการข้ามคิว
 - บันทึกสกอร์ สรุปตารางคะแนน และเพิ่มเกมเมื่อเล่นต่อเกินเวลา
-- เริ่ม/จบแมตช์ ดูคิวและประวัติ GK
-- แชร์ผ่าน Web Share API หรือคัดลอกข้อความ
-- บันทึกข้อมูลใน LocalStorage
+- แก้สกอร์ ยกเลิกผล เริ่ม/จบแมตช์ และดูคิว GK
+- วางแผนบนกระดาน tactic และบันทึกโน้ต
+- แชร์รูปตารางคะแนนผ่าน Web Share API ดาวน์โหลด PNG หรือคัดลอกข้อความ
+- หน้ารวมเกมทั้งหมด พร้อมเปิดและลบเกม
+- เก็บ state ของเกมใน Neon Postgres ผ่าน Neon Data API; LocalStorage เป็นเพียง backup
 
-ไม่มี backend, authentication, LINE Login/LIFF หรือ score tracking ใน V1 โครงสร้างข้อมูลแยกจาก UI เพื่อรองรับการเชื่อมต่อเหล่านี้ภายหลัง
+แอปไม่มีหน้า login ตาม requirement ปัจจุบัน ผู้ใช้ที่เข้าถึงเว็บสามารถแก้ไขและลบเกมได้ โปรดอ่านข้อจำกัดและ known risks ใน `PROJECT_HANDOFF.md` ก่อนเปลี่ยน persistence หรือ security model
