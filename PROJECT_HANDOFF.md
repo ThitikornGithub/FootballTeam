@@ -248,7 +248,13 @@ UI clamp select index ด้วย `Math.min` แต่ state index เดิม
 
 ข้อความระบุว่า “จำนวนทีมและรายชื่อผู้เล่นแก้ได้จากหน้าทีม” แต่หน้าทีมปัจจุบันแก้ได้เฉพาะ roster/attendance/GK order ไม่ได้แก้จำนวนทีม ชื่อทีม หรือสีเสื้อ
 
-#### 11. Test command ยังไม่ถูกประกาศใน package scripts
+#### 11. Game deep link ตอบ HTTP 404 ก่อน JavaScript redirect
+
+ข้อจำกัดของ GitHub Pages ทำให้ `/FootballTeam/game...` ตอบ `404` และส่ง custom `404.html` มากู้ path ใน browser ผู้ใช้ทั่วไปที่เปิด JavaScript จึงเข้าเกมได้ แต่ link preview bot, crawler หรือ client ที่ไม่รัน JavaScript อาจมองว่า link เสียหรือสร้าง preview ไม่ได้
+
+แนวทางแก้ถ้าต้องการ HTTP 200 จริง: เปลี่ยนไปใช้ hosting ที่รองรับ SPA rewrite เช่น Vercel/Cloudflare Pages หรือใช้ hash route; สำหรับ GitHub Pages ปัจจุบันให้ถือเป็น known platform limitation
+
+#### 12. Test command ยังไม่ถูกประกาศใน package scripts
 
 มี `scripts/verify-engine.ts` แต่ไม่มี `npm test` และยังไม่มี UI/sync/database contract tests ทำให้ regression สำคัญต้องอาศัย manual audit
 
