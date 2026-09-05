@@ -83,6 +83,7 @@ import {
 } from '@/lib/football-data-api';
 
 const STORAGE_KEY = 'football-match-maker-v1';
+const STORAGE_GAME_ID_KEY = 'football-match-maker-game-id';
 const PAGES_PATH_KEY = 'football-pages-path';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
@@ -1440,16 +1441,25 @@ function MatchDetailScreen({
 
 function ShareScreen({
   tournament,
+  gameId,
   onBack,
   onNotice,
 }: {
   tournament: Tournament;
+  gameId: string;
   onBack: () => void;
   onNotice: (message: string) => void;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isSharing, setIsSharing] = useState(false);
-  const text = formatShareText(tournament);
+  const gameUrl =
+    typeof window !== 'undefined' && gameId ? window.location.href : '';
+  const text = [
+    formatShareText(tournament),
+    gameUrl ? `เปิดเกมและแก้ไขร่วมกัน: ${gameUrl}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   useEffect(() => {
     let cancelled = false;
@@ -1502,6 +1512,7 @@ function ShareScreen({
         await navigator.share({
           title: tournament.name,
           text: `ตารางคะแนนล่าสุด · ${tournament.name}`,
+          ...(gameUrl ? { url: gameUrl } : {}),
           files: [file],
         });
       } else {
@@ -1567,12 +1578,14 @@ function SettingsScreen({
   tournament,
   gameId,
   onCreateNew,
+  onPublish,
   onDemo,
   onReset,
 }: {
   tournament: Tournament;
   gameId: string;
   onCreateNew: () => void;
+  onPublish: () => void;
   onDemo: () => void;
   onReset: () => void;
 }) {
@@ -1603,10 +1616,19 @@ function SettingsScreen({
               ? `แชร์และแก้ไขร่วมกันผ่านลิงก์ ${gameId}`
               : 'เกมนี้ยังบันทึกอยู่เฉพาะบนอุปกรณ์นี้'}
           </p>
+          {!gameId && (
+            <Button
+              onClick={onPublish}
+              className="mt-4 h-12 w-full rounded-xl bg-[#11823b] font-black"
+            >
+              <Share2 />
+              สร้างลิงก์ให้เกมนี้
+            </Button>
+          )}
           <Button
             onClick={onDemo}
             variant="outline"
-            className="mt-4 h-12 w-full rounded-xl font-black"
+            className={`${gameId ? 'mt-4' : 'mt-2'} h-12 w-full rounded-xl font-black`}
           >
             <RotateCcw />
             โหลดข้อมูลตัวอย่างใหม่
@@ -1692,14 +1714,27 @@ export default function FootballApp() {
             lastRemoteStateRef.current = JSON.stringify(value);
             setTournament(value);
             localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+            localStorage.setItem(STORAGE_GAME_ID_KEY, pathGameId);
           } else {
             setNotice('ไม่พบเกมจากลิงก์นี้');
           }
         } catch {
           if (cancelled) return;
-          const stored = localStorage.getItem(STORAGE_KEY);
-          if (stored) setTournament(JSON.parse(stored) as Tournament);
-          setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองในเครื่อง');
+          try {
+            const stored = localStorage.getItem(STORAGE_KEY);
+            const storedGameId = localStorage.getItem(STORAGE_GAME_ID_KEY);
+            const saved = stored ? (JSON.parse(stored) as Tournament) : null;
+            if (saved && storedGameId === pathGameId) {
+              setTournament(extendTournamentToEndTime(saved));
+              setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
+            } else {
+              setNotice('เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
+            }
+          } catch {
+            localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem(STORAGE_GAME_ID_KEY);
+            setNotice('เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
+          }
         } finally {
           if (!cancelled) setHydrated(true);
         }
@@ -1714,6 +1749,7 @@ export default function FootballApp() {
         }
       } catch {
         localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_GAME_ID_KEY);
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -1729,7 +1765,11 @@ export default function FootballApp() {
     if (!hydrated) return;
     if (tournament) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
-      if (!gameId) return;
+      if (!gameId) {
+        localStorage.removeItem(STORAGE_GAME_ID_KEY);
+        return;
+      }
+      localStorage.setItem(STORAGE_GAME_ID_KEY, gameId);
       const serialized = JSON.stringify(tournament);
       if (serialized === lastRemoteStateRef.current) return;
       lastLocalChangeRef.current = Date.now();
@@ -1743,6 +1783,7 @@ export default function FootballApp() {
       return () => window.clearTimeout(timer);
     }
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_GAME_ID_KEY);
   }, [tournament, hydrated, gameId]);
   useEffect(() => {
     if (!hydrated || !gameId) return;
@@ -1974,6 +2015,7 @@ export default function FootballApp() {
           {tournament && view === 'share' && (
             <ShareScreen
               tournament={tournament}
+              gameId={gameId}
               onBack={() => setView('home')}
               onNotice={setNotice}
             />
@@ -1983,6 +2025,9 @@ export default function FootballApp() {
               tournament={tournament}
               gameId={gameId}
               onCreateNew={openNewSetup}
+              onPublish={() =>
+                void publishTournament(tournament, 'สร้างลิงก์ให้เกมนี้แล้ว')
+              }
               onDemo={loadDemo}
               onReset={() => {
                 setTournament(null);
