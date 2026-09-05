@@ -88,6 +88,7 @@ import {
   loadSharedGame,
   saveSharedGame,
 } from '@/lib/football-data-api';
+import { TacticsScreen } from './tactics-board';
 
 const STORAGE_KEY = 'football-match-maker-v1';
 const STORAGE_GAME_ID_KEY = 'football-match-maker-game-id';
@@ -449,11 +450,6 @@ function HomeScreen({
       icon: Share2,
       view: 'share' as AppView,
     },
-    {
-      label: 'เกมทั้งหมด',
-      icon: FolderOpen,
-      view: 'games' as AppView,
-    },
   ];
   return (
     <>
@@ -467,7 +463,7 @@ function HomeScreen({
         }
       />
       <div className="space-y-4 px-4 py-4">
-        <section className="grid grid-cols-2 gap-2">
+        <section className="grid grid-cols-3 gap-2">
           {actions.map(({ label, icon: Icon, view }) => (
             <button
               key={label}
@@ -2311,18 +2307,10 @@ export default function FootballApp() {
         return;
       }
 
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-          const savedTournament = JSON.parse(stored) as Tournament;
-          setTournament(extendTournamentToEndTime(savedTournament));
-        }
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem(STORAGE_GAME_ID_KEY);
-      } finally {
-        if (!cancelled) setHydrated(true);
-      }
+      setTournament(null);
+      setGameId('');
+      setView('home');
+      if (!cancelled) setHydrated(true);
     }
     void hydrate();
     return () => {
@@ -2512,9 +2500,13 @@ export default function FootballApp() {
     lastRemoteStateRef.current = '';
     window.history.replaceState({}, '', gamePath());
   }
-  const mainView: MainView = ['home', 'teams', 'schedule', 'settings'].includes(
-    view,
-  )
+  const mainView: MainView = [
+    'home',
+    'teams',
+    'schedule',
+    'tactics',
+    'settings',
+  ].includes(view)
     ? (view as MainView)
     : view === 'team-detail'
       ? 'teams'
@@ -2605,6 +2597,9 @@ export default function FootballApp() {
               onUpdate={setTournament}
               onStandings={() => setView('standings')}
             />
+          )}
+          {tournament && view === 'tactics' && (
+            <TacticsScreen tournament={tournament} onUpdate={setTournament} />
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen

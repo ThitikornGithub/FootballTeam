@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, CalendarRange, Home, Minus, Plus, Settings, Users } from 'lucide-react';
+import { ArrowLeft, CalendarRange, Home, Map, Minus, Plus, Settings, Users } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -45,18 +45,19 @@ export function PageHeader({ title, eyebrow, onBack, action }: { title: string; 
   );
 }
 
-export type MainView = 'home' | 'teams' | 'schedule' | 'settings';
+export type MainView = 'home' | 'teams' | 'schedule' | 'tactics' | 'settings';
 
 const navItems: Array<{ view: MainView; label: string; icon: ComponentType<{ className?: string }> }> = [
   { view: 'home', label: 'หน้าหลัก', icon: Home },
   { view: 'teams', label: 'ทีม', icon: Users },
   { view: 'schedule', label: 'ตาราง', icon: CalendarRange },
+  { view: 'tactics', label: 'แท็กติก', icon: Map },
   { view: 'settings', label: 'ตั้งค่า', icon: Settings },
 ];
 
 export function BottomNavigation({ active, onChange }: { active: MainView; onChange: (view: MainView) => void }) {
   return (
-    <nav aria-label="เมนูหลัก" className="sticky bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
+    <nav aria-label="เมนูหลัก" className="sticky bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-1 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
       {navItems.map(({ view, label, icon: Icon }) => (
         <button key={view} onClick={() => onChange(view)} className={`nav-item ${active === view ? 'is-active' : ''}`} aria-current={active === view ? 'page' : undefined}>
           <Icon className="h-5 w-5" /><span>{label}</span>

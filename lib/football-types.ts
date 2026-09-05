@@ -42,6 +42,23 @@ export type Match = {
   status: MatchStatus;
 };
 
+export type TacticMarker = {
+  id: string;
+  kind: 'player' | 'ball';
+  teamId?: string;
+  playerId?: string;
+  label: string;
+  x: number;
+  y: number;
+};
+
+export type TacticsBoard = {
+  teamAId: string;
+  teamBId: string;
+  markers: TacticMarker[];
+  notes: string;
+};
+
 export type Tournament = {
   id: string;
   name: string;
@@ -52,6 +69,7 @@ export type Tournament = {
   startTime: string;
   availableTimeMinutes: number;
   matches: Match[];
+  tactics?: TacticsBoard;
   createdAt: string;
 };
 
