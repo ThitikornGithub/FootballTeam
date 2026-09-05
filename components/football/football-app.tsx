@@ -1036,11 +1036,6 @@ function ScheduleScreen({
     .reverse();
   const groups = [
     {
-      label: 'แข่งแล้ว · ล่าสุดก่อน',
-      matches: finished,
-      tone: 'finished' as const,
-    },
-    {
       label: 'กำลังแข่ง',
       matches: current ? [current] : [],
       tone: 'current' as const,
@@ -1049,6 +1044,11 @@ function ScheduleScreen({
       label: 'เกมถัดไป',
       matches: upcoming,
       tone: 'upcoming' as const,
+    },
+    {
+      label: 'แข่งแล้ว · ล่าสุดก่อน',
+      matches: finished,
+      tone: 'finished' as const,
     },
   ].filter((group) => group.matches.length > 0);
   return (
