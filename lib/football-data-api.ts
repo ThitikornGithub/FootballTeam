@@ -15,6 +15,17 @@ export type StoredFootballGame = {
   updatedAt: string;
 };
 
+export type FootballGameSummary = {
+  id: string;
+  name: string;
+  teamCount: number;
+  matchCount: number;
+  finishedCount: number;
+  startTime: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 async function callRpc<T>(name: string, body: Record<string, unknown>) {
   const response = await fetch(`${DATA_API_URL}/rpc/${name}`, {
     method: 'POST',
@@ -51,4 +62,12 @@ export function saveSharedGame(gameId: string, tournament: Tournament) {
     p_game_id: gameId,
     p_state: tournament,
   });
+}
+
+export function listSharedGames() {
+  return callRpc<FootballGameSummary[]>('list_football_games', {});
+}
+
+export function deleteSharedGame(gameId: string) {
+  return callRpc<boolean>('delete_football_game', { p_game_id: gameId });
 }

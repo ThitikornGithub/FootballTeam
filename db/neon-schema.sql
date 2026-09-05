@@ -120,13 +120,69 @@ begin
 end;
 $$;
 
+create or replace function public.list_football_games()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = pg_catalog, public
+as $$
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', id,
+        'name', coalesce(state ->> 'name', id),
+        'teamCount', coalesce(jsonb_array_length(state -> 'teams'), 0),
+        'matchCount', coalesce(jsonb_array_length(state -> 'matches'), 0),
+        'finishedCount', coalesce(
+          (
+            select count(*)
+            from jsonb_array_elements(coalesce(state -> 'matches', '[]'::jsonb)) match
+            where match ->> 'status' = 'finished'
+          ),
+          0
+        ),
+        'startTime', coalesce(state ->> 'startTime', ''),
+        'createdAt', created_at,
+        'updatedAt', updated_at
+      )
+      order by updated_at desc
+    ),
+    '[]'::jsonb
+  )
+  from public.football_games;
+$$;
+
+create or replace function public.delete_football_game(p_game_id text)
+returns boolean
+language plpgsql
+security definer
+set search_path = pg_catalog, public
+as $$
+declare
+  v_deleted boolean;
+begin
+  if p_game_id !~ '^game[0-9]{8}-[1-9][0-9]*$' then
+    raise exception 'invalid game id' using errcode = '22023';
+  end if;
+
+  delete from public.football_games where id = p_game_id;
+  v_deleted := found;
+  return v_deleted;
+end;
+$$;
+
 revoke all on function public.create_football_game(jsonb, text) from public;
 revoke all on function public.get_football_game(text) from public;
 revoke all on function public.save_football_game(text, jsonb) from public;
+revoke all on function public.list_football_games() from public;
+revoke all on function public.delete_football_game(text) from public;
 
 grant usage on schema public to anonymous;
 grant execute on function public.create_football_game(jsonb, text) to anonymous;
 grant execute on function public.get_football_game(text) to anonymous;
 grant execute on function public.save_football_game(text, jsonb) to anonymous;
+grant execute on function public.list_football_games() to anonymous;
+grant execute on function public.delete_football_game(text) to anonymous;
 
 commit;

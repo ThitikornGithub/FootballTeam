@@ -11,10 +11,12 @@ import {
   CircleCheck,
   Copy,
   Download,
+  FolderOpen,
   GripVertical,
   Minus,
   Plus,
   RotateCcw,
+  Save,
   Share2,
   Shield,
   Shuffle,
@@ -61,6 +63,7 @@ import {
   setMatchScore,
   setMatchStatus,
   shuffle,
+  updateTournamentSettings,
 } from '@/lib/football-engine';
 import {
   TEAM_COLORS,
@@ -78,6 +81,9 @@ import {
 } from '@/lib/standings-share-card';
 import {
   createSharedGame,
+  deleteSharedGame,
+  type FootballGameSummary,
+  listSharedGames,
   loadSharedGame,
   saveSharedGame,
 } from '@/lib/football-data-api';
@@ -93,7 +99,8 @@ type AppView =
   | 'team-detail'
   | 'match-detail'
   | 'standings'
-  | 'share';
+  | 'share'
+  | 'games';
 
 function restoreGitHubPagesPath() {
   try {
@@ -359,9 +366,11 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
 function EmptyHome({
   onSetup,
   onDemo,
+  onGames,
 }: {
   onSetup: () => void;
   onDemo: () => void;
+  onGames: () => void;
 }) {
   return (
     <div className="flex min-h-[calc(100dvh-140px)] flex-col items-center justify-center px-7 pb-16 text-center">
@@ -388,6 +397,14 @@ function EmptyHome({
         className="mt-3 h-12 w-full max-w-xs rounded-2xl font-bold"
       >
         ลองด้วยข้อมูลตัวอย่าง
+      </Button>
+      <Button
+        onClick={onGames}
+        variant="ghost"
+        className="mt-2 h-11 w-full max-w-xs rounded-2xl font-black text-[#087632]"
+      >
+        <FolderOpen />
+        ดูเกมทั้งหมด
       </Button>
     </div>
   );
@@ -431,6 +448,11 @@ function HomeScreen({
       icon: Share2,
       view: 'share' as AppView,
     },
+    {
+      label: 'เกมทั้งหมด',
+      icon: FolderOpen,
+      view: 'games' as AppView,
+    },
   ];
   return (
     <>
@@ -444,7 +466,7 @@ function HomeScreen({
         }
       />
       <div className="space-y-4 px-4 py-4">
-        <section className="grid grid-cols-3 gap-2">
+        <section className="grid grid-cols-2 gap-2">
           {actions.map(({ label, icon: Icon, view }) => (
             <button
               key={label}
@@ -536,6 +558,16 @@ function SetupScreen({
       color: tournament?.teams[i]?.color ?? TEAM_COLORS[i],
     })),
   );
+  const [firstTeamIndex, setFirstTeamIndex] = useState(() => {
+    const teamId = tournament?.matches[0]?.teamAId;
+    const index = tournament?.teams.findIndex((team) => team.id === teamId);
+    return index !== undefined && index >= 0 ? index : 0;
+  });
+  const [secondTeamIndex, setSecondTeamIndex] = useState(() => {
+    const teamId = tournament?.matches[0]?.teamBId;
+    const index = tournament?.teams.findIndex((team) => team.id === teamId);
+    return index !== undefined && index >= 0 ? index : 1;
+  });
   const [matchMinutes, setMatchMinutes] = useState(
     tournament?.matchDurationMinutes ?? 10,
   );
@@ -581,6 +613,10 @@ function SetupScreen({
       createTournament({
         name: gameName.trim(),
         teams,
+        firstMatchTeamIds: [
+          teams[firstTeamIndex]?.id ?? teams[0].id,
+          teams[secondTeamIndex]?.id ?? teams[1].id,
+        ],
         matchDurationMinutes: matchMinutes,
         breakDurationMinutes: breakMinutes,
         startTime,
@@ -674,6 +710,54 @@ function SetupScreen({
                 </div>
               </div>
             ))}
+          </div>
+        </section>
+        <section className="settings-card">
+          <div className="mb-3">
+            <h2 className="section-title">กำหนดคู่แรก</h2>
+            <p className="section-note">
+              เลือกทีมที่พร้อมลงสนามก่อน ระหว่างรอทีมอื่นมาให้ครบ
+            </p>
+          </div>
+          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+            <label className="min-w-0">
+              <span className="sr-only">ทีมแรกของแมตช์แรก</span>
+              <select
+                value={Math.min(firstTeamIndex, teamCount - 1)}
+                onChange={(event) => {
+                  const next = Number(event.target.value);
+                  setFirstTeamIndex(next);
+                  if (next === secondTeamIndex)
+                    setSecondTeamIndex(next === 0 ? 1 : 0);
+                }}
+                className="h-12 w-full rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
+              >
+                {drafts.slice(0, teamCount).map((draft, index) => (
+                  <option key={index} value={index}>
+                    {COLOR_LABEL[draft.color]} · {draft.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="text-sm font-black text-slate-400">VS</span>
+            <label className="min-w-0">
+              <span className="sr-only">ทีมที่สองของแมตช์แรก</span>
+              <select
+                value={Math.min(secondTeamIndex, teamCount - 1)}
+                onChange={(event) => setSecondTeamIndex(Number(event.target.value))}
+                className="h-12 w-full rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
+              >
+                {drafts.slice(0, teamCount).map((draft, index) => (
+                  <option
+                    key={index}
+                    value={index}
+                    disabled={index === Math.min(firstTeamIndex, teamCount - 1)}
+                  >
+                    {COLOR_LABEL[draft.color]} · {draft.name}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </section>
         <section className="settings-card space-y-4">
@@ -1574,11 +1658,192 @@ function ShareScreen({
   );
 }
 
+function formatGameDate(value: string) {
+  return new Intl.DateTimeFormat('th-TH', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Bangkok',
+  }).format(new Date(value));
+}
+
+function GamesScreen({
+  onBack,
+  onOpen,
+  onDeleted,
+  onNotice,
+}: {
+  onBack: () => void;
+  onOpen: (gameId: string) => void;
+  onDeleted: (gameId: string) => void;
+  onNotice: (message: string) => void;
+}) {
+  const [games, setGames] = useState<FootballGameSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState('');
+  const [confirmingId, setConfirmingId] = useState('');
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      setGames(await listSharedGames());
+    } catch {
+      onNotice('โหลดรายการเกมไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- load the remote game index once when this screen opens. */
+  useEffect(() => {
+    void refresh();
+  }, []);
+  /* oxlint-enable react-hooks/exhaustive-deps, react/react-compiler */
+
+  async function removeGame(gameId: string) {
+    setDeletingId(gameId);
+    try {
+      const deleted = await deleteSharedGame(gameId);
+      if (!deleted) {
+        onNotice('ไม่พบเกมนี้ในฐานข้อมูล');
+        return;
+      }
+      setGames((items) => items.filter((game) => game.id !== gameId));
+      setConfirmingId('');
+      onDeleted(gameId);
+      onNotice('ลบเกมออกจากฐานข้อมูลแล้ว');
+    } catch {
+      onNotice('ลบเกมไม่สำเร็จ กรุณาลองใหม่');
+    } finally {
+      setDeletingId('');
+    }
+  }
+
+  const confirmingGame = games.find((game) => game.id === confirmingId);
+  return (
+    <>
+      <PageHeader
+        title="เกมทั้งหมด"
+        eyebrow={`${games.length} เกมใน FootballTeam`}
+        onBack={onBack}
+        action={
+          <button
+            type="button"
+            onClick={() => void refresh()}
+            disabled={loading}
+            className="grid h-10 w-10 place-items-center rounded-2xl bg-[#e1f4e6] text-[#11823b] disabled:opacity-50"
+            aria-label="โหลดรายการเกมใหม่"
+          >
+            <RotateCcw className={`h-5 w-5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        }
+      />
+      <div className="space-y-3 px-4 py-4 pb-8">
+        {loading && games.length === 0 ? (
+          <div className="rounded-[22px] border border-slate-200 bg-white p-8 text-center font-bold text-slate-500">
+            กำลังโหลดเกม…
+          </div>
+        ) : games.length === 0 ? (
+          <div className="rounded-[22px] border border-slate-200 bg-white p-8 text-center">
+            <FolderOpen className="mx-auto h-10 w-10 text-slate-300" />
+            <p className="mt-3 font-black">ยังไม่มีเกมในฐานข้อมูล</p>
+            <p className="mt-1 text-sm font-semibold text-slate-500">
+              สร้างตารางใหม่แล้วเกมจะมาอยู่ที่หน้านี้
+            </p>
+          </div>
+        ) : (
+          games.map((game) => (
+            <article
+              key={game.id}
+              className="rounded-[22px] border border-slate-200 bg-white p-4 shadow-sm"
+            >
+              <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() => onOpen(game.id)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <p className="truncate text-base font-black">{game.name}</p>
+                  <p className="mt-1 text-xs font-bold text-slate-400">
+                    {game.id} · อัปเดต {formatGameDate(game.updatedAt)}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmingId(game.id)}
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-red-50 text-red-600"
+                  aria-label={`ลบ ${game.name}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpen(game.id)}
+                className="mt-3 flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-left"
+              >
+                <span className="text-sm font-bold text-slate-600">
+                  {game.teamCount} ทีม · {game.finishedCount}/{game.matchCount}{' '}
+                  แมตช์ · เริ่ม {game.startTime}
+                </span>
+                <ChevronRight className="h-5 w-5 text-slate-400" />
+              </button>
+            </article>
+          ))
+        )}
+      </div>
+      {confirmingGame && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/25 p-4 backdrop-blur-sm">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-game-title"
+            aria-describedby="delete-game-description"
+            className="w-full max-w-sm rounded-[24px] bg-white p-5 shadow-2xl"
+          >
+            <h2 id="delete-game-title" className="text-lg font-black">
+              ลบ “{confirmingGame.name}”?
+            </h2>
+            <p
+              id="delete-game-description"
+              className="mt-2 text-sm font-semibold leading-6 text-slate-500"
+            >
+              เกม ตารางคะแนน รายชื่อทีม และผลแข่งจะถูกลบจากฐานข้อมูลถาวร
+              ลิงก์เดิมจะเปิดเกมนี้ไม่ได้อีก
+            </p>
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                onClick={() => setConfirmingId('')}
+                disabled={Boolean(deletingId)}
+                className="h-12 rounded-xl font-black"
+              >
+                ยกเลิก
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void removeGame(confirmingGame.id)}
+                disabled={Boolean(deletingId)}
+                className="h-12 rounded-xl font-black"
+              >
+                <Trash2 />
+                {deletingId ? 'กำลังลบ…' : 'ลบถาวร'}
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
 function SettingsScreen({
   tournament,
   gameId,
   onCreateNew,
   onPublish,
+  onSave,
+  onGames,
+  onTeams,
   onDemo,
   onReset,
 }: {
@@ -1586,24 +1851,164 @@ function SettingsScreen({
   gameId: string;
   onCreateNew: () => void;
   onPublish: () => void;
+  onSave: (value: Tournament) => void;
+  onGames: () => void;
+  onTeams: () => void;
   onDemo: () => void;
   onReset: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [name, setName] = useState(tournament.name);
+  const [matchMinutes, setMatchMinutes] = useState(
+    tournament.matchDurationMinutes,
+  );
+  const [breakMinutes, setBreakMinutes] = useState(
+    tournament.breakDurationMinutes,
+  );
+  const [startTime, setStartTime] = useState(tournament.startTime);
+  const [endTime, setEndTime] = useState(
+    addMinutes(tournament.startTime, tournament.availableTimeMinutes),
+  );
+  const availableMinutes = minutesBetween(startTime, endTime);
+  const windowMetrics = scheduleWindowMetrics(
+    matchMinutes,
+    breakMinutes,
+    startTime,
+    availableMinutes,
+  );
+  const protectedCount = tournament.matches.reduce(
+    (count, match, index) =>
+      match.status === 'upcoming' ? count : Math.max(count, index + 1),
+    0,
+  );
+  const resultingCount = Math.max(windowMetrics.matchCount, protectedCount);
+  const valid =
+    Boolean(name.trim()) && availableMinutes > 0 && resultingCount > 0;
+
+  function saveSettings() {
+    if (!valid) return;
+    onSave(
+      updateTournamentSettings(tournament, {
+        name: name.trim(),
+        matchDurationMinutes: matchMinutes,
+        breakDurationMinutes: breakMinutes,
+        startTime,
+        availableTimeMinutes: availableMinutes,
+      }),
+    );
+  }
+
   return (
     <>
       <PageHeader title="ตั้งค่า" eyebrow="เกมที่กำลังใช้งาน" />
       <div className="space-y-4 px-4 py-4">
+        <section className="settings-card space-y-4">
+          <div>
+            <label htmlFor="settings-game-name" className="section-title">
+              ชื่อเกม
+            </label>
+            <input
+              id="settings-game-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              className="mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold outline-none focus:border-[#35a95f]"
+            />
+          </div>
+          <div className="setting-row">
+            <div>
+              <h2 className="section-title">เวลาแข่งต่อคู่</h2>
+              <p className="section-note">ปรับได้ระหว่างเล่น</p>
+            </div>
+            <NumberStepper
+              value={matchMinutes}
+              min={5}
+              max={30}
+              onChange={setMatchMinutes}
+              suffix="นาที"
+            />
+          </div>
+          <div className="setting-row">
+            <div>
+              <h2 className="section-title">เวลาพัก</h2>
+              <p className="section-note">เวลาเปลี่ยนทีม</p>
+            </div>
+            <NumberStepper
+              value={breakMinutes}
+              min={0}
+              max={10}
+              onChange={setBreakMinutes}
+              suffix="นาที"
+            />
+          </div>
+          <div className="setting-row">
+            <div>
+              <h2 className="section-title">เวลาเริ่ม</h2>
+              <p className="section-note">คำนวณเวลาทุกแมตช์ใหม่</p>
+            </div>
+            <input
+              aria-label="เวลาเริ่ม"
+              type="time"
+              value={startTime}
+              onChange={(event) => setStartTime(event.target.value)}
+              className="h-12 rounded-xl border border-slate-200 bg-white px-3 text-base font-black"
+            />
+          </div>
+          <div className="setting-row">
+            <div>
+              <h2 className="section-title">เวลาจบ</h2>
+              <p className="section-note">เพิ่มหรือลดเกมที่ยังไม่เริ่ม</p>
+            </div>
+            <input
+              aria-label="เวลาจบ"
+              type="time"
+              value={endTime}
+              onChange={(event) => setEndTime(event.target.value)}
+              className="h-12 rounded-xl border border-slate-200 bg-white px-3 text-base font-black"
+            />
+          </div>
+          <div
+            className={`rounded-2xl p-3 text-sm font-bold ${valid ? 'bg-[#eef9f1] text-[#087632]' : 'bg-amber-50 text-amber-700'}`}
+          >
+            {availableMinutes <= 0
+              ? 'เวลาจบต้องอยู่หลังเวลาเริ่ม'
+              : `หลังบันทึกจะมี ${resultingCount} แมตช์ · ผลที่แข่งแล้วจะถูกเก็บไว้ทั้งหมด`}
+          </div>
+          <Button
+            onClick={saveSettings}
+            disabled={!valid}
+            className="h-13 w-full rounded-xl bg-[#11823b] font-black"
+          >
+            <Save />
+            บันทึกการตั้งค่า
+          </Button>
+        </section>
         <section className="settings-card">
-          <h2 className="section-title">{tournament.name}</h2>
+          <h2 className="section-title">ทางลัด</h2>
           <p className="section-note mt-1">
-            {tournament.teams.length} ทีม · {tournament.matches.length} แมตช์ ·
-            เริ่ม {tournament.startTime}
+            จำนวนทีมและรายชื่อผู้เล่นแก้ได้จากหน้าทีม โดยไม่กระทบผลแข่ง
           </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button
+              onClick={onTeams}
+              variant="outline"
+              className="h-12 rounded-xl font-black"
+            >
+              <Users />
+              จัดการทีม
+            </Button>
+            <Button
+              onClick={onGames}
+              variant="outline"
+              className="h-12 rounded-xl font-black"
+            >
+              <FolderOpen />
+              เกมทั้งหมด
+            </Button>
+          </div>
           <Button
             onClick={onCreateNew}
             variant="outline"
-            className="mt-4 h-12 w-full rounded-xl font-black"
+            className="mt-2 h-12 w-full rounded-xl font-black"
           >
             <Plus />
             สร้างตารางใหม่
@@ -1916,6 +2321,32 @@ export default function FootballApp() {
     setSelectedMatchId(id);
     setView('match-detail');
   }
+  async function openSharedGame(gameIdToOpen: string) {
+    try {
+      const game = await loadSharedGame(gameIdToOpen);
+      if (!game) {
+        setNotice('ไม่พบเกมนี้ในฐานข้อมูล');
+        return;
+      }
+      const value = extendTournamentToEndTime(game.state);
+      lastRemoteStateRef.current = JSON.stringify(value);
+      setGameId(game.id);
+      setTournament(value);
+      setSelectedTeamId(value.teams[0]?.id ?? '');
+      setSelectedMatchId('');
+      window.history.pushState({}, '', gamePath(game.id));
+      setView('home');
+    } catch {
+      setNotice('เปิดเกมไม่สำเร็จ กรุณาลองใหม่');
+    }
+  }
+  function handleDeletedGame(deletedGameId: string) {
+    if (deletedGameId !== gameId) return;
+    setTournament(null);
+    setGameId('');
+    lastRemoteStateRef.current = '';
+    window.history.replaceState({}, '', gamePath());
+  }
   const mainView: MainView = ['home', 'teams', 'schedule', 'settings'].includes(
     view,
   )
@@ -1944,14 +2375,26 @@ export default function FootballApp() {
     <main className="min-h-dvh bg-[#edf3ee] text-slate-950 sm:py-7">
       <div className="relative mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-[#f8faf8] shadow-[0_22px_70px_rgba(15,45,29,.15)] sm:min-h-[844px] sm:overflow-hidden sm:rounded-[32px] sm:border sm:border-white">
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
-          {!tournament && view !== 'setup' && (
+          {!tournament && !['setup', 'games'].includes(view) && (
             <>
               <PageHeader
                 title="Football Match Maker"
                 eyebrow="Ready when you are"
               />
-              <EmptyHome onSetup={openNewSetup} onDemo={loadDemo} />
+              <EmptyHome
+                onSetup={openNewSetup}
+                onDemo={loadDemo}
+                onGames={() => setView('games')}
+              />
             </>
+          )}
+          {view === 'games' && (
+            <GamesScreen
+              onBack={() => setView('home')}
+              onOpen={(id) => void openSharedGame(id)}
+              onDeleted={handleDeletedGame}
+              onNotice={setNotice}
+            />
           )}
           {view === 'setup' && (
             <SetupScreen
@@ -2022,12 +2465,19 @@ export default function FootballApp() {
           )}
           {tournament && view === 'settings' && (
             <SettingsScreen
+              key={gameId || tournament.id}
               tournament={tournament}
               gameId={gameId}
               onCreateNew={openNewSetup}
               onPublish={() =>
                 void publishTournament(tournament, 'สร้างลิงก์ให้เกมนี้แล้ว')
               }
+              onSave={(value) => {
+                setTournament(value);
+                setNotice('บันทึกการตั้งค่าแล้ว');
+              }}
+              onGames={() => setView('games')}
+              onTeams={() => setView('teams')}
               onDemo={loadDemo}
               onReset={() => {
                 setTournament(null);
@@ -2041,7 +2491,9 @@ export default function FootballApp() {
           )}
         </div>
         {tournament &&
-          !['setup', 'match-detail', 'team-detail', 'share'].includes(view) && (
+          !['setup', 'match-detail', 'team-detail', 'share', 'games'].includes(
+            view,
+          ) && (
             <BottomNavigation active={mainView} onChange={setView} />
           )}
         {notice && (

@@ -60,6 +60,7 @@ export type TeamDraft = Pick<Team, 'name' | 'color'>;
 export type ScheduleConfig = {
   name: string;
   teams: Team[];
+  firstMatchTeamIds?: [string, string];
   matchDurationMinutes: number;
   breakDurationMinutes: number;
   startTime: string;

@@ -148,6 +148,25 @@ function repeatedRoundRobin(teamIds: string[], matchCount: number): Pair[] {
   return pairs.slice(0, matchCount);
 }
 
+function preferredPairFirst(
+  pairs: Pair[],
+  preferredTeamIds?: [string, string],
+) {
+  if (!preferredTeamIds) return pairs;
+  const [teamAId, teamBId] = preferredTeamIds;
+  const preferredIndex = pairs.findIndex(
+    (pair) =>
+      (pair.teamAId === teamAId && pair.teamBId === teamBId) ||
+      (pair.teamAId === teamBId && pair.teamBId === teamAId),
+  );
+  if (preferredIndex < 0) return pairs;
+  const preferred = pairs[preferredIndex];
+  return [
+    { ...preferred, teamAId, teamBId },
+    ...pairs.filter((_, index) => index !== preferredIndex),
+  ];
+}
+
 export function scheduleWindowMetrics(
   matchMinutes: number,
   breakMinutes: number,
@@ -265,9 +284,12 @@ export function createTournament(config: ScheduleConfig): Tournament {
     config.startTime,
     config.availableTimeMinutes,
   );
-  const pairs = repeatedRoundRobin(
-    config.teams.map((team) => team.id),
-    windowMetrics.matchCount,
+  const pairs = preferredPairFirst(
+    repeatedRoundRobin(
+      config.teams.map((team) => team.id),
+      windowMetrics.matchCount,
+    ),
+    config.firstMatchTeamIds,
   );
   const matches: Match[] = pairs.map((pair, index) => ({
     id: makeId('match'),
@@ -290,6 +312,67 @@ export function createTournament(config: ScheduleConfig): Tournament {
     availableTimeMinutes: config.availableTimeMinutes,
     matches,
     createdAt: new Date().toISOString(),
+  });
+}
+
+export function updateTournamentSettings(
+  tournament: Tournament,
+  settings: {
+    name: string;
+    matchDurationMinutes: number;
+    breakDurationMinutes: number;
+    startTime: string;
+    availableTimeMinutes: number;
+  },
+): Tournament {
+  const windowMetrics = scheduleWindowMetrics(
+    settings.matchDurationMinutes,
+    settings.breakDurationMinutes,
+    settings.startTime,
+    settings.availableTimeMinutes,
+  );
+  const protectedCount = tournament.matches.reduce(
+    (count, match, index) =>
+      match.status === 'upcoming' ? count : Math.max(count, index + 1),
+    0,
+  );
+  const targetCount = Math.max(windowMetrics.matchCount, protectedCount);
+  const slotMinutes =
+    settings.matchDurationMinutes + settings.breakDurationMinutes;
+  const generatedPairs = repeatedRoundRobin(
+    tournament.teams.map((team) => team.id),
+    targetCount,
+  );
+  const matches: Match[] = Array.from({ length: targetCount }, (_, index) => {
+    const existing = tournament.matches[index];
+    const pair = generatedPairs[index];
+    return existing
+      ? {
+          ...existing,
+          matchNumber: index + 1,
+          startTime: addMinutes(settings.startTime, index * slotMinutes),
+        }
+      : {
+          id: makeId('match'),
+          matchNumber: index + 1,
+          roundNumber: pair.roundNumber,
+          teamAId: pair.teamAId,
+          teamBId: pair.teamBId,
+          startTime: addMinutes(settings.startTime, index * slotMinutes),
+          status: 'upcoming' as const,
+        };
+  });
+
+  if (matches.length && !matches.some((match) => match.status === 'current')) {
+    const firstUpcoming = matches.find((match) => match.status === 'upcoming');
+    if (firstUpcoming) firstUpcoming.status = 'current';
+  }
+
+  return assignGoalkeepers({
+    ...tournament,
+    ...settings,
+    name: settings.name.trim(),
+    matches,
   });
 }
 
