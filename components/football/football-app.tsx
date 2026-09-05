@@ -12,7 +12,6 @@ import {
   Copy,
   Goal,
   GripVertical,
-  Pencil,
   Plus,
   RotateCcw,
   Share2,
@@ -20,7 +19,7 @@ import {
   Shuffle,
   Trash2,
   Trophy,
-  UserMinus,
+  Users,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -32,7 +31,6 @@ import {
   type MainView,
   NumberStepper,
   PageHeader,
-  StatusDot,
   TeamBadge,
   TeamShirtIcon,
 } from './shared';
@@ -56,7 +54,6 @@ import {
   setMatchScore,
   setMatchStatus,
   shuffle,
-  skipGoalkeeper,
 } from '@/lib/football-engine';
 import {
   TEAM_COLORS,
@@ -206,7 +203,7 @@ function EmptyHome({
         className="mt-7 h-13 w-full max-w-xs rounded-2xl bg-[#11823b] text-base font-black"
       >
         <CalendarDays />
-        สร้างการแข่งขันใหม่
+          สร้างตารางใหม่
       </Button>
       <Button
         onClick={onDemo}
@@ -241,17 +238,17 @@ function HomeScreen({
   );
   const actions = [
     {
-      label: 'สร้างตารางแข่ง',
-      note: 'เริ่มรายการใหม่',
-      icon: CalendarDays,
-      view: 'setup' as AppView,
+      label: 'ทีมและคิว GK',
+      note: `${tournament.teams.length} ทีม`,
+      icon: Users,
+      view: 'teams' as AppView,
       tone: 'green',
     },
     {
-      label: 'สุ่ม GK',
-      note: 'แยกตามแต่ละทีม',
-      icon: Shuffle,
-      view: 'gk' as AppView,
+      label: 'ตารางคะแนน',
+      note: 'ดูอันดับและผลแข่ง',
+      icon: Trophy,
+      view: 'standings' as AppView,
       tone: 'violet',
     },
     {
@@ -396,6 +393,9 @@ function SetupScreen({
   onCreate: (value: Tournament) => void;
 }) {
   const defaultNames = ['Green', 'Red', 'Blue', 'Yellow', 'White', 'Black'];
+  const [gameName, setGameName] = useState(
+    tournament?.name ?? 'ฟุตบอลคืนนี้',
+  );
   const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 4);
   const [drafts, setDrafts] = useState(() =>
     Array.from({ length: 8 }, (_, i) => ({
@@ -434,6 +434,7 @@ function SetupScreen({
   function submit() {
     if (
       !enough ||
+      !gameName.trim() ||
       drafts.slice(0, teamCount).some((draft) => !draft.name.trim())
     )
       return;
@@ -445,7 +446,7 @@ function SetupScreen({
     });
     onCreate(
       createTournament({
-        name: tournament?.name ?? 'Friendly Match',
+        name: gameName.trim(),
         teams,
         matchDurationMinutes: matchMinutes,
         breakDurationMinutes: breakMinutes,
@@ -457,11 +458,24 @@ function SetupScreen({
   return (
     <>
       <PageHeader
-        title="ตั้งค่าการแข่งขัน"
+        title={tournament ? 'แก้ไขการแข่งขัน' : 'สร้างตารางใหม่'}
         eyebrow="Round Robin · 1 สนาม"
         onBack={onCancel}
       />
       <div className="space-y-4 px-4 py-4 pb-8">
+        <section className="settings-card">
+          <label htmlFor="game-name" className="section-title">
+            ชื่อเกม
+          </label>
+          <p className="section-note mt-1">เช่น ฟุตบอลคืนวันศุกร์</p>
+          <input
+            id="game-name"
+            value={gameName}
+            onChange={(event) => setGameName(event.target.value)}
+            placeholder="ตั้งชื่อเกมนี้"
+            className="mt-3 h-12 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold outline-none focus:border-[#35a95f]"
+          />
+        </section>
         <section className="settings-card">
           <div>
             <h2 className="section-title">จำนวนทีม</h2>
@@ -634,11 +648,15 @@ function SetupScreen({
         </section>
         <Button
           onClick={submit}
-          disabled={!enough}
+          disabled={
+            !enough ||
+            !gameName.trim() ||
+            drafts.slice(0, teamCount).some((draft) => !draft.name.trim())
+          }
           className="h-14 w-full rounded-2xl bg-[#11823b] text-base font-black"
         >
           <CalendarDays />
-          สร้างตารางแข่งขัน
+          สร้างตารางใหม่
         </Button>
       </div>
     </>
@@ -648,27 +666,15 @@ function SetupScreen({
 function TeamsScreen({
   tournament,
   onOpenTeam,
-  onAddTeam,
 }: {
   tournament: Tournament;
   onOpenTeam: (id: string) => void;
-  onAddTeam: () => void;
 }) {
   return (
     <>
       <PageHeader
         title="ทีมทั้งหมด"
-        eyebrow={`${tournament.teams.length} ทีม`}
-        action={
-          <Button
-            onClick={onAddTeam}
-            variant="ghost"
-            className="h-10 rounded-xl font-black text-[#11823b]"
-          >
-            <Plus />
-            เพิ่มทีม
-          </Button>
-        }
+        eyebrow={`${tournament.teams.length} ทีม · เลือกทีมเพื่อดูคิว GK`}
       />
       <div className="space-y-3 px-4 py-4">
         {tournament.teams.map((team) => (
@@ -695,15 +701,32 @@ function TeamDetailScreen({
   team,
   onBack,
   onUpdate,
-  onRandomize,
 }: {
   team: Team;
   onBack: () => void;
   onUpdate: (team: Team) => void;
-  onRandomize: () => void;
 }) {
   const [newName, setNewName] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const eligiblePlayers = team.players.filter(
+    (player) => !player.absentToday,
+  );
+  const gkOrder = [
+    ...team.gkRotation.filter((id) =>
+      eligiblePlayers.some((player) => player.id === id),
+    ),
+    ...eligiblePlayers
+      .map((player) => player.id)
+      .filter((id) => !team.gkRotation.includes(id)),
+  ];
+  function randomizeGoalkeepers() {
+    const order = shuffle(eligiblePlayers.map((player) => player.id));
+    onUpdate({
+      ...team,
+      gkRotation: order,
+      gkCycleOrders: order.length ? [order] : [],
+    });
+  }
   function updatePlayers(players: Team['players']) {
     const ids = new Set(players.map((player) => player.id));
     onUpdate({
@@ -748,17 +771,45 @@ function TeamDetailScreen({
         <section className="settings-card">
           <div className="mb-3 flex items-center justify-between">
             <div>
-              <h2 className="section-title">รายชื่อผู้เล่น</h2>
-              <p className="section-note">ลากหรือใช้ลูกศรเพื่อเรียงลำดับ</p>
+              <h2 className="section-title">ลำดับผู้รักษาประตู</h2>
+              <p className="section-note">วนตามลำดับนี้ในแต่ละเกม</p>
             </div>
             <Button
-              onClick={onRandomize}
+              onClick={randomizeGoalkeepers}
+              disabled={eligiblePlayers.length === 0}
               variant="outline"
               className="h-10 rounded-xl border-[#9dd2ab] font-black text-[#087632]"
             >
               <Shuffle />
-              สุ่ม GK
+              สุ่มลำดับ
             </Button>
+          </div>
+          {gkOrder.length > 0 ? (
+            <div className="grid grid-cols-2 gap-2">
+              {gkOrder.map((id, index) => (
+                <div
+                  key={id}
+                  className="flex min-w-0 items-center gap-2 rounded-xl bg-slate-50 p-2.5"
+                >
+                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#11823b] text-xs font-black text-white">
+                    {index + 1}
+                  </span>
+                  <span className="truncate font-black">
+                    {team.players.find((player) => player.id === id)?.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-xl bg-slate-50 p-4 text-center text-sm font-bold text-slate-400">
+              เพิ่มผู้เล่นที่มาวันนี้ก่อนสุ่มคิว GK
+            </p>
+          )}
+        </section>
+        <section className="settings-card">
+          <div className="mb-3">
+            <h2 className="section-title">รายชื่อผู้เล่น</h2>
+            <p className="section-note">ลากหรือใช้ลูกศรเพื่อเรียงรายชื่อ</p>
           </div>
           <div className="overflow-hidden rounded-2xl border border-slate-200">
             {team.players.length === 0 ? (
@@ -898,8 +949,8 @@ function ScheduleScreen({
   const finished = tournament.matches
     .filter((match) => match.status === 'finished')
     .reverse();
-  const visibleUpcoming = showAllUpcoming ? upcoming : upcoming.slice(0, 5);
-  const visibleFinished = showAllFinished ? finished : finished.slice(0, 5);
+  const visibleUpcoming = showAllUpcoming ? upcoming : upcoming.slice(0, 3);
+  const visibleFinished = showAllFinished ? finished : finished.slice(0, 3);
   return (
     <>
       <PageHeader
@@ -916,7 +967,39 @@ function ScheduleScreen({
           </Button>
         }
       />
-      <div className="space-y-6 px-4 py-4 pb-6">
+      <div className="space-y-5 px-4 py-4 pb-6">
+        {finished.length > 0 && (
+          <section>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-base font-black">แข่งแล้ว</h2>
+              <span className="text-sm font-bold text-slate-400">
+                {finished.length} เกม
+              </span>
+            </div>
+            <div className="space-y-2">
+              {visibleFinished.map((match) => (
+                <MatchCard
+                  key={match.id}
+                  match={match}
+                  teams={tournament.teams}
+                  onClick={() => onOpenMatch(match.id)}
+                  onFinish={() => onOpenMatch(match.id)}
+                />
+              ))}
+            </div>
+            {finished.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setShowAllFinished((value) => !value)}
+                className="mt-2 h-11 w-full rounded-xl font-black text-[#087632]"
+              >
+                {showAllFinished
+                  ? 'ย่อผลการแข่งขัน'
+                  : `ดูผลย้อนหลังอีก ${finished.length - 3} เกม`}
+              </button>
+            )}
+          </section>
+        )}
         {current && (
           <section>
             <div className="mb-2 flex items-center justify-between">
@@ -952,7 +1035,7 @@ function ScheduleScreen({
                 />
               ))}
             </div>
-            {upcoming.length > 5 && (
+            {upcoming.length > 3 && (
               <button
                 type="button"
                 onClick={() => setShowAllUpcoming((value) => !value)}
@@ -960,39 +1043,7 @@ function ScheduleScreen({
               >
                 {showAllUpcoming
                   ? 'ย่อรายการ'
-                  : `ดูคิวทั้งหมดอีก ${upcoming.length - 5} เกม`}
-              </button>
-            )}
-          </section>
-        )}
-        {finished.length > 0 && (
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-base font-black">แข่งแล้ว</h2>
-              <span className="text-sm font-bold text-slate-400">
-                {finished.length} เกม
-              </span>
-            </div>
-            <div className="space-y-2">
-              {visibleFinished.map((match) => (
-                <MatchCard
-                  key={match.id}
-                  match={match}
-                  teams={tournament.teams}
-                  onClick={() => onOpenMatch(match.id)}
-                  onFinish={() => onOpenMatch(match.id)}
-                />
-              ))}
-            </div>
-            {finished.length > 5 && (
-              <button
-                type="button"
-                onClick={() => setShowAllFinished((value) => !value)}
-                className="mt-2 h-11 w-full rounded-xl font-black text-[#087632]"
-              >
-                {showAllFinished
-                  ? 'ย่อรายการ'
-                  : `ดูผลย้อนหลังอีก ${finished.length - 5} เกม`}
+                  : `ดูคิวทั้งหมดอีก ${upcoming.length - 3} เกม`}
               </button>
             )}
           </section>
@@ -1122,353 +1173,6 @@ function StandingsScreen({
             </p>
           )}
         </section>
-      </div>
-    </>
-  );
-}
-
-function TeamSelector({
-  teams,
-  selectedId,
-  onSelect,
-}: {
-  teams: Team[];
-  selectedId: string;
-  onSelect: (id: string) => void;
-}) {
-  return (
-    <div className="scrollbar-none flex gap-2 overflow-x-auto px-4 py-3">
-      {teams.map((team) => (
-        <button
-          key={team.id}
-          onClick={() => onSelect(team.id)}
-          className={`flex shrink-0 items-center gap-2 rounded-2xl border px-3 py-2 font-black ${selectedId === team.id ? 'border-[#59b776] bg-[#e9f7ed] text-[#087632]' : 'border-slate-200 bg-white'}`}
-        >
-          <TeamShirtIcon color={team.color} size="sm" />
-          <span>{team.name}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function GkScreen({
-  tournament,
-  selectedId,
-  onSelect,
-  onUpdate,
-  onOpenMatch,
-}: {
-  tournament: Tournament;
-  selectedId: string;
-  onSelect: (id: string) => void;
-  onUpdate: (value: Tournament) => void;
-  onOpenMatch: (id: string) => void;
-}) {
-  const [mode, setMode] = useState<'queue' | 'shuffle' | 'history'>('queue');
-  const team =
-    tournament.teams.find((item) => item.id === selectedId) ??
-    tournament.teams[0];
-  const eligiblePlayers = team.players.filter((player) => !player.absentToday);
-  const [draftOrder, setDraftOrder] = useState<string[]>(
-    team.gkRotation.filter((id) =>
-      eligiblePlayers.some((player) => player.id === id),
-    ),
-  );
-  const [isShuffling, setIsShuffling] = useState(false);
-  const [dragOrderIndex, setDragOrderIndex] = useState<number | null>(null);
-  const teamMatches = tournament.matches.filter(
-    (match) => match.teamAId === team.id || match.teamBId === team.id,
-  );
-  const currentIndex = teamMatches.findIndex(
-    (match) => match.status === 'current',
-  );
-  const activeIndex =
-    currentIndex >= 0
-      ? currentIndex
-      : teamMatches.findIndex((match) => match.status === 'upcoming');
-  const current = teamMatches[activeIndex];
-  const next = teamMatches
-    .slice(activeIndex + 1)
-    .find((match) => match.status !== 'finished');
-  const gkFor = (match?: Match) =>
-    match
-      ? playerFor(
-          team,
-          match.teamAId === team.id
-            ? match.teamAGkPlayerId
-            : match.teamBGkPlayerId,
-        )
-      : undefined;
-  function doShuffle() {
-    setIsShuffling(true);
-    window.setTimeout(() => {
-      setDraftOrder(shuffle(eligiblePlayers.map((player) => player.id)));
-      setIsShuffling(false);
-    }, 900);
-  }
-  function confirmOrder() {
-    const teams = tournament.teams.map((item) =>
-      item.id === team.id
-        ? { ...item, gkRotation: draftOrder, gkCycleOrders: [draftOrder] }
-        : item,
-    );
-    onUpdate(assignGoalkeepers({ ...tournament, teams }));
-    setMode('queue');
-  }
-  const completed = teamMatches.filter(
-    (match) => match.status === 'finished',
-  ).length;
-  const cycle = eligiblePlayers.length
-    ? Math.floor(completed / eligiblePlayers.length) + 1
-    : 1;
-  return (
-    <>
-      <PageHeader
-        title={`GK ทีม ${team.name}`}
-        eyebrow="หมุนเวียนแยกแต่ละทีม"
-        action={<TeamShirtIcon color={team.color} size="sm" />}
-      />
-      <TeamSelector
-        teams={tournament.teams}
-        selectedId={team.id}
-        onSelect={onSelect}
-      />
-      <div className="mx-4 grid grid-cols-3 rounded-xl bg-slate-100 p-1">
-        {(
-          [
-            ['queue', 'คิว GK'],
-            ['shuffle', 'สุ่มลำดับ'],
-            ['history', 'ประวัติ'],
-          ] as const
-        ).map(([value, label]) => (
-          <button
-            key={value}
-            onClick={() => setMode(value)}
-            className={`h-10 rounded-lg text-xs font-black ${mode === value ? 'bg-white text-[#087632] shadow-sm' : 'text-slate-500'}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="px-4 py-4 pb-8">
-        {mode === 'queue' && (
-          <div className="space-y-4">
-            <section className="grid grid-cols-2 gap-3">
-              <div className="rounded-[22px] border-2 border-[#35a95f] bg-[#f1faf4] p-4">
-                <p className="text-[10px] font-black uppercase tracking-[.16em] text-[#11823b]">
-                  ตอนนี้
-                </p>
-                <p className="mt-2 truncate text-2xl font-black">
-                  {gkFor(current)?.name ?? '—'}
-                </p>
-                <p className="mt-1 text-xs font-bold text-slate-500">
-                  {current ? `Match ${current.matchNumber}` : 'ไม่มีแมตช์'}
-                </p>
-              </div>
-              <div className="rounded-[22px] border border-amber-200 bg-amber-50 p-4">
-                <p className="text-[10px] font-black uppercase tracking-[.16em] text-amber-700">
-                  คนถัดไป
-                </p>
-                <p className="mt-2 truncate text-2xl font-black">
-                  {gkFor(next)?.name ?? '—'}
-                </p>
-                <p className="mt-1 text-xs font-bold text-slate-500">
-                  {next ? `Match ${next.matchNumber}` : 'จบคิวแล้ว'}
-                </p>
-              </div>
-            </section>
-            {current && (
-              <Button
-                variant="outline"
-                onClick={() =>
-                  onUpdate(skipGoalkeeper(tournament, current.id, team.id))
-                }
-                className="h-12 w-full rounded-2xl border-amber-300 font-black text-amber-700"
-              >
-                <UserMinus />
-                ข้ามคิว GK คนนี้
-              </Button>
-            )}
-            <section className="settings-card">
-              <div className="mb-3">
-                <h2 className="section-title">GK Rotation</h2>
-                <p className="section-note">ทุกคนจะได้เป็น GK ก่อนเริ่มรอบใหม่</p>
-              </div>
-              <div className="overflow-hidden rounded-2xl border border-slate-200">
-                {teamMatches.map((match, index) => {
-                  const status =
-                    match.status === 'finished'
-                      ? 'played'
-                      : match.status === 'current'
-                        ? 'current'
-                        : index === activeIndex + 1
-                          ? 'next'
-                          : 'waiting';
-                  return (
-                    <button
-                      key={match.id}
-                      onClick={() => onOpenMatch(match.id)}
-                      className="flex w-full items-center gap-3 border-b border-slate-100 bg-white p-3 text-left last:border-0"
-                    >
-                      <StatusDot status={status} />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-black">
-                          {gkFor(match)?.name ?? 'ยังไม่มี GK'}
-                        </p>
-                        <p className="text-xs font-bold text-slate-400">
-                          Match {match.matchNumber} · {match.startTime}
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-black text-slate-400">
-                        {status === 'played'
-                          ? 'PLAYED'
-                          : status === 'current'
-                            ? 'CURRENT'
-                            : status === 'next'
-                              ? 'NEXT'
-                              : 'WAITING'}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          </div>
-        )}
-        {mode === 'shuffle' && (
-          <div className="space-y-4">
-            <section className="rounded-[26px] border border-slate-200 bg-white p-5 text-center">
-              <div
-                className={`mx-auto grid h-24 w-24 place-items-center rounded-[30px] bg-[#e5f5e9] text-[#11823b] ${isShuffling ? 'animate-shuffle' : ''}`}
-              >
-                <Goal className="h-12 w-12" />
-              </div>
-              <h2 className="mt-4 text-xl font-black">
-                {isShuffling
-                  ? 'กำลังสลับลำดับ…'
-                  : draftOrder.length
-                    ? 'ลำดับ GK พร้อมแล้ว'
-                    : 'ยังไม่มีผู้เล่นที่พร้อม'}
-              </h2>
-              <p className="mt-1 text-sm font-semibold text-slate-500">
-                ทีม {team.name} · {eligiblePlayers.length} คน
-              </p>
-            </section>
-            <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
-              {draftOrder.map((id, index) => (
-                <div
-                  key={id}
-                  draggable
-                  onDragStart={() => setDragOrderIndex(index)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    if (dragOrderIndex !== null)
-                      setDraftOrder(reorder(draftOrder, dragOrderIndex, index));
-                    setDragOrderIndex(null);
-                  }}
-                  className="flex items-center gap-3 border-b border-slate-100 p-3 last:border-0"
-                >
-                  <GripVertical className="h-5 w-5 text-slate-300" />
-                  <span className="grid h-8 w-8 place-items-center rounded-full bg-[#11823b] text-sm font-black text-white">
-                    {index + 1}
-                  </span>
-                  <p className="min-w-0 flex-1 truncate font-black">
-                    {team.players.find((player) => player.id === id)?.name}
-                  </p>
-                  <button
-                    disabled={index === 0}
-                    onClick={() =>
-                      setDraftOrder(reorder(draftOrder, index, index - 1))
-                    }
-                    className="p-2 disabled:opacity-20"
-                  >
-                    <ChevronUp className="h-4 w-4" />
-                  </button>
-                  <button
-                    disabled={index === draftOrder.length - 1}
-                    onClick={() =>
-                      setDraftOrder(reorder(draftOrder, index, index + 1))
-                    }
-                    className="p-2 disabled:opacity-20"
-                  >
-                    <ChevronDown className="h-4 w-4" />
-                  </button>
-                </div>
-              ))}
-            </section>
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                onClick={doShuffle}
-                disabled={isShuffling || eligiblePlayers.length === 0}
-                variant="outline"
-                className="h-13 rounded-2xl font-black"
-              >
-                <Shuffle />
-                สุ่มใหม่
-              </Button>
-              <Button
-                onClick={confirmOrder}
-                disabled={isShuffling || draftOrder.length === 0}
-                className="h-13 rounded-2xl bg-[#11823b] font-black"
-              >
-                <Check />
-                ยืนยันลำดับนี้
-              </Button>
-            </div>
-          </div>
-        )}
-        {mode === 'history' && (
-          <div className="space-y-4">
-            <section className="grid grid-cols-3 divide-x divide-slate-100 rounded-[22px] border border-slate-200 bg-white py-4 text-center">
-              <div>
-                <p className="text-xl font-black text-[#11823b]">{completed}</p>
-                <p className="text-[10px] font-bold text-slate-500">
-                  COMPLETED
-                </p>
-              </div>
-              <div>
-                <p className="text-xl font-black">
-                  {Math.max(0, teamMatches.length - completed)}
-                </p>
-                <p className="text-[10px] font-bold text-slate-500">
-                  REMAINING
-                </p>
-              </div>
-              <div>
-                <p className="text-xl font-black">{cycle}</p>
-                <p className="text-[10px] font-bold text-slate-500">ROUND</p>
-              </div>
-            </section>
-            <section className="settings-card">
-              <h2 className="section-title mb-3">Round {cycle}</h2>
-              {teamMatches.map((match) => (
-                <div
-                  key={match.id}
-                  className="flex items-center gap-3 border-b border-slate-100 py-3 last:border-0"
-                >
-                  <span
-                    className={`grid h-8 w-8 place-items-center rounded-full ${match.status === 'finished' ? 'bg-[#11823b] text-white' : 'bg-slate-100 text-slate-400'}`}
-                  >
-                    {match.status === 'finished' ? (
-                      <Check className="h-4 w-4" />
-                    ) : (
-                      match.matchNumber
-                    )}
-                  </span>
-                  <div className="flex-1">
-                    <p className="font-black">
-                      {gkFor(match)?.name ?? 'ยังไม่มี'}
-                    </p>
-                    <p className="text-xs font-bold text-slate-400">
-                      Match {match.matchNumber} · {match.startTime}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </section>
-          </div>
-        )}
       </div>
     </>
   );
@@ -1706,19 +1410,19 @@ function ShareScreen({
 
 function SettingsScreen({
   tournament,
-  onEdit,
+  onCreateNew,
   onDemo,
   onReset,
 }: {
   tournament: Tournament;
-  onEdit: () => void;
+  onCreateNew: () => void;
   onDemo: () => void;
   onReset: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   return (
     <>
-      <PageHeader title="ตั้งค่า" eyebrow="Tournament" />
+      <PageHeader title="ตั้งค่า" eyebrow="เกมที่กำลังใช้งาน" />
       <div className="space-y-4 px-4 py-4">
         <section className="settings-card">
           <h2 className="section-title">{tournament.name}</h2>
@@ -1727,12 +1431,12 @@ function SettingsScreen({
             เริ่ม {tournament.startTime}
           </p>
           <Button
-            onClick={onEdit}
+            onClick={onCreateNew}
             variant="outline"
             className="mt-4 h-12 w-full rounded-xl font-black"
           >
-            <Pencil />
-            แก้ไขและสร้างตารางใหม่
+            <Plus />
+            สร้างตารางใหม่
           </Button>
         </section>
         <section className="settings-card">
@@ -1801,6 +1505,7 @@ function SettingsScreen({
 
 export default function FootballApp() {
   const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [setupSource, setSetupSource] = useState<Tournament | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<AppView>('home');
   const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -1919,6 +1624,10 @@ export default function FootballApp() {
     setView('home');
     setNotice('โหลดข้อมูลตัวอย่างแล้ว');
   }
+  function openNewSetup() {
+    setSetupSource(null);
+    setView('setup');
+  }
   function openTeam(id: string) {
     setSelectedTeamId(id);
     setView('team-detail');
@@ -1931,7 +1640,6 @@ export default function FootballApp() {
     'home',
     'teams',
     'schedule',
-    'gk',
     'settings',
   ].includes(view)
     ? (view as MainView)
@@ -1965,18 +1673,19 @@ export default function FootballApp() {
                 title="Football Match Maker"
                 eyebrow="Ready when you are"
               />
-              <EmptyHome onSetup={() => setView('setup')} onDemo={loadDemo} />
+              <EmptyHome onSetup={openNewSetup} onDemo={loadDemo} />
             </>
           )}
           {view === 'setup' && (
             <SetupScreen
-              tournament={tournament}
+              tournament={setupSource}
               onCancel={() => setView('home')}
               onCreate={(value) => {
                 setTournament(value);
+                setSetupSource(null);
                 setSelectedTeamId(value.teams[0]?.id ?? '');
                 setView('home');
-                setNotice('สร้างตารางแข่งขันแล้ว');
+                setNotice('สร้างตารางใหม่แล้ว');
               }}
             />
           )}
@@ -1991,7 +1700,6 @@ export default function FootballApp() {
             <TeamsScreen
               tournament={tournament}
               onOpenTeam={openTeam}
-              onAddTeam={() => setView('setup')}
             />
           )}
           {tournament && view === 'team-detail' && selectedTeam && (
@@ -2008,10 +1716,6 @@ export default function FootballApp() {
                   }),
                 )
               }
-              onRandomize={() => {
-                setSelectedTeamId(selectedTeam.id);
-                setView('gk');
-              }}
             />
           )}
           {tournament && view === 'schedule' && (
@@ -2036,16 +1740,6 @@ export default function FootballApp() {
               onUpdate={setTournament}
             />
           )}
-          {tournament && view === 'gk' && selectedTeam && (
-            <GkScreen
-              key={selectedTeam.id}
-              tournament={tournament}
-              selectedId={selectedTeam.id}
-              onSelect={setSelectedTeamId}
-              onUpdate={setTournament}
-              onOpenMatch={openMatch}
-            />
-          )}
           {tournament && view === 'share' && (
             <ShareScreen
               tournament={tournament}
@@ -2056,7 +1750,7 @@ export default function FootballApp() {
           {tournament && view === 'settings' && (
             <SettingsScreen
               tournament={tournament}
-              onEdit={() => setView('setup')}
+              onCreateNew={openNewSetup}
               onDemo={loadDemo}
               onReset={() => {
                 setTournament(null);

@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowLeft, CalendarRange, Home, Minus, Plus, Settings, Shuffle, Users } from 'lucide-react';
+import { ArrowLeft, CalendarRange, Home, Minus, Plus, Settings, Users } from 'lucide-react';
 import type { ComponentType } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -45,19 +45,18 @@ export function PageHeader({ title, eyebrow, onBack, action }: { title: string; 
   );
 }
 
-export type MainView = 'home' | 'teams' | 'schedule' | 'gk' | 'settings';
+export type MainView = 'home' | 'teams' | 'schedule' | 'settings';
 
 const navItems: Array<{ view: MainView; label: string; icon: ComponentType<{ className?: string }> }> = [
   { view: 'home', label: 'หน้าหลัก', icon: Home },
   { view: 'teams', label: 'ทีม', icon: Users },
   { view: 'schedule', label: 'ตาราง', icon: CalendarRange },
-  { view: 'gk', label: 'GK', icon: Shuffle },
   { view: 'settings', label: 'ตั้งค่า', icon: Settings },
 ];
 
 export function BottomNavigation({ active, onChange }: { active: MainView; onChange: (view: MainView) => void }) {
   return (
-    <nav aria-label="เมนูหลัก" className="sticky bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
+    <nav aria-label="เมนูหลัก" className="sticky bottom-0 z-40 grid grid-cols-4 border-t border-slate-200 bg-white/95 px-2 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur">
       {navItems.map(({ view, label, icon: Icon }) => (
         <button key={view} onClick={() => onChange(view)} className={`nav-item ${active === view ? 'is-active' : ''}`} aria-current={active === view ? 'page' : undefined}>
           <Icon className="h-5 w-5" /><span>{label}</span>
@@ -75,14 +74,4 @@ export function NumberStepper({ value, min, max, onChange, suffix }: { value: nu
       <Button type="button" variant="outline" size="icon-lg" className="h-11 w-11 rounded-xl" onClick={() => onChange(Math.min(max, value + 1))} disabled={value >= max} aria-label="เพิ่ม"><Plus /></Button>
     </div>
   );
-}
-
-export function StatusDot({ status }: { status: 'played' | 'current' | 'next' | 'waiting' }) {
-  const config = {
-    played: ['bg-[#11823b] text-white', '✓'],
-    current: ['bg-orange-500 text-white', '•'],
-    next: ['bg-amber-100 text-amber-700', '→'],
-    waiting: ['bg-slate-100 text-slate-400', ''],
-  }[status];
-  return <span className={`grid h-7 w-7 place-items-center rounded-full text-sm font-black ${config[0]}`}>{config[1]}</span>;
 }
