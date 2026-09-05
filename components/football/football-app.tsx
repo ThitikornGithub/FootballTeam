@@ -417,8 +417,7 @@ function EmptyHome({
           <Plus className="h-5 w-5" />
         </span>
       </div>
-      <h2 className="text-2xl font-black">ยังไม่มีการแข่งขัน</h2>
-      <p className="mt-2 max-w-xs text-sm font-medium leading-6 text-slate-500">
+      <p className="max-w-xs text-sm font-medium leading-6 text-slate-500">
         สร้างตารางแบบพบกันหมด พร้อมหมุนเวียนผู้รักษาประตูให้ทุกทีม
       </p>
       <Button
