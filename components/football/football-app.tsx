@@ -76,8 +76,16 @@ import {
   scheduledEndTime,
   shareCardFilename,
 } from '@/lib/standings-share-card';
+import {
+  createSharedGame,
+  loadSharedGame,
+  saveSharedGame,
+} from '@/lib/football-data-api';
 
 const STORAGE_KEY = 'football-match-maker-v1';
+const PAGES_PATH_KEY = 'football-pages-path';
+const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 type AppView =
   | MainView
   | 'setup'
@@ -85,6 +93,41 @@ type AppView =
   | 'match-detail'
   | 'standings'
   | 'share';
+
+function restoreGitHubPagesPath() {
+  try {
+    const restoredPath = sessionStorage.getItem(PAGES_PATH_KEY);
+    if (!restoredPath) return;
+    sessionStorage.removeItem(PAGES_PATH_KEY);
+    window.history.replaceState({}, '', restoredPath);
+  } catch {
+    // Continue at the root route when storage is unavailable.
+  }
+}
+
+function gameIdFromPath() {
+  const path = window.location.pathname;
+  const relativePath =
+    BASE_PATH && path.startsWith(BASE_PATH) ? path.slice(BASE_PATH.length) : path;
+  const candidate = relativePath.split('/').filter(Boolean)[0] ?? '';
+  return GAME_ID_PATTERN.test(candidate) ? candidate : '';
+}
+
+function gamePath(gameId?: string) {
+  const root = `${BASE_PATH || ''}/`.replace(/\/+/g, '/');
+  return gameId ? `${root}${gameId}` : root;
+}
+
+function bangkokDateCode() {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}${value.month}${value.day}`;
+}
 
 function formatShareText(tournament: Tournament) {
   const standings = calculateStandings(tournament);
@@ -1522,11 +1565,13 @@ function ShareScreen({
 
 function SettingsScreen({
   tournament,
+  gameId,
   onCreateNew,
   onDemo,
   onReset,
 }: {
   tournament: Tournament;
+  gameId: string;
   onCreateNew: () => void;
   onDemo: () => void;
   onReset: () => void;
@@ -1552,9 +1597,11 @@ function SettingsScreen({
           </Button>
         </section>
         <section className="settings-card">
-          <h2 className="section-title">ข้อมูลบนอุปกรณ์นี้</h2>
+          <h2 className="section-title">ข้อมูลการแข่งขัน</h2>
           <p className="section-note mt-1">
-            ข้อมูลการแข่งขันบันทึกใน LocalStorage และยังอยู่หลังรีเฟรชหน้า
+            {gameId
+              ? `แชร์และแก้ไขร่วมกันผ่านลิงก์ ${gameId}`
+              : 'เกมนี้ยังบันทึกอยู่เฉพาะบนอุปกรณ์นี้'}
           </p>
           <Button
             onClick={onDemo}
@@ -1571,7 +1618,7 @@ function SettingsScreen({
           className="h-12 w-full rounded-xl font-black"
         >
           <Trash2 />
-          Reset Tournament
+          {gameId ? 'ออกจากเกมนี้' : 'ลบเกมบนอุปกรณ์นี้'}
         </Button>
       </div>
       {confirming && (
@@ -1590,7 +1637,9 @@ function SettingsScreen({
               id="reset-description"
               className="mt-2 text-sm font-semibold leading-6 text-slate-500"
             >
-              ทีม รายชื่อผู้เล่น ตารางแข่งขัน และประวัติ GK จะถูกลบจากอุปกรณ์นี้
+              {gameId
+                ? 'เกมยังอยู่ในลิงก์เดิมและเปิดกลับมาได้ การออกจะล้างเฉพาะเกมที่เปิดอยู่บนอุปกรณ์นี้'
+                : 'ทีม รายชื่อผู้เล่น ตารางแข่งขัน และประวัติ GK จะถูกลบจากอุปกรณ์นี้'}
             </p>
             <div className="mt-5 grid grid-cols-2 gap-3">
               <Button
@@ -1617,6 +1666,7 @@ function SettingsScreen({
 
 export default function FootballApp() {
   const [tournament, setTournament] = useState<Tournament | null>(null);
+  const [gameId, setGameId] = useState('');
   const [setupSource, setSetupSource] = useState<Tournament | null>(null);
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<AppView>('home');
@@ -1624,28 +1674,93 @@ export default function FootballApp() {
   const [selectedMatchId, setSelectedMatchId] = useState('');
   const [notice, setNotice] = useState('');
   const tournamentRef = useRef<Tournament | null>(null);
-  /* oxlint-disable react/react-compiler -- hydration intentionally reads the browser-only store once. */
+  const lastRemoteStateRef = useRef('');
+  const lastLocalChangeRef = useRef(0);
+  /* oxlint-disable react/react-compiler -- hydration intentionally reads browser-only and remote state once. */
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const savedTournament = JSON.parse(stored) as Tournament;
-        setTournament(extendTournamentToEndTime(savedTournament));
+    let cancelled = false;
+    async function hydrate() {
+      restoreGitHubPagesPath();
+      const pathGameId = gameIdFromPath();
+      if (pathGameId) {
+        setGameId(pathGameId);
+        try {
+          const game = await loadSharedGame(pathGameId);
+          if (cancelled) return;
+          if (game) {
+            const value = extendTournamentToEndTime(game.state);
+            lastRemoteStateRef.current = JSON.stringify(value);
+            setTournament(value);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+          } else {
+            setNotice('ไม่พบเกมจากลิงก์นี้');
+          }
+        } catch {
+          if (cancelled) return;
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) setTournament(JSON.parse(stored) as Tournament);
+          setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองในเครื่อง');
+        } finally {
+          if (!cancelled) setHydrated(true);
+        }
+        return;
       }
-    } catch {
-      localStorage.removeItem(STORAGE_KEY);
-    } finally {
-      setHydrated(true);
+
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        if (stored) {
+          const savedTournament = JSON.parse(stored) as Tournament;
+          setTournament(extendTournamentToEndTime(savedTournament));
+        }
+      } catch {
+        localStorage.removeItem(STORAGE_KEY);
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
     }
+    void hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
   /* oxlint-enable react/react-compiler */
   useEffect(() => {
     tournamentRef.current = tournament;
     if (!hydrated) return;
-    if (tournament)
+    if (tournament) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
-    else localStorage.removeItem(STORAGE_KEY);
-  }, [tournament, hydrated]);
+      if (!gameId) return;
+      const serialized = JSON.stringify(tournament);
+      if (serialized === lastRemoteStateRef.current) return;
+      lastLocalChangeRef.current = Date.now();
+      const timer = window.setTimeout(() => {
+        void saveSharedGame(gameId, tournament)
+          .then((game) => {
+            lastRemoteStateRef.current = JSON.stringify(game.state);
+          })
+          .catch(() => setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง'));
+      }, 450);
+      return () => window.clearTimeout(timer);
+    }
+    localStorage.removeItem(STORAGE_KEY);
+  }, [tournament, hydrated, gameId]);
+  useEffect(() => {
+    if (!hydrated || !gameId) return;
+    const poll = window.setInterval(() => {
+      if (Date.now() - lastLocalChangeRef.current < 1600) return;
+      void loadSharedGame(gameId)
+        .then((game) => {
+          if (!game) return;
+          const serialized = JSON.stringify(game.state);
+          lastRemoteStateRef.current = serialized;
+          if (serialized !== JSON.stringify(tournamentRef.current)) {
+            setTournament(extendTournamentToEndTime(game.state));
+          }
+        })
+        .catch(() => undefined);
+    }, 4000);
+    return () => window.clearInterval(poll);
+  }, [hydrated, gameId]);
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(''), 2200);
@@ -1729,12 +1844,24 @@ export default function FootballApp() {
     void register().catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
+  async function publishTournament(value: Tournament, message: string) {
+    setTournament(value);
+    setSelectedTeamId(value.teams[0]?.id ?? '');
+    setView('home');
+    try {
+      const game = await createSharedGame(value, bangkokDateCode());
+      lastRemoteStateRef.current = JSON.stringify(game.state);
+      setGameId(game.id);
+      setTournament(game.state);
+      window.history.pushState({}, '', gamePath(game.id));
+      setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
+    } catch {
+      setNotice(`${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`);
+    }
+  }
   function loadDemo() {
     const demo = createDemoTournament();
-    setTournament(demo);
-    setSelectedTeamId(demo.teams[0].id);
-    setView('home');
-    setNotice('โหลดข้อมูลตัวอย่างแล้ว');
+    void publishTournament(demo, 'โหลดข้อมูลตัวอย่างแล้ว');
   }
   function openNewSetup() {
     setSetupSource(null);
@@ -1790,11 +1917,8 @@ export default function FootballApp() {
               tournament={setupSource}
               onCancel={() => setView('home')}
               onCreate={(value) => {
-                setTournament(value);
                 setSetupSource(null);
-                setSelectedTeamId(value.teams[0]?.id ?? '');
-                setView('home');
-                setNotice('สร้างตารางใหม่แล้ว');
+                void publishTournament(value, 'สร้างตารางใหม่แล้ว');
               }}
             />
           )}
@@ -1857,12 +1981,16 @@ export default function FootballApp() {
           {tournament && view === 'settings' && (
             <SettingsScreen
               tournament={tournament}
+              gameId={gameId}
               onCreateNew={openNewSetup}
               onDemo={loadDemo}
               onReset={() => {
                 setTournament(null);
+                setGameId('');
+                lastRemoteStateRef.current = '';
+                window.history.pushState({}, '', gamePath());
                 setView('home');
-                setNotice('ลบการแข่งขันแล้ว');
+                setNotice(gameId ? 'ออกจากเกมนี้แล้ว' : 'ลบการแข่งขันแล้ว');
               }}
             />
           )}
