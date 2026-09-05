@@ -2,9 +2,12 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://football-match-maker.coral-spice-7899.chatgpt.site'),
+  metadataBase: new URL('https://football-match-maker.b-thitikorn.chatgpt.site'),
   title: 'Football Match Maker',
   description: 'จัดตารางฟุตบอลและหมุนเวียนผู้รักษาประตูสำหรับกลุ่มเพื่อน',
+  icons: {
+    icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }],
+  },
   openGraph: {
     title: 'Football Match Maker',
     description: 'จัดทีม • จัดตาราง • หมุนเวียน GK',

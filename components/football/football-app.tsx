@@ -116,9 +116,10 @@ function ScorePicker({
 }: {
   label: string;
   color: TeamColor;
-  score: number;
-  onChange: (score: number) => void;
+  score: string;
+  onChange: (score: string) => void;
 }) {
+  const numericScore = Number.parseInt(score, 10) || 0;
   return (
     <div className="rounded-2xl bg-slate-50 p-3">
       <div className="flex min-w-0 items-center justify-center gap-2">
@@ -131,28 +132,29 @@ function ScorePicker({
       <div className="mt-2 flex items-center justify-center gap-2">
         <button
           type="button"
-          onClick={() => onChange(Math.max(0, score - 1))}
-          disabled={score === 0}
+          onClick={() => onChange(String(Math.max(0, numericScore - 1)))}
+          disabled={numericScore === 0}
           aria-label={`ลดสกอร์ ${label}`}
           className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-35"
         >
           <Minus className="h-4 w-4" />
         </button>
         <input
-          type="number"
+          type="text"
           inputMode="numeric"
-          min={0}
+          pattern="[0-9]*"
           value={score}
           onChange={(event) => {
-            const value = Number(event.target.value);
-            onChange(Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0);
+            onChange(event.target.value.replace(/\D/g, '').slice(0, 2));
           }}
+          onFocus={(event) => event.currentTarget.select()}
+          onBlur={() => !score && onChange('0')}
           aria-label={`สกอร์ทีม ${label}`}
           className="h-10 w-12 rounded-xl border border-slate-200 bg-white text-center text-xl font-black tabular-nums outline-none focus:border-[#35a95f]"
         />
         <button
           type="button"
-          onClick={() => onChange(score + 1)}
+          onClick={() => onChange(String(numericScore + 1))}
           aria-label={`เพิ่มสกอร์ ${label}`}
           className="grid h-9 w-9 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]"
         >
@@ -178,9 +180,10 @@ function CurrentMatchControl({
 }) {
   const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
   const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
-  const [scoreA, setScoreA] = useState(match.teamAScore ?? 0);
-  const [scoreB, setScoreB] = useState(match.teamBScore ?? 0);
-  const [saved, setSaved] = useState(false);
+  const [scoreA, setScoreA] = useState(String(match.teamAScore ?? 0));
+  const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
+  const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
+  const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
   return (
     <div className="rounded-[22px] border border-[#9dd2ab] bg-white p-4 shadow-[0_8px_24px_rgba(17,130,59,.08)]">
       <div className="mb-3 flex items-center justify-between">
@@ -206,44 +209,32 @@ function CurrentMatchControl({
           label={teamA.name}
           color={teamA.color}
           score={scoreA}
-          onChange={(score) => {
-            setScoreA(score);
-            setSaved(false);
-          }}
+          onChange={setScoreA}
         />
         <ScorePicker
           label={teamB.name}
           color={teamB.color}
           score={scoreB}
-          onChange={(score) => {
-            setScoreB(score);
-            setSaved(false);
-          }}
+          onChange={setScoreB}
         />
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            onUpdate(setMatchScore(tournament, match.id, scoreA, scoreB));
-            setSaved(true);
-          }}
-          className="h-11 rounded-xl font-black"
-        >
-          {saved ? 'บันทึกแล้ว' : 'บันทึกสกอร์'}
-        </Button>
+      <div className="mt-3">
         <Button
           type="button"
           onClick={() =>
             onUpdate(
-              finishMatchWithScore(tournament, match.id, scoreA, scoreB),
+              finishMatchWithScore(
+                tournament,
+                match.id,
+                normalizedScoreA,
+                normalizedScoreB,
+              ),
             )
           }
-          className="h-11 rounded-xl bg-[#11823b] font-black"
+          className="h-12 w-full rounded-xl bg-[#11823b] font-black"
         >
           <Check />
-          จบเกม
+          บันทึกผลและจบเกม
         </Button>
       </div>
       {next && (
@@ -259,6 +250,58 @@ function CurrentMatchControl({
         </div>
       )}
     </div>
+  );
+}
+
+function StandingsTable({ tournament }: { tournament: Tournament }) {
+  const standings = calculateStandings(tournament);
+  return (
+    <section className="overflow-x-auto rounded-[22px] border border-slate-200 bg-white">
+      <table className="w-full min-w-[430px] text-center text-sm">
+        <thead className="bg-[#e5f5e9] text-[#087632]">
+          <tr>
+            <th className="px-3 py-3 text-left">อันดับ / ทีม</th>
+            <th className="px-2 py-3">แข่ง</th>
+            <th className="px-2 py-3">ช</th>
+            <th className="px-2 py-3">ส</th>
+            <th className="px-2 py-3">พ</th>
+            <th className="px-2 py-3">+/-</th>
+            <th className="px-3 py-3">แต้ม</th>
+          </tr>
+        </thead>
+        <tbody>
+          {standings.map((standing, index) => {
+            const team = tournament.teams.find(
+              (item) => item.id === standing.teamId,
+            )!;
+            return (
+              <tr key={standing.teamId} className="border-t border-slate-100">
+                <td className="px-3 py-3 text-left">
+                  <div className="flex items-center gap-2 font-black">
+                    <span className="w-5 text-center text-slate-400">
+                      {index + 1}
+                    </span>
+                    <TeamShirtIcon color={team.color} size="sm" />
+                    <span className="truncate">{team.name}</span>
+                  </div>
+                </td>
+                <td className="px-2 py-3 font-bold">{standing.played}</td>
+                <td className="px-2 py-3 font-bold">{standing.won}</td>
+                <td className="px-2 py-3 font-bold">{standing.drawn}</td>
+                <td className="px-2 py-3 font-bold">{standing.lost}</td>
+                <td className="px-2 py-3 font-bold">
+                  {standing.goalDifference > 0 ? '+' : ''}
+                  {standing.goalDifference}
+                </td>
+                <td className="px-3 py-3 text-base font-black text-[#087632]">
+                  {standing.points}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
   );
 }
 
@@ -321,7 +364,6 @@ function HomeScreen({
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
-  const standings = calculateStandings(tournament);
   const actions = [
     {
       label: 'ทีม / คิว GK',
@@ -402,8 +444,8 @@ function HomeScreen({
             </div>
           )}
         </section>
-        <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
-          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+        <section>
+          <div className="mb-2 flex items-end justify-between px-1">
             <div>
               <h2 className="font-black">ตารางคะแนน</h2>
               <p className="text-xs font-bold text-slate-400">
@@ -418,45 +460,7 @@ function HomeScreen({
               ดูผลทั้งหมด
             </button>
           </div>
-          <Table>
-            <TableHeader className="bg-slate-50">
-              <TableRow>
-                <TableHead className="w-10 text-center">#</TableHead>
-                <TableHead>ทีม</TableHead>
-                <TableHead className="w-14 text-center">แข่ง</TableHead>
-                <TableHead className="w-14 text-center">แต้ม</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {standings.map((standing, index) => {
-                const team = tournament.teams.find(
-                  (item) => item.id === standing.teamId,
-                )!;
-                return (
-                  <TableRow key={standing.teamId}>
-                    <TableCell className="text-center font-bold text-slate-400">
-                      {index + 1}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex min-w-0 items-center gap-2 font-black">
-                        <span
-                          className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-                          style={{ background: COLOR_HEX[team.color] }}
-                        />
-                        <span className="truncate">{team.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-center font-bold">
-                      {standing.played}
-                    </TableCell>
-                    <TableCell className="text-center font-black text-[#087632]">
-                      {standing.points}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+          <StandingsTable tournament={tournament} />
         </section>
       </div>
     </>
@@ -1171,7 +1175,6 @@ function StandingsScreen({
   tournament: Tournament;
   onBack: () => void;
 }) {
-  const standings = calculateStandings(tournament);
   const results = tournament.matches.filter(
     (match) =>
       match.status === 'finished' &&
@@ -1186,55 +1189,7 @@ function StandingsScreen({
         onBack={onBack}
       />
       <div className="space-y-4 px-4 py-4 pb-8">
-        <section className="overflow-x-auto rounded-[22px] border border-slate-200 bg-white">
-          <table className="w-full min-w-[430px] text-center text-sm">
-            <thead className="bg-[#e5f5e9] text-[#087632]">
-              <tr>
-                <th className="px-3 py-3 text-left">อันดับ / ทีม</th>
-                <th className="px-2 py-3">แข่ง</th>
-                <th className="px-2 py-3">ช</th>
-                <th className="px-2 py-3">ส</th>
-                <th className="px-2 py-3">พ</th>
-                <th className="px-2 py-3">+/-</th>
-                <th className="px-3 py-3">แต้ม</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standings.map((standing, index) => {
-                const team = tournament.teams.find(
-                  (item) => item.id === standing.teamId,
-                )!;
-                return (
-                  <tr
-                    key={standing.teamId}
-                    className="border-t border-slate-100"
-                  >
-                    <td className="px-3 py-3 text-left">
-                      <div className="flex items-center gap-2 font-black">
-                        <span className="w-5 text-center text-slate-400">
-                          {index + 1}
-                        </span>
-                        <TeamShirtIcon color={team.color} size="sm" />
-                        <span className="truncate">{team.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-2 py-3 font-bold">{standing.played}</td>
-                    <td className="px-2 py-3 font-bold">{standing.won}</td>
-                    <td className="px-2 py-3 font-bold">{standing.drawn}</td>
-                    <td className="px-2 py-3 font-bold">{standing.lost}</td>
-                    <td className="px-2 py-3 font-bold">
-                      {standing.goalDifference > 0 ? '+' : ''}
-                      {standing.goalDifference}
-                    </td>
-                    <td className="px-3 py-3 text-base font-black text-[#087632]">
-                      {standing.points}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+        <StandingsTable tournament={tournament} />
         <p className="px-1 text-sm font-semibold text-slate-500">
           ชนะ 3 แต้ม · เสมอ 1 แต้ม · นับเฉพาะแมตช์ที่บันทึกสกอร์แล้ว
         </p>
@@ -1289,8 +1244,10 @@ function MatchDetailScreen({
 }) {
   const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
   const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
-  const [scoreA, setScoreA] = useState(match.teamAScore ?? 0);
-  const [scoreB, setScoreB] = useState(match.teamBScore ?? 0);
+  const [scoreA, setScoreA] = useState(String(match.teamAScore ?? 0));
+  const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
+  const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
+  const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
   return (
     <>
       <PageHeader
@@ -1315,50 +1272,21 @@ function MatchDetailScreen({
         <section className="settings-card">
           <div className="mb-4 text-center">
             <h2 className="section-title">บันทึกสกอร์</h2>
-            <p className="section-note">ใส่ประตูของแต่ละทีมก่อนกดแข่งไปแล้ว</p>
+            <p className="section-note">ใส่ประตูของแต่ละทีมก่อนจบเกม</p>
           </div>
-          <div className="grid grid-cols-[1fr_32px_1fr] items-end gap-3">
-            <label className="text-center">
-              <span className="mb-2 block truncate text-sm font-black">
-                {teamA.name}
-              </span>
-              <input
-                aria-label={`สกอร์ทีม ${teamA.name}`}
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={99}
-                value={scoreA}
-                onChange={(event) =>
-                  setScoreA(
-                    Math.min(99, Math.max(0, Number(event.target.value))),
-                  )
-                }
-                className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 text-center text-3xl font-black outline-none focus:border-[#35a95f]"
-              />
-            </label>
-            <span className="pb-5 text-center text-xl font-black text-slate-400">
-              -
-            </span>
-            <label className="text-center">
-              <span className="mb-2 block truncate text-sm font-black">
-                {teamB.name}
-              </span>
-              <input
-                aria-label={`สกอร์ทีม ${teamB.name}`}
-                type="number"
-                inputMode="numeric"
-                min={0}
-                max={99}
-                value={scoreB}
-                onChange={(event) =>
-                  setScoreB(
-                    Math.min(99, Math.max(0, Number(event.target.value))),
-                  )
-                }
-                className="h-16 w-full rounded-2xl border-2 border-slate-200 bg-slate-50 text-center text-3xl font-black outline-none focus:border-[#35a95f]"
-              />
-            </label>
+          <div className="grid grid-cols-2 gap-2">
+            <ScorePicker
+              label={teamA.name}
+              color={teamA.color}
+              score={scoreA}
+              onChange={setScoreA}
+            />
+            <ScorePicker
+              label={teamB.name}
+              color={teamB.color}
+              score={scoreB}
+              onChange={setScoreB}
+            />
           </div>
         </section>
         {match.status === 'upcoming' && (
@@ -1375,20 +1303,32 @@ function MatchDetailScreen({
           <Button
             onClick={() =>
               onUpdate(
-                finishMatchWithScore(tournament, match.id, scoreA, scoreB),
+                finishMatchWithScore(
+                  tournament,
+                  match.id,
+                  normalizedScoreA,
+                  normalizedScoreB,
+                ),
               )
             }
             className="h-14 w-full rounded-2xl bg-[#11823b] text-base font-black"
           >
             <Check />
-            บันทึกผล · แข่งไปแล้ว
+            บันทึกผลและจบเกม
           </Button>
         )}
         {match.status === 'finished' && (
           <div className="space-y-3">
             <Button
               onClick={() =>
-                onUpdate(setMatchScore(tournament, match.id, scoreA, scoreB))
+                onUpdate(
+                  setMatchScore(
+                    tournament,
+                    match.id,
+                    normalizedScoreA,
+                    normalizedScoreB,
+                  ),
+                )
               }
               variant="outline"
               className="h-12 w-full rounded-xl font-black"
