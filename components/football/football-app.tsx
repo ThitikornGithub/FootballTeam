@@ -1947,21 +1947,17 @@ function SettingsScreen({
   tournament,
   gameId,
   onCreateNew,
-  onPublish,
   onSave,
   onGames,
   onTeams,
-  onDemo,
   onReset,
 }: {
   tournament: Tournament;
   gameId: string;
   onCreateNew: () => void;
-  onPublish: () => void;
   onSave: (value: Tournament) => void;
   onGames: () => void;
   onTeams: () => void;
-  onDemo: () => void;
   onReset: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -2225,31 +2221,6 @@ function SettingsScreen({
           >
             <Plus />
             สร้างตารางใหม่
-          </Button>
-        </section>
-        <section className="settings-card">
-          <h2 className="section-title">ข้อมูลการแข่งขัน</h2>
-          <p className="section-note mt-1">
-            {gameId
-              ? `แชร์และแก้ไขร่วมกันผ่านลิงก์ ${gameId}`
-              : 'เกมนี้ยังบันทึกอยู่เฉพาะบนอุปกรณ์นี้'}
-          </p>
-          {!gameId && (
-            <Button
-              onClick={onPublish}
-              className="mt-4 h-12 w-full rounded-xl bg-[#11823b] font-black"
-            >
-              <Share2 />
-              สร้างลิงก์ให้เกมนี้
-            </Button>
-          )}
-          <Button
-            onClick={onDemo}
-            variant="outline"
-            className={`${gameId ? 'mt-4' : 'mt-2'} h-12 w-full rounded-xl font-black`}
-          >
-            <RotateCcw />
-            โหลดข้อมูลตัวอย่างใหม่
           </Button>
         </section>
         <Button
@@ -2746,16 +2717,12 @@ export default function FootballApp() {
               tournament={tournament}
               gameId={gameId}
               onCreateNew={openNewSetup}
-              onPublish={() =>
-                void publishTournament(tournament, 'สร้างลิงก์ให้เกมนี้แล้ว')
-              }
               onSave={(value) => {
                 applyTournament(value);
                 setNotice('บันทึกการตั้งค่าแล้ว');
               }}
               onGames={() => setView('games')}
               onTeams={() => setView('teams')}
-              onDemo={loadDemo}
               onReset={() => {
                 setTournament(null);
                 setGameId('');
