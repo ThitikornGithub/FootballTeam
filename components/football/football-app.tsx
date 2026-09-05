@@ -10,8 +10,8 @@ import {
   CircleAlert,
   CircleCheck,
   Copy,
-  Goal,
   GripVertical,
+  Minus,
   Plus,
   RotateCcw,
   Share2,
@@ -23,7 +23,6 @@ import {
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { MatchCard } from './match-card';
 import {
   BottomNavigation,
   COLOR_HEX,
@@ -35,6 +34,14 @@ import {
   TeamShirtIcon,
 } from './shared';
 import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { createDemoTournament, makeTeam } from '@/lib/demo-data';
 import {
   addMinutes,
@@ -101,81 +108,157 @@ function nextMatchAfter(tournament: Tournament, match?: Match) {
     .find((item) => item.status !== 'finished');
 }
 
-function GkNameCard({
+function ScorePicker({
   label,
-  name,
   color,
+  score,
+  onChange,
 }: {
   label: string;
-  name?: string;
   color: TeamColor;
+  score: number;
+  onChange: (score: number) => void;
 }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
-      <p className="truncate text-[10px] font-black uppercase tracking-wide text-slate-500">
-        {label}
-      </p>
-      <div className="mt-1 flex items-center gap-2">
-        <Goal className="h-4 w-4" style={{ color: COLOR_HEX[color] }} />
-        <p className="truncate text-lg font-black">{name ?? 'ยังไม่มี'}</p>
+    <div className="rounded-2xl bg-slate-50 p-3">
+      <div className="flex min-w-0 items-center justify-center gap-2">
+        <span
+          className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+          style={{ background: COLOR_HEX[color] }}
+        />
+        <p className="truncate text-sm font-black">{label}</p>
+      </div>
+      <div className="mt-2 flex items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={() => onChange(Math.max(0, score - 1))}
+          disabled={score === 0}
+          aria-label={`ลดสกอร์ ${label}`}
+          className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-35"
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          value={score}
+          onChange={(event) => {
+            const value = Number(event.target.value);
+            onChange(Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0);
+          }}
+          aria-label={`สกอร์ทีม ${label}`}
+          className="h-10 w-12 rounded-xl border border-slate-200 bg-white text-center text-xl font-black tabular-nums outline-none focus:border-[#35a95f]"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(score + 1)}
+          aria-label={`เพิ่มสกอร์ ${label}`}
+          className="grid h-9 w-9 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]"
+        >
+          <Plus className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );
 }
 
-function CurrentMatchHero({
+function CurrentMatchControl({
   tournament,
   match,
+  next,
   onOpen,
+  onUpdate,
 }: {
   tournament: Tournament;
   match: Match;
+  next?: Match;
   onOpen: () => void;
+  onUpdate: (value: Tournament) => void;
 }) {
   const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
   const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
+  const [scoreA, setScoreA] = useState(match.teamAScore ?? 0);
+  const [scoreB, setScoreB] = useState(match.teamBScore ?? 0);
+  const [saved, setSaved] = useState(false);
   return (
-    <button
-      onClick={onOpen}
-      className="w-full rounded-[26px] border border-[#acd8b8] bg-white p-5 text-left shadow-[0_12px_32px_rgba(17,130,59,.11)] active:scale-[.99]"
-    >
-      <div className="mb-4 flex items-center justify-between">
+    <div className="rounded-[22px] border border-[#9dd2ab] bg-white p-4 shadow-[0_8px_24px_rgba(17,130,59,.08)]">
+      <div className="mb-3 flex items-center justify-between">
         <div>
-          <p className="text-xs font-black uppercase tracking-[.12em] text-[#11823b]">
-            {match.status === 'current' ? 'กำลังแข่งขัน' : 'แมตช์ถัดไป'}
+          <p className="font-black text-[#087632]">
+            {match.status === 'current' ? 'กำลังแข่ง' : 'เกมถัดไป'} ·{' '}
+            {match.startTime}
           </p>
-          <p className="text-2xl font-black tabular-nums">{match.startTime}</p>
+          <p className="text-xs font-bold text-slate-400">
+            เกม {match.matchNumber} · สนาม 1
+          </p>
         </div>
-        <span className="rounded-full bg-[#e5f5e9] px-3 py-1.5 text-xs font-black text-[#087632]">
-          สนาม 1 · #{match.matchNumber}
-        </span>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="h-9 rounded-xl px-3 text-sm font-black text-[#087632]"
+        >
+          รายละเอียด
+        </button>
       </div>
-      <div className="grid grid-cols-[1fr_42px_1fr] items-center">
-        <div className="flex flex-col items-center gap-1">
-          <TeamShirtIcon color={teamA.color} size="lg" />
-          <p className="max-w-full truncate text-lg font-black">{teamA.name}</p>
-        </div>
-        <span className="text-center text-sm font-black text-slate-400">
-          VS
-        </span>
-        <div className="flex flex-col items-center gap-1">
-          <TeamShirtIcon color={teamB.color} size="lg" />
-          <p className="max-w-full truncate text-lg font-black">{teamB.name}</p>
-        </div>
-      </div>
-      <div className="mt-5 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4">
-        <GkNameCard
-          label={`GK ${teamA.name}`}
-          name={playerFor(teamA, match.teamAGkPlayerId)?.name}
+      <div className="grid grid-cols-2 gap-2">
+        <ScorePicker
+          label={teamA.name}
           color={teamA.color}
+          score={scoreA}
+          onChange={(score) => {
+            setScoreA(score);
+            setSaved(false);
+          }}
         />
-        <GkNameCard
-          label={`GK ${teamB.name}`}
-          name={playerFor(teamB, match.teamBGkPlayerId)?.name}
+        <ScorePicker
+          label={teamB.name}
           color={teamB.color}
+          score={scoreB}
+          onChange={(score) => {
+            setScoreB(score);
+            setSaved(false);
+          }}
         />
       </div>
-    </button>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            onUpdate(setMatchScore(tournament, match.id, scoreA, scoreB));
+            setSaved(true);
+          }}
+          className="h-11 rounded-xl font-black"
+        >
+          {saved ? 'บันทึกแล้ว' : 'บันทึกสกอร์'}
+        </Button>
+        <Button
+          type="button"
+          onClick={() =>
+            onUpdate(
+              finishMatchWithScore(tournament, match.id, scoreA, scoreB),
+            )
+          }
+          className="h-11 rounded-xl bg-[#11823b] font-black"
+        >
+          <Check />
+          จบเกม
+        </Button>
+      </div>
+      {next && (
+        <div
+          className="mt-3 flex w-full items-center justify-between border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500"
+        >
+          <span>เกมถัดไป {next.startTime}</span>
+          <span className="text-slate-800">
+            {tournament.teams.find((team) => team.id === next.teamAId)?.name}{' '}
+            vs{' '}
+            {tournament.teams.find((team) => team.id === next.teamBId)?.name}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -203,7 +286,7 @@ function EmptyHome({
         className="mt-7 h-13 w-full max-w-xs rounded-2xl bg-[#11823b] text-base font-black"
       >
         <CalendarDays />
-          สร้างตารางใหม่
+        สร้างตารางใหม่
       </Button>
       <Button
         onClick={onDemo}
@@ -220,10 +303,12 @@ function HomeScreen({
   tournament,
   onNavigate,
   onOpenMatch,
+  onUpdate,
 }: {
   tournament: Tournament;
   onNavigate: (view: AppView) => void;
   onOpenMatch: (id: string) => void;
+  onUpdate: (value: Tournament) => void;
 }) {
   const current =
     tournament.matches.find((match) => match.status === 'current') ??
@@ -236,34 +321,22 @@ function HomeScreen({
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
+  const standings = calculateStandings(tournament);
   const actions = [
     {
-      label: 'ทีมและคิว GK',
-      note: `${tournament.teams.length} ทีม`,
+      label: 'ทีม / คิว GK',
       icon: Users,
       view: 'teams' as AppView,
-      tone: 'green',
     },
     {
-      label: 'ตารางคะแนน',
-      note: 'ดูอันดับและผลแข่ง',
-      icon: Trophy,
-      view: 'standings' as AppView,
-      tone: 'violet',
-    },
-    {
-      label: 'ดูตารางวันนี้',
-      note: `${finished}/${tournament.matches.length} แมตช์`,
+      label: 'ตารางแข่ง',
       icon: CalendarRange,
       view: 'schedule' as AppView,
-      tone: 'blue',
     },
     {
-      label: 'แชร์เข้ากลุ่ม',
-      note: 'LINE หรือคัดลอก',
+      label: 'แชร์',
       icon: Share2,
       view: 'share' as AppView,
-      tone: 'line',
     },
   ];
   return (
@@ -277,23 +350,19 @@ function HomeScreen({
           </div>
         }
       />
-      <div className="space-y-5 px-4 py-4">
-        <section className="grid grid-cols-2 gap-3">
-          {actions.map(({ label, note, icon: Icon, view, tone }) => (
+      <div className="space-y-4 px-4 py-4">
+        <section className="grid grid-cols-3 gap-2">
+          {actions.map(({ label, icon: Icon, view }) => (
             <button
               key={label}
               onClick={() => onNavigate(view)}
-              className="action-card"
-              data-accent={tone}
+              className="flex min-h-16 items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm active:scale-[.98]"
             >
-              <span className="action-icon">
-                <Icon className="h-7 w-7" />
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]">
+                <Icon className="h-4 w-4" />
               </span>
-              <span>
-                <span className="block text-[15px] font-black">{label}</span>
-                <span className="mt-0.5 block text-[11px] font-semibold text-slate-400">
-                  {note}
-                </span>
+              <span className="min-w-0 flex-1 text-xs leading-4 font-black">
+                {label}
               </span>
             </button>
           ))}
@@ -305,7 +374,7 @@ function HomeScreen({
                 {current?.status === 'current' ? 'แข่งอยู่ตอนนี้' : 'เกมถัดไป'}
               </p>
               <p className="text-xs font-semibold text-slate-500">
-                แตะการ์ดเพื่อจัดการแมตช์
+                ใส่สกอร์และจบเกมได้จากหน้านี้
               </p>
             </div>
             {current && (
@@ -318,10 +387,13 @@ function HomeScreen({
             )}
           </div>
           {current ? (
-            <CurrentMatchHero
+            <CurrentMatchControl
+              key={current.id}
               tournament={tournament}
               match={current}
+              next={next}
               onOpen={() => onOpenMatch(current.id)}
+              onUpdate={onUpdate}
             />
           ) : (
             <div className="rounded-3xl bg-[#e5f5e9] p-8 text-center">
@@ -330,54 +402,62 @@ function HomeScreen({
             </div>
           )}
         </section>
-        {next && (
-          <section className="rounded-[22px] border border-slate-200 bg-white p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="font-black">แมตช์ถัดไป · {next.startTime}</p>
-              <span className="text-xs font-bold text-slate-400">
-                #{next.matchNumber}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <TeamBadge
-                team={tournament.teams.find(
-                  (team) => team.id === next.teamAId,
-                )!}
-                compact
-              />
-              <span className="text-xs font-black text-slate-400">VS</span>
-              <TeamBadge
-                team={tournament.teams.find(
-                  (team) => team.id === next.teamBId,
-                )!}
-                compact
-              />
-            </div>
-          </section>
-        )}
-        <section className="grid grid-cols-4 divide-x divide-slate-100 rounded-2xl border border-slate-200 bg-white py-3 text-center shadow-sm">
-          {[
-            [String(tournament.teams.length), 'ทีม'],
-            ['1', 'สนาม'],
-            [String(tournament.matches.length), 'แมตช์'],
-            [endTime, 'จบ'],
-          ].map(([value, label]) => (
-            <div key={label}>
-              <p className="font-black">{value}</p>
-              <p className="text-[11px] font-semibold text-slate-500">
-                {label}
+        <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
+          <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div>
+              <h2 className="font-black">ตารางคะแนน</h2>
+              <p className="text-xs font-bold text-slate-400">
+                แข่งแล้ว {finished}/{tournament.matches.length} · จบ {endTime}
               </p>
             </div>
-          ))}
+            <button
+              type="button"
+              onClick={() => onNavigate('standings')}
+              className="text-sm font-black text-[#087632]"
+            >
+              ดูผลทั้งหมด
+            </button>
+          </div>
+          <Table>
+            <TableHeader className="bg-slate-50">
+              <TableRow>
+                <TableHead className="w-10 text-center">#</TableHead>
+                <TableHead>ทีม</TableHead>
+                <TableHead className="w-14 text-center">แข่ง</TableHead>
+                <TableHead className="w-14 text-center">แต้ม</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {standings.map((standing, index) => {
+                const team = tournament.teams.find(
+                  (item) => item.id === standing.teamId,
+                )!;
+                return (
+                  <TableRow key={standing.teamId}>
+                    <TableCell className="text-center font-bold text-slate-400">
+                      {index + 1}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex min-w-0 items-center gap-2 font-black">
+                        <span
+                          className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                          style={{ background: COLOR_HEX[team.color] }}
+                        />
+                        <span className="truncate">{team.name}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-center font-bold">
+                      {standing.played}
+                    </TableCell>
+                    <TableCell className="text-center font-black text-[#087632]">
+                      {standing.points}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </section>
-        <Button
-          onClick={() => onNavigate('standings')}
-          variant="outline"
-          className="h-13 w-full rounded-2xl border-[#9dd2ab] font-black text-[#087632]"
-        >
-          <Trophy />
-          ดูตารางคะแนนและผลการแข่งขัน
-        </Button>
       </div>
     </>
   );
@@ -938,8 +1018,6 @@ function ScheduleScreen({
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
-  const [showAllUpcoming, setShowAllUpcoming] = useState(false);
-  const [showAllFinished, setShowAllFinished] = useState(false);
   const current = tournament.matches.find(
     (match) => match.status === 'current',
   );
@@ -949,8 +1027,11 @@ function ScheduleScreen({
   const finished = tournament.matches
     .filter((match) => match.status === 'finished')
     .reverse();
-  const visibleUpcoming = showAllUpcoming ? upcoming : upcoming.slice(0, 3);
-  const visibleFinished = showAllFinished ? finished : finished.slice(0, 3);
+  const orderedMatches = [
+    ...finished,
+    ...(current ? [current] : []),
+    ...upcoming,
+  ];
   return (
     <>
       <PageHeader
@@ -967,100 +1048,117 @@ function ScheduleScreen({
           </Button>
         }
       />
-      <div className="space-y-5 px-4 py-4 pb-6">
-        {finished.length > 0 && (
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-base font-black">แข่งแล้ว</h2>
-              <span className="text-sm font-bold text-slate-400">
-                {finished.length} เกม
-              </span>
-            </div>
-            <div className="space-y-2">
-              {visibleFinished.map((match) => (
-                <MatchCard
-                  key={match.id}
-                  match={match}
-                  teams={tournament.teams}
-                  onClick={() => onOpenMatch(match.id)}
-                  onFinish={() => onOpenMatch(match.id)}
-                />
-              ))}
-            </div>
-            {finished.length > 3 && (
-              <button
-                type="button"
-                onClick={() => setShowAllFinished((value) => !value)}
-                className="mt-2 h-11 w-full rounded-xl font-black text-[#087632]"
-              >
-                {showAllFinished
-                  ? 'ย่อผลการแข่งขัน'
-                  : `ดูผลย้อนหลังอีก ${finished.length - 3} เกม`}
-              </button>
-            )}
-          </section>
-        )}
-        {current && (
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-base font-black text-[#087632]">กำลังแข่ง</h2>
-              <span className="rounded-full bg-[#11823b] px-2.5 py-1 text-xs font-black text-white">
-                LIVE
-              </span>
-            </div>
-            <MatchCard
-              match={current}
-              teams={tournament.teams}
-              onClick={() => onOpenMatch(current.id)}
-              onFinish={() => onOpenMatch(current.id)}
-            />
-          </section>
-        )}
-        {upcoming.length > 0 && (
-          <section>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-base font-black">คิวถัดไป</h2>
-              <span className="text-sm font-bold text-slate-400">
-                {upcoming.length} เกม
-              </span>
-            </div>
-            <div className="space-y-2">
-              {visibleUpcoming.map((match) => (
-                <MatchCard
-                  key={match.id}
-                  match={match}
-                  teams={tournament.teams}
-                  onClick={() => onOpenMatch(match.id)}
-                  onFinish={() => onOpenMatch(match.id)}
-                />
-              ))}
-            </div>
-            {upcoming.length > 3 && (
-              <button
-                type="button"
-                onClick={() => setShowAllUpcoming((value) => !value)}
-                className="mt-2 h-11 w-full rounded-xl font-black text-[#087632]"
-              >
-                {showAllUpcoming
-                  ? 'ย่อรายการ'
-                  : `ดูคิวทั้งหมดอีก ${upcoming.length - 3} เกม`}
-              </button>
-            )}
-          </section>
-        )}
-        <section className="rounded-[22px] border border-dashed border-[#72bf88] bg-[#eef9f1] p-4 text-center">
-          <p className="font-black text-[#087632]">ยังเล่นต่อกันอยู่?</p>
-          <p className="mt-1 text-sm font-semibold text-slate-600">
-            เพิ่มแมตช์ถัดไปและขยายเวลาจบอีก {slotMinutes} นาที
-          </p>
-          <Button
-            onClick={() => onUpdate(extendTournamentByMatches(tournament, 1))}
-            className="mt-3 h-12 w-full rounded-xl bg-[#11823b] font-black"
-          >
-            <Plus />
-            เล่นต่ออีก 1 เกม
-          </Button>
+      <div className="space-y-3 px-4 py-4 pb-6">
+        <section className="overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-sm">
+          <Table>
+            <TableHeader className="bg-slate-50">
+              <TableRow>
+                <TableHead className="w-[58px] px-3">เวลา</TableHead>
+                <TableHead>คู่แข่งขัน</TableHead>
+                <TableHead className="w-[76px] pr-3 text-right">
+                  ผล
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {orderedMatches.map((match) => {
+                const teamA = tournament.teams.find(
+                  (team) => team.id === match.teamAId,
+                )!;
+                const teamB = tournament.teams.find(
+                  (team) => team.id === match.teamBId,
+                )!;
+                const hasScore =
+                  match.teamAScore !== undefined &&
+                  match.teamBScore !== undefined;
+                return (
+                  <TableRow
+                    key={match.id}
+                    className={
+                      match.status === 'current'
+                        ? 'bg-[#eef9f1]'
+                        : match.status === 'finished'
+                          ? 'bg-slate-50/60'
+                          : ''
+                    }
+                  >
+                    <TableCell className="px-3 py-3 align-middle font-black tabular-nums">
+                      {match.startTime}
+                    </TableCell>
+                    <TableCell className="p-0 align-middle">
+                      <button
+                        type="button"
+                        onClick={() => onOpenMatch(match.id)}
+                        aria-label={`เปิดเกม ${match.matchNumber}: ${teamA.name} พบ ${teamB.name}`}
+                        className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)] items-center gap-1 px-2 text-left"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                            style={{ background: COLOR_HEX[teamA.color] }}
+                          />
+                          <span className="truncate text-sm font-black">
+                            {teamA.name}
+                          </span>
+                        </span>
+                        <span className="text-center text-xs font-bold text-slate-400">
+                          vs
+                        </span>
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                            style={{ background: COLOR_HEX[teamB.color] }}
+                          />
+                          <span className="truncate text-sm font-black">
+                            {teamB.name}
+                          </span>
+                        </span>
+                      </button>
+                    </TableCell>
+                    <TableCell className="pr-2 text-right align-middle">
+                      <button
+                        type="button"
+                        onClick={() => onOpenMatch(match.id)}
+                        aria-label={`ดูรายละเอียดเกม ${match.matchNumber}`}
+                        className="inline-flex min-h-10 items-center justify-end gap-1"
+                      >
+                        {hasScore ? (
+                          <span className="font-black tabular-nums text-[#087632]">
+                            {match.teamAScore}-{match.teamBScore}
+                          </span>
+                        ) : (
+                          <span
+                            className={`rounded-full px-2 py-1 text-xs font-black ${
+                              match.status === 'current'
+                                ? 'bg-[#11823b] text-white'
+                                : 'bg-slate-100 text-slate-500'
+                            }`}
+                          >
+                            {match.status === 'current'
+                              ? 'LIVE'
+                              : match.status === 'finished'
+                                ? 'จบ'
+                                : 'รอ'}
+                          </span>
+                        )}
+                        <ChevronRight className="h-4 w-4 text-slate-300" />
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </section>
+        <Button
+          onClick={() => onUpdate(extendTournamentByMatches(tournament, 1))}
+          variant="outline"
+          className="h-11 w-full rounded-xl border-[#9dd2ab] font-black text-[#087632]"
+        >
+          <Plus />
+          เล่นต่ออีก 1 เกม
+          <span className="font-bold text-slate-400">(+{slotMinutes} นาที)</span>
+        </Button>
       </div>
     </>
   );
@@ -1694,6 +1792,7 @@ export default function FootballApp() {
               tournament={tournament}
               onNavigate={setView}
               onOpenMatch={openMatch}
+              onUpdate={setTournament}
             />
           )}
           {tournament && view === 'teams' && (

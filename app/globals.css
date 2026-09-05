@@ -23,13 +23,6 @@ button:disabled { cursor: not-allowed; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .setting-row + .setting-row { border-top: 1px solid #edf0ee; padding-top: 16px; }
 
-.action-card { display: flex; min-height: 116px; flex-direction: column; align-items: flex-start; justify-content: space-between; border: 1px solid #dce3de; border-radius: 22px; background: white; padding: 16px; text-align: left; box-shadow: 0 4px 14px rgba(16,65,35,.04); transition: transform .15s ease, box-shadow .15s ease; }
-.action-card:active { transform: scale(.98); }
-.action-icon { display: grid; height: 46px; width: 46px; place-items: center; border-radius: 15px; }
-.action-card[data-accent="green"] .action-icon { background: #dcf3e2; color: #087b34; }
-.action-card[data-accent="violet"] .action-icon { background: #eee7ff; color: #7048ca; }
-.action-card[data-accent="blue"] .action-icon { background: #e2ecff; color: #225fc5; }
-.action-card[data-accent="line"] .action-icon { background: #e1f7dc; color: #17a43b; }
 .nav-item { display: flex; min-height: 52px; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-radius: 14px; color: #7a8580; font-size: 10px; font-weight: 700; }
 .nav-item.is-active { color: #0c7c36; background: #ebf7ee; }
 
