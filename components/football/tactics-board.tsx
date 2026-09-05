@@ -3,6 +3,7 @@
 import { RotateCcw } from 'lucide-react';
 import {
   useRef,
+  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
@@ -88,6 +89,11 @@ export function TacticsScreen({
   onUpdate: (value: Tournament) => void;
 }) {
   const pitchRef = useRef<HTMLDivElement>(null);
+  const [dragPreview, setDragPreview] = useState<{
+    markerId: string;
+    x: number;
+    y: number;
+  } | null>(null);
   const storedBoard = tournament.tactics;
   const hasValidTeams =
     storedBoard &&
@@ -124,19 +130,22 @@ export function TacticsScreen({
     });
   }
 
-  function moveFromPointer(
+  function positionFromPointer(
     event: ReactPointerEvent<HTMLButtonElement>,
-    markerId: string,
   ) {
     const pitch = pitchRef.current;
-    if (!pitch || !event.currentTarget.hasPointerCapture(event.pointerId))
-      return;
+    if (!pitch) return null;
     const bounds = pitch.getBoundingClientRect();
-    moveMarker(
-      markerId,
-      ((event.clientX - bounds.left) / bounds.width) * 100,
-      ((event.clientY - bounds.top) / bounds.height) * 100,
-    );
+    return {
+      x: Math.min(
+        95,
+        Math.max(5, ((event.clientX - bounds.left) / bounds.width) * 100),
+      ),
+      y: Math.min(
+        97,
+        Math.max(3, ((event.clientY - bounds.top) / bounds.height) * 100),
+      ),
+    };
   }
 
   function moveFromKeyboard(
@@ -222,7 +231,7 @@ export function TacticsScreen({
         <section
           ref={pitchRef}
           aria-label={`กระดานแท็กติก ${teamA?.name ?? ''} พบ ${teamB?.name ?? ''}`}
-          className="relative h-[540px] touch-none overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none"
+          className="relative h-[540px] touch-pan-y overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none"
         >
           <div className="pointer-events-none absolute inset-3 border-2 border-white/80" />
           <div className="pointer-events-none absolute inset-x-3 top-1/2 border-t-2 border-white/80" />
@@ -239,25 +248,61 @@ export function TacticsScreen({
             );
             const label = markerLabel(marker, tournament);
             const isBall = marker.kind === 'ball';
+            const preview =
+              dragPreview?.markerId === marker.id ? dragPreview : marker;
             return (
               <button
                 key={marker.id}
                 type="button"
                 aria-label={`ย้าย ${label}`}
+                draggable={false}
                 onPointerDown={(event) => {
                   event.preventDefault();
+                  event.stopPropagation();
                   event.currentTarget.setPointerCapture(event.pointerId);
+                  setDragPreview({
+                    markerId: marker.id,
+                    x: marker.x,
+                    y: marker.y,
+                  });
                 }}
-                onPointerMove={(event) => moveFromPointer(event, marker.id)}
-                onPointerUp={(event) =>
-                  event.currentTarget.releasePointerCapture(event.pointerId)
-                }
+                onPointerMove={(event) => {
+                  if (!event.currentTarget.hasPointerCapture(event.pointerId))
+                    return;
+                  event.preventDefault();
+                  const position = positionFromPointer(event);
+                  if (position)
+                    setDragPreview({ markerId: marker.id, ...position });
+                }}
+                onPointerUp={(event) => {
+                  if (!event.currentTarget.hasPointerCapture(event.pointerId))
+                    return;
+                  event.preventDefault();
+                  const position = positionFromPointer(event);
+                  const finalPosition =
+                    position ??
+                    (dragPreview?.markerId === marker.id
+                      ? dragPreview
+                      : marker);
+                  moveMarker(marker.id, finalPosition.x, finalPosition.y);
+                  setDragPreview(null);
+                  event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onPointerCancel={(event) => {
+                  if (dragPreview?.markerId === marker.id)
+                    moveMarker(marker.id, dragPreview.x, dragPreview.y);
+                  setDragPreview(null);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId))
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onLostPointerCapture={() => setDragPreview(null)}
+                onDragStart={(event) => event.preventDefault()}
                 onKeyDown={(event) => moveFromKeyboard(event, marker)}
-                className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none focus-visible:ring-4 focus-visible:ring-white/80"
-                style={{ left: `${marker.x}%`, top: `${marker.y}%` }}
+                className="absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 cursor-grab flex-col items-center outline-none will-change-transform active:cursor-grabbing focus-visible:ring-4 focus-visible:ring-white/80"
+                style={{ left: `${preview.x}%`, top: `${preview.y}%` }}
               >
                 <span
-                  className={`grid place-items-center rounded-full border-[3px] border-white font-black shadow-lg ${isBall ? 'h-9 w-9 bg-white text-lg' : 'h-10 w-10 text-sm'}`}
+                  className={`grid place-items-center rounded-full border-white font-black shadow-lg ${isBall ? 'h-7 w-7 border-2 bg-white text-sm' : 'h-10 w-10 border-[3px] text-sm'}`}
                   style={
                     isBall
                       ? undefined
