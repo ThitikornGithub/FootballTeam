@@ -56,6 +56,7 @@ import {
   extendTournamentToEndTime,
   finishMatchWithScore,
   minutesBetween,
+  prioritizeUpcomingMatches,
   reopenFinishedMatch,
   reorder,
   scheduleMetrics,
@@ -1836,6 +1837,64 @@ function GamesScreen({
   );
 }
 
+function SettingsPairPicker({
+  label,
+  teams,
+  teamAId,
+  teamBId,
+  onTeamAChange,
+  onTeamBChange,
+  disabled = false,
+}: {
+  label: string;
+  teams: Team[];
+  teamAId: string;
+  teamBId: string;
+  onTeamAChange: (teamId: string) => void;
+  onTeamBChange: (teamId: string) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <fieldset disabled={disabled} className="rounded-2xl bg-slate-50 p-3">
+      <legend className="px-1 text-sm font-black text-slate-700">{label}</legend>
+      <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+        <select
+          aria-label={`${label} ทีมแรก`}
+          value={teamAId}
+          onChange={(event) => {
+            const nextId = event.target.value;
+            onTeamAChange(nextId);
+            if (nextId === teamBId) {
+              const replacement = teams.find((team) => team.id !== nextId);
+              if (replacement) onTeamBChange(replacement.id);
+            }
+          }}
+          className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f] disabled:opacity-50"
+        >
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {COLOR_LABEL[team.color]} · {team.name}
+            </option>
+          ))}
+        </select>
+        <span className="text-xs font-black text-slate-400">VS</span>
+        <select
+          aria-label={`${label} ทีมที่สอง`}
+          value={teamBId}
+          onChange={(event) => onTeamBChange(event.target.value)}
+          className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f] disabled:opacity-50"
+        >
+          {teams.map((team) => (
+            <option key={team.id} value={team.id} disabled={team.id === teamAId}>
+              {COLOR_LABEL[team.color]} · {team.name}
+            </option>
+          ))}
+        </select>
+      </div>
+    </fieldset>
+  );
+}
+
 function SettingsScreen({
   tournament,
   gameId,
@@ -1869,6 +1928,28 @@ function SettingsScreen({
   const [endTime, setEndTime] = useState(
     addMinutes(tournament.startTime, tournament.availableTimeMinutes),
   );
+  const editableMatches = tournament.matches.filter(
+    (match) => match.status !== 'finished',
+  );
+  const firstQueuedMatch = editableMatches[0];
+  const secondQueuedMatch = editableMatches[1];
+  const fallbackTeamA = tournament.teams[0]?.id ?? '';
+  const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
+  const [firstPairA, setFirstPairA] = useState(
+    firstQueuedMatch?.teamAId ?? fallbackTeamA,
+  );
+  const [firstPairB, setFirstPairB] = useState(
+    firstQueuedMatch?.teamBId ?? fallbackTeamB,
+  );
+  const [secondPairA, setSecondPairA] = useState(
+    secondQueuedMatch?.teamAId ?? fallbackTeamA,
+  );
+  const [secondPairB, setSecondPairB] = useState(
+    secondQueuedMatch?.teamBId ?? fallbackTeamB,
+  );
+  const [useSecondPair, setUseSecondPair] = useState(
+    Boolean(secondQueuedMatch),
+  );
   const availableMinutes = minutesBetween(startTime, endTime);
   const windowMetrics = scheduleWindowMetrics(
     matchMinutes,
@@ -1882,19 +1963,45 @@ function SettingsScreen({
     0,
   );
   const resultingCount = Math.max(windowMetrics.matchCount, protectedCount);
+  const finishedCount = tournament.matches.filter(
+    (match) => match.status === 'finished',
+  ).length;
+  const remainingAfterSave = Math.max(0, resultingCount - finishedCount);
+  const samePairTwice =
+    useSecondPair &&
+    ((firstPairA === secondPairA && firstPairB === secondPairB) ||
+      (firstPairA === secondPairB && firstPairB === secondPairA));
+  const pairSelectionValid =
+    remainingAfterSave === 0 ||
+    (firstPairA !== firstPairB &&
+      (!useSecondPair ||
+        (remainingAfterSave >= 2 &&
+          secondPairA !== secondPairB &&
+          !samePairTwice)));
   const valid =
-    Boolean(name.trim()) && availableMinutes > 0 && resultingCount > 0;
+    Boolean(name.trim()) &&
+    availableMinutes > 0 &&
+    resultingCount > 0 &&
+    pairSelectionValid;
 
   function saveSettings() {
     if (!valid) return;
+    const updated = updateTournamentSettings(tournament, {
+      name: name.trim(),
+      matchDurationMinutes: matchMinutes,
+      breakDurationMinutes: breakMinutes,
+      startTime,
+      availableTimeMinutes: availableMinutes,
+    });
+    const preferredPairs: Array<[string, string]> = [
+      [firstPairA, firstPairB],
+    ];
+    if (useSecondPair)
+      preferredPairs.push([secondPairA, secondPairB]);
     onSave(
-      updateTournamentSettings(tournament, {
-        name: name.trim(),
-        matchDurationMinutes: matchMinutes,
-        breakDurationMinutes: breakMinutes,
-        startTime,
-        availableTimeMinutes: availableMinutes,
-      }),
+      remainingAfterSave > 0
+        ? prioritizeUpcomingMatches(updated, preferredPairs)
+        : updated,
     );
   }
 
@@ -1965,6 +2072,64 @@ function SettingsScreen({
               onChange={(event) => setEndTime(event.target.value)}
               className="h-12 rounded-xl border border-slate-200 bg-white px-3 text-base font-black"
             />
+          </div>
+          <div className="space-y-3 border-t border-slate-100 pt-4">
+            <div>
+              <h2 className="section-title">
+                {finishedCount > 0 ? 'กำหนดคู่ถัดไป' : 'กำหนดคู่เริ่มต้น'}
+              </h2>
+              <p className="section-note">
+                {finishedCount > 0
+                  ? 'เรียงเฉพาะเกมที่ยังไม่จบ ผลการแข่งขันเดิมจะไม่ถูกย้าย'
+                  : 'เลือกได้ 1 หรือ 2 คู่ เผื่อบางทีมยังมาไม่ครบ'}
+              </p>
+            </div>
+            {remainingAfterSave > 0 ? (
+              <>
+                <SettingsPairPicker
+                  label={finishedCount > 0 ? 'คู่ถัดไป' : 'คู่แรก'}
+                  teams={tournament.teams}
+                  teamAId={firstPairA}
+                  teamBId={firstPairB}
+                  onTeamAChange={setFirstPairA}
+                  onTeamBChange={setFirstPairB}
+                />
+                <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl px-1 text-sm font-black">
+                  <span>กำหนดคู่ที่ 2 ด้วย</span>
+                  <input
+                    type="checkbox"
+                    checked={useSecondPair}
+                    onChange={(event) => setUseSecondPair(event.target.checked)}
+                    disabled={remainingAfterSave < 2}
+                    className="h-5 w-5 accent-[#11823b]"
+                  />
+                </label>
+                {useSecondPair && (
+                  <SettingsPairPicker
+                    label={finishedCount > 0 ? 'คู่ต่อจากนั้น' : 'คู่ที่ 2'}
+                    teams={tournament.teams}
+                    teamAId={secondPairA}
+                    teamBId={secondPairB}
+                    onTeamAChange={setSecondPairA}
+                    onTeamBChange={setSecondPairB}
+                  />
+                )}
+                {useSecondPair && remainingAfterSave < 2 && (
+                  <p className="text-sm font-bold text-amber-700">
+                    เวลาที่ตั้งไว้เหลือเพียง 1 แมตช์ กรุณาปิดคู่ที่ 2 หรือเพิ่มเวลาจบ
+                  </p>
+                )}
+                {samePairTwice && (
+                  <p className="text-sm font-bold text-amber-700">
+                    คู่แรกและคู่ที่ 2 ต้องไม่เป็นคู่เดียวกัน
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="rounded-xl bg-slate-50 p-3 text-sm font-bold text-slate-500">
+                ไม่มีแมตช์ที่ยังไม่จบให้จัดลำดับ
+              </p>
+            )}
           </div>
           <div
             className={`rounded-2xl p-3 text-sm font-bold ${valid ? 'bg-[#eef9f1] text-[#087632]' : 'bg-amber-50 text-amber-700'}`}

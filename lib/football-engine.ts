@@ -376,6 +376,72 @@ export function updateTournamentSettings(
   });
 }
 
+export function prioritizeUpcomingMatches(
+  tournament: Tournament,
+  preferredPairs: Array<[string, string]>,
+): Tournament {
+  if (!preferredPairs.length) return tournament;
+  const editableMatches = tournament.matches.filter(
+    (match) => match.status !== 'finished',
+  );
+  if (!editableMatches.length) return tournament;
+
+  const remaining = editableMatches.map((match) => ({ ...match }));
+  const prioritized: Match[] = [];
+  for (const [teamAId, teamBId] of preferredPairs) {
+    const matchIndex = remaining.findIndex(
+      (match) =>
+        (match.teamAId === teamAId && match.teamBId === teamBId) ||
+        (match.teamAId === teamBId && match.teamBId === teamAId),
+    );
+    const [match] = remaining.splice(matchIndex >= 0 ? matchIndex : 0, 1);
+    if (!match) continue;
+    const reversed =
+      match.teamAId === teamBId && match.teamBId === teamAId;
+    prioritized.push({
+      ...match,
+      teamAId,
+      teamBId,
+      teamAScore:
+        matchIndex < 0
+          ? undefined
+          : reversed
+            ? match.teamBScore
+            : match.teamAScore,
+      teamBScore:
+        matchIndex < 0
+          ? undefined
+          : reversed
+            ? match.teamAScore
+            : match.teamBScore,
+      teamAGkPlayerId: undefined,
+      teamBGkPlayerId: undefined,
+    });
+  }
+
+  if (!prioritized.length) return tournament;
+  const orderedEditable = [...prioritized, ...remaining];
+  const slotMinutes =
+    tournament.matchDurationMinutes + tournament.breakDurationMinutes;
+  let editableIndex = 0;
+  const matches = tournament.matches.map((match, index) => {
+    const scheduled = {
+      matchNumber: index + 1,
+      startTime: addMinutes(tournament.startTime, index * slotMinutes),
+    };
+    if (match.status === 'finished') return { ...match, ...scheduled };
+    const next = orderedEditable[editableIndex];
+    editableIndex += 1;
+    return {
+      ...next,
+      ...scheduled,
+      status: editableIndex === 1 ? ('current' as const) : ('upcoming' as const),
+    };
+  });
+
+  return assignGoalkeepers({ ...tournament, matches });
+}
+
 export function extendTournamentToEndTime(tournament: Tournament): Tournament {
   const windowMetrics = scheduleWindowMetrics(
     tournament.matchDurationMinutes,
