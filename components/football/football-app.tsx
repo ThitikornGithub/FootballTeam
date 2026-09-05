@@ -10,6 +10,7 @@ import {
   CircleAlert,
   CircleCheck,
   Copy,
+  Download,
   GripVertical,
   Minus,
   Plus,
@@ -53,7 +54,6 @@ import {
   extendTournamentToEndTime,
   finishMatchWithScore,
   minutesBetween,
-  playerFor,
   reopenFinishedMatch,
   reorder,
   scheduleMetrics,
@@ -69,6 +69,13 @@ import {
   type TeamColor,
   type Tournament,
 } from '@/lib/football-types';
+import {
+  canvasToPngBlob,
+  downloadShareCard,
+  renderStandingsShareCard,
+  scheduledEndTime,
+  shareCardFilename,
+} from '@/lib/standings-share-card';
 
 const STORAGE_KEY = 'football-match-maker-v1';
 type AppView =
@@ -80,23 +87,26 @@ type AppView =
   | 'share';
 
 function formatShareText(tournament: Tournament) {
-  const lines = [`⚽ FOOTBALL TODAY — ${tournament.name}`, ''];
-  for (const match of tournament.matches) {
-    const teamA = tournament.teams.find((team) => team.id === match.teamAId);
-    const teamB = tournament.teams.find((team) => team.id === match.teamBId);
-    if (!teamA || !teamB) continue;
-    const gkA = playerFor(teamA, match.teamAGkPlayerId)?.name ?? '-';
-    const gkB = playerFor(teamB, match.teamBGkPlayerId)?.name ?? '-';
-    const score =
-      match.teamAScore !== undefined && match.teamBScore !== undefined
-        ? `  [${match.teamAScore}-${match.teamBScore}]`
-        : '';
+  const standings = calculateStandings(tournament);
+  const finishedCount = tournament.matches.filter(
+    (match) => match.status === 'finished',
+  ).length;
+  const lines = [
+    `⚽ ${tournament.name}`,
+    `ตารางคะแนนล่าสุด · แข่งแล้ว ${finishedCount}/${tournament.matches.length} แมตช์`,
+    '',
+  ];
+  standings.forEach((standing, index) => {
+    const team = tournament.teams.find((item) => item.id === standing.teamId);
+    if (!team) return;
     lines.push(
-      `${match.startTime}  ${teamA.name} vs ${teamB.name}${score}`,
-      `GK: ${gkA} / ${gkB}`,
-      '',
+      `${index + 1}. ${team.name} — ${standing.points} แต้ม (${standing.played} นัด, +/- ${standing.goalDifference > 0 ? '+' : ''}${standing.goalDifference})`,
     );
-  }
+  });
+  lines.push(
+    '',
+    `เวลาตามตาราง ${tournament.startTime}–${scheduledEndTime(tournament)}`,
+  );
   return lines.join('\n').trim();
 }
 
@@ -238,13 +248,10 @@ function CurrentMatchControl({
         </Button>
       </div>
       {next && (
-        <div
-          className="mt-3 flex w-full items-center justify-between border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500"
-        >
+        <div className="mt-3 flex w-full items-center justify-between border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500">
           <span>เกมถัดไป {next.startTime}</span>
           <span className="text-slate-800">
-            {tournament.teams.find((team) => team.id === next.teamAId)?.name}{' '}
-            vs{' '}
+            {tournament.teams.find((team) => team.id === next.teamAId)?.name} vs{' '}
             {tournament.teams.find((team) => team.id === next.teamBId)?.name}
           </span>
         </div>
@@ -477,9 +484,7 @@ function SetupScreen({
   onCreate: (value: Tournament) => void;
 }) {
   const defaultNames = ['Green', 'Red', 'Blue', 'Yellow', 'White', 'Black'];
-  const [gameName, setGameName] = useState(
-    tournament?.name ?? 'ฟุตบอลคืนนี้',
-  );
+  const [gameName, setGameName] = useState(tournament?.name ?? 'ฟุตบอลคืนนี้');
   const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 4);
   const [drafts, setDrafts] = useState(() =>
     Array.from({ length: 8 }, (_, i) => ({
@@ -792,9 +797,7 @@ function TeamDetailScreen({
 }) {
   const [newName, setNewName] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const eligiblePlayers = team.players.filter(
-    (player) => !player.absentToday,
-  );
+  const eligiblePlayers = team.players.filter((player) => !player.absentToday);
   const gkOrder = [
     ...team.gkRotation.filter((id) =>
       eligiblePlayers.some((player) => player.id === id),
@@ -1018,7 +1021,7 @@ function ScheduleScreen({
 }) {
   const slotMinutes =
     tournament.matchDurationMinutes + tournament.breakDurationMinutes;
-  const endTime = addMinutes(
+  const fieldEndTime = addMinutes(
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
@@ -1031,16 +1034,28 @@ function ScheduleScreen({
   const finished = tournament.matches
     .filter((match) => match.status === 'finished')
     .reverse();
-  const orderedMatches = [
-    ...finished,
-    ...(current ? [current] : []),
-    ...upcoming,
-  ];
+  const groups = [
+    {
+      label: 'แข่งแล้ว · ล่าสุดก่อน',
+      matches: finished,
+      tone: 'finished' as const,
+    },
+    {
+      label: 'กำลังแข่ง',
+      matches: current ? [current] : [],
+      tone: 'current' as const,
+    },
+    {
+      label: 'เกมถัดไป',
+      matches: upcoming,
+      tone: 'upcoming' as const,
+    },
+  ].filter((group) => group.matches.length > 0);
   return (
     <>
       <PageHeader
         title="ตารางการแข่งขัน"
-        eyebrow={`${tournament.matches.length} แมตช์ · ถึง ${endTime}`}
+        eyebrow={`${tournament.matches.length} แมตช์ · เวลาสนาม ${tournament.startTime}–${fieldEndTime}`}
         action={
           <Button
             onClick={onStandings}
@@ -1057,100 +1072,124 @@ function ScheduleScreen({
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableHead className="w-[58px] px-3">เวลา</TableHead>
+                <TableHead className="w-[88px] px-3">ช่วงเวลา</TableHead>
                 <TableHead>คู่แข่งขัน</TableHead>
-                <TableHead className="w-[76px] pr-3 text-right">
-                  ผล
-                </TableHead>
+                <TableHead className="w-[76px] pr-3 text-right">ผล</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {orderedMatches.map((match) => {
-                const teamA = tournament.teams.find(
-                  (team) => team.id === match.teamAId,
-                )!;
-                const teamB = tournament.teams.find(
-                  (team) => team.id === match.teamBId,
-                )!;
-                const hasScore =
-                  match.teamAScore !== undefined &&
-                  match.teamBScore !== undefined;
-                return (
-                  <TableRow
-                    key={match.id}
-                    className={
-                      match.status === 'current'
-                        ? 'bg-[#eef9f1]'
-                        : match.status === 'finished'
-                          ? 'bg-slate-50/60'
-                          : ''
-                    }
+              {groups.flatMap((group) => [
+                <TableRow
+                  key={`group-${group.tone}`}
+                  className="border-0 bg-slate-100/80 hover:bg-slate-100/80"
+                >
+                  <TableCell
+                    colSpan={3}
+                    className={`px-3 py-2 text-[11px] font-black uppercase tracking-wide ${
+                      group.tone === 'current'
+                        ? 'text-[#087632]'
+                        : 'text-slate-500'
+                    }`}
                   >
-                    <TableCell className="px-3 py-3 align-middle font-black tabular-nums">
-                      {match.startTime}
-                    </TableCell>
-                    <TableCell className="p-0 align-middle">
-                      <button
-                        type="button"
-                        onClick={() => onOpenMatch(match.id)}
-                        aria-label={`เปิดเกม ${match.matchNumber}: ${teamA.name} พบ ${teamB.name}`}
-                        className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)] items-center gap-1 px-2 text-left"
-                      >
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span
-                            className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-                            style={{ background: COLOR_HEX[teamA.color] }}
-                          />
-                          <span className="truncate text-sm font-black">
-                            {teamA.name}
-                          </span>
+                    {group.label}
+                  </TableCell>
+                </TableRow>,
+                ...group.matches.map((match) => {
+                  const teamA = tournament.teams.find(
+                    (team) => team.id === match.teamAId,
+                  )!;
+                  const teamB = tournament.teams.find(
+                    (team) => team.id === match.teamBId,
+                  )!;
+                  const hasScore =
+                    match.teamAScore !== undefined &&
+                    match.teamBScore !== undefined;
+                  return (
+                    <TableRow
+                      key={match.id}
+                      className={
+                        match.status === 'current'
+                          ? 'bg-[#eef9f1]'
+                          : match.status === 'finished'
+                            ? 'bg-slate-50/60'
+                            : ''
+                      }
+                    >
+                      <TableCell className="px-3 py-3 align-middle font-black tabular-nums">
+                        <span className="block leading-4">
+                          {match.startTime}
                         </span>
-                        <span className="text-center text-xs font-bold text-slate-400">
-                          vs
+                        <span className="block text-[11px] font-bold text-slate-400">
+                          –
+                          {addMinutes(
+                            match.startTime,
+                            tournament.matchDurationMinutes,
+                          )}
                         </span>
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span
-                            className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-                            style={{ background: COLOR_HEX[teamB.color] }}
-                          />
-                          <span className="truncate text-sm font-black">
-                            {teamB.name}
+                      </TableCell>
+                      <TableCell className="p-0 align-middle">
+                        <button
+                          type="button"
+                          onClick={() => onOpenMatch(match.id)}
+                          aria-label={`เปิดเกม ${match.matchNumber}: ${teamA.name} พบ ${teamB.name}`}
+                          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)] items-center gap-1 px-2 text-left"
+                        >
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                              style={{ background: COLOR_HEX[teamA.color] }}
+                            />
+                            <span className="truncate text-sm font-black">
+                              {teamA.name}
+                            </span>
                           </span>
-                        </span>
-                      </button>
-                    </TableCell>
-                    <TableCell className="pr-2 text-right align-middle">
-                      <button
-                        type="button"
-                        onClick={() => onOpenMatch(match.id)}
-                        aria-label={`ดูรายละเอียดเกม ${match.matchNumber}`}
-                        className="inline-flex min-h-10 items-center justify-end gap-1"
-                      >
-                        {hasScore ? (
-                          <span className="font-black tabular-nums text-[#087632]">
-                            {match.teamAScore}-{match.teamBScore}
+                          <span className="text-center text-xs font-bold text-slate-400">
+                            vs
                           </span>
-                        ) : (
-                          <span
-                            className={`rounded-full px-2 py-1 text-xs font-black ${
-                              match.status === 'current'
-                                ? 'bg-[#11823b] text-white'
-                                : 'bg-slate-100 text-slate-500'
-                            }`}
-                          >
-                            {match.status === 'current'
-                              ? 'LIVE'
-                              : match.status === 'finished'
-                                ? 'จบ'
-                                : 'รอ'}
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                              style={{ background: COLOR_HEX[teamB.color] }}
+                            />
+                            <span className="truncate text-sm font-black">
+                              {teamB.name}
+                            </span>
                           </span>
-                        )}
-                        <ChevronRight className="h-4 w-4 text-slate-300" />
-                      </button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                        </button>
+                      </TableCell>
+                      <TableCell className="pr-2 text-right align-middle">
+                        <button
+                          type="button"
+                          onClick={() => onOpenMatch(match.id)}
+                          aria-label={`ดูรายละเอียดเกม ${match.matchNumber}`}
+                          className="inline-flex min-h-10 items-center justify-end gap-1"
+                        >
+                          {hasScore ? (
+                            <span className="font-black tabular-nums text-[#087632]">
+                              {match.teamAScore}-{match.teamBScore}
+                            </span>
+                          ) : (
+                            <span
+                              className={`rounded-full px-2 py-1 text-xs font-black ${
+                                match.status === 'current'
+                                  ? 'bg-[#11823b] text-white'
+                                  : 'bg-slate-100 text-slate-500'
+                              }`}
+                            >
+                              {match.status === 'current'
+                                ? 'LIVE'
+                                : match.status === 'finished'
+                                  ? 'จบ'
+                                  : 'รอ'}
+                            </span>
+                          )}
+                          <ChevronRight className="h-4 w-4 text-slate-300" />
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                }),
+              ])}
             </TableBody>
           </Table>
         </section>
@@ -1252,7 +1291,7 @@ function MatchDetailScreen({
     <>
       <PageHeader
         title={`Match ${match.matchNumber}`}
-        eyebrow={`สนาม 1 · ${match.startTime}`}
+        eyebrow={`สนาม 1 · ${match.startTime}–${addMinutes(match.startTime, tournament.matchDurationMinutes)}`}
         onBack={onBack}
       />
       <div className="space-y-4 px-4 py-4 pb-8">
@@ -1365,82 +1404,117 @@ function ShareScreen({
   onBack: () => void;
   onNotice: (message: string) => void;
 }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isSharing, setIsSharing] = useState(false);
   const text = formatShareText(tournament);
-  async function copy() {
-    await navigator.clipboard.writeText(text);
-    onNotice('คัดลอกตารางแล้ว');
-  }
-  async function share() {
-    if (navigator.share) {
-      try {
-        await navigator.share({ title: 'Football Today', text });
-        return;
-      } catch {
-        return;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function draw() {
+      await document.fonts?.ready;
+      if (!cancelled && canvasRef.current) {
+        renderStandingsShareCard(canvasRef.current, tournament);
       }
     }
-    await copy();
+    void draw();
+    return () => {
+      cancelled = true;
+    };
+  }, [tournament]);
+
+  async function makeBlob() {
+    if (!canvasRef.current) throw new Error('ยังสร้างรูปไม่เสร็จ');
+    renderStandingsShareCard(canvasRef.current, tournament);
+    return canvasToPngBlob(canvasRef.current);
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      onNotice('คัดลอกสรุปตารางคะแนนแล้ว');
+    } catch {
+      onNotice('คัดลอกไม่สำเร็จ ลองแชร์หรือดาวน์โหลดรูปแทน');
+    }
+  }
+
+  async function download() {
+    try {
+      const blob = await makeBlob();
+      downloadShareCard(blob, shareCardFilename(tournament));
+      onNotice('ดาวน์โหลดรูปตารางคะแนนแล้ว');
+    } catch {
+      onNotice('สร้างรูปไม่สำเร็จ กรุณาลองใหม่');
+    }
+  }
+
+  async function share() {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const blob = await makeBlob();
+      const file = new File([blob], shareCardFilename(tournament), {
+        type: 'image/png',
+      });
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: tournament.name,
+          text: `ตารางคะแนนล่าสุด · ${tournament.name}`,
+          files: [file],
+        });
+      } else {
+        downloadShareCard(blob, file.name);
+        onNotice('อุปกรณ์นี้แชร์ไฟล์ตรงไม่ได้ จึงดาวน์โหลดรูปให้แล้ว');
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      onNotice('แชร์รูปไม่สำเร็จ กรุณาลองดาวน์โหลดรูปแทน');
+    } finally {
+      setIsSharing(false);
+    }
   }
   return (
     <>
-      <PageHeader title="แชร์เข้ากลุ่ม" eyebrow="Football Today" onBack={onBack} />
+      <PageHeader
+        title="แชร์ตารางคะแนน"
+        eyebrow="รูปพร้อมส่งให้เพื่อน"
+        onBack={onBack}
+      />
       <div className="space-y-4 px-4 py-4 pb-8">
-        <section className="rounded-[26px] border border-slate-200 bg-white p-5">
-          <div className="mb-5 flex items-center gap-3">
-            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#e5f5e9] text-[#11823b]">
-              <Trophy />
-            </div>
-            <div>
-              <h2 className="text-lg font-black">⚽ FOOTBALL TODAY</h2>
-              <p className="text-sm font-bold text-slate-500">
-                {tournament.name}
-              </p>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {tournament.matches.map((match) => {
-              const teamA = tournament.teams.find(
-                (team) => team.id === match.teamAId,
-              )!;
-              const teamB = tournament.teams.find(
-                (team) => team.id === match.teamBId,
-              )!;
-              return (
-                <div key={match.id} className="rounded-2xl bg-slate-50 p-3">
-                  <div className="grid grid-cols-[48px_1fr_24px_1fr] items-center gap-2">
-                    <span className="text-sm font-black tabular-nums">
-                      {match.startTime}
-                    </span>
-                    <span className="truncate font-black">{teamA.name}</span>
-                    <span className="text-center text-[10px] font-bold text-slate-400">
-                      VS
-                    </span>
-                    <span className="truncate font-black">{teamB.name}</span>
-                  </div>
-                  <p className="mt-1 pl-14 text-[11px] font-bold text-slate-500">
-                    GK: {playerFor(teamA, match.teamAGkPlayerId)?.name ?? '-'} /{' '}
-                    {playerFor(teamB, match.teamBGkPlayerId)?.name ?? '-'}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
+        <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2 shadow-sm">
+          <canvas
+            ref={canvasRef}
+            aria-label={`รูปตารางคะแนน ${tournament.name}`}
+            className="block h-auto w-full rounded-[20px] bg-[#f4f8f5]"
+          >
+            รูปตารางคะแนน {tournament.name}
+          </canvas>
         </section>
         <Button
           onClick={share}
+          disabled={isSharing}
           className="h-14 w-full rounded-2xl bg-[#06c755] text-base font-black hover:bg-[#05ad49]"
         >
           <Share2 />
-          แชร์ไป LINE / แอปอื่น
+          {isSharing ? 'กำลังสร้างรูป…' : 'แชร์รูปไป LINE / แอปอื่น'}
         </Button>
-        <Button
-          onClick={copy}
-          variant="outline"
-          className="h-13 w-full rounded-2xl font-black"
-        >
-          <Copy />
-          Copy Text
-        </Button>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            onClick={download}
+            variant="outline"
+            className="h-12 rounded-xl font-black"
+          >
+            <Download />
+            ดาวน์โหลดรูป
+          </Button>
+          <Button
+            onClick={copy}
+            variant="outline"
+            className="h-12 rounded-xl font-black"
+          >
+            <Copy />
+            คัดลอกข้อความ
+          </Button>
+        </div>
       </div>
     </>
   );
@@ -1674,12 +1748,9 @@ export default function FootballApp() {
     setSelectedMatchId(id);
     setView('match-detail');
   }
-  const mainView: MainView = [
-    'home',
-    'teams',
-    'schedule',
-    'settings',
-  ].includes(view)
+  const mainView: MainView = ['home', 'teams', 'schedule', 'settings'].includes(
+    view,
+  )
     ? (view as MainView)
     : view === 'team-detail'
       ? 'teams'
@@ -1736,10 +1807,7 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'teams' && (
-            <TeamsScreen
-              tournament={tournament}
-              onOpenTeam={openTeam}
-            />
+            <TeamsScreen tournament={tournament} onOpenTeam={openTeam} />
           )}
           {tournament && view === 'team-detail' && selectedTeam && (
             <TeamDetailScreen
