@@ -26,9 +26,14 @@ export type FootballGameSummary = {
   updatedAt: string;
 };
 
-async function callRpc<T>(name: string, body: Record<string, unknown>) {
+async function callRpc<T>(
+  name: string,
+  body: Record<string, unknown>,
+  options: { keepalive?: boolean } = {},
+) {
   const response = await fetch(`${DATA_API_URL}/rpc/${name}`, {
     method: 'POST',
+    keepalive: options.keepalive,
     headers: {
       Authorization: `Bearer ${DATA_API_TOKEN}`,
       'Content-Type': 'application/json',
@@ -57,11 +62,19 @@ export function loadSharedGame(gameId: string) {
   });
 }
 
-export function saveSharedGame(gameId: string, tournament: Tournament) {
-  return callRpc<StoredFootballGame>('save_football_game', {
-    p_game_id: gameId,
-    p_state: tournament,
-  });
+export function saveSharedGame(
+  gameId: string,
+  tournament: Tournament,
+  options: { keepalive?: boolean } = {},
+) {
+  return callRpc<StoredFootballGame>(
+    'save_football_game',
+    {
+      p_game_id: gameId,
+      p_state: tournament,
+    },
+    options,
+  );
 }
 
 export function listSharedGames() {

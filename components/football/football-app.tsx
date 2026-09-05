@@ -9,10 +9,13 @@ import {
   ChevronUp,
   CircleAlert,
   CircleCheck,
+  Cloud,
+  CloudOff,
   Copy,
   Download,
   FolderOpen,
   GripVertical,
+  LoaderCircle,
   Minus,
   Plus,
   RotateCcw,
@@ -103,6 +106,38 @@ type AppView =
   | 'standings'
   | 'share'
   | 'games';
+type SyncStatus = 'local' | 'saving' | 'saved' | 'error';
+
+function readLocalBackup() {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return {
+      tournament: stored ? (JSON.parse(stored) as Tournament) : null,
+      gameId: localStorage.getItem(STORAGE_GAME_ID_KEY),
+    };
+  } catch {
+    return { tournament: null, gameId: null };
+  }
+}
+
+function writeLocalBackup(tournament: Tournament, gameId = '') {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
+    if (gameId) localStorage.setItem(STORAGE_GAME_ID_KEY, gameId);
+    else localStorage.removeItem(STORAGE_GAME_ID_KEY);
+  } catch {
+    // Neon remains the source of truth when browser storage is unavailable.
+  }
+}
+
+function clearLocalBackup() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(STORAGE_GAME_ID_KEY);
+  } catch {
+    // Browser storage is only a best-effort offline backup.
+  }
+}
 
 function restoreGitHubPagesPath() {
   try {
@@ -414,11 +449,13 @@ function EmptyHome({
 
 function HomeScreen({
   tournament,
+  syncStatus,
   onNavigate,
   onOpenMatch,
   onUpdate,
 }: {
   tournament: Tournament;
+  syncStatus: SyncStatus;
   onNavigate: (view: AppView) => void;
   onOpenMatch: (id: string) => void;
   onUpdate: (value: Tournament) => void;
@@ -457,8 +494,23 @@ function HomeScreen({
         title="Football Match Maker"
         eyebrow={tournament.name}
         action={
-          <div className="grid h-10 w-10 place-items-center rounded-2xl bg-[#e1f4e6] text-[#11823b]">
-            <Trophy className="h-5 w-5" />
+          <div
+            className={`flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-black ${syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
+          >
+            {syncStatus === 'saving' ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+            ) : syncStatus === 'error' || syncStatus === 'local' ? (
+              <CloudOff className="h-4 w-4" />
+            ) : (
+              <Cloud className="h-4 w-4" />
+            )}
+            {syncStatus === 'saving'
+              ? 'กำลังบันทึก'
+              : syncStatus === 'saved'
+                ? 'บันทึกแล้ว'
+                : syncStatus === 'error'
+                  ? 'ซิงก์ไม่สำเร็จ'
+                  : 'เฉพาะเครื่อง'}
           </div>
         }
       />
@@ -2261,9 +2313,11 @@ export default function FootballApp() {
   const [selectedTeamId, setSelectedTeamId] = useState('');
   const [selectedMatchId, setSelectedMatchId] = useState('');
   const [notice, setNotice] = useState('');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
   const tournamentRef = useRef<Tournament | null>(null);
   const lastRemoteStateRef = useRef('');
   const lastLocalChangeRef = useRef(0);
+  const lastExitFlushRef = useRef('');
   /* oxlint-disable react/react-compiler -- hydration intentionally reads browser-only and remote state once. */
   useEffect(() => {
     let cancelled = false;
@@ -2279,26 +2333,19 @@ export default function FootballApp() {
             const value = extendTournamentToEndTime(game.state);
             lastRemoteStateRef.current = JSON.stringify(value);
             setTournament(value);
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
-            localStorage.setItem(STORAGE_GAME_ID_KEY, pathGameId);
+            setSyncStatus('saved');
+            writeLocalBackup(value, pathGameId);
           } else {
             setNotice('ไม่พบเกมจากลิงก์นี้');
           }
         } catch {
           if (cancelled) return;
-          try {
-            const stored = localStorage.getItem(STORAGE_KEY);
-            const storedGameId = localStorage.getItem(STORAGE_GAME_ID_KEY);
-            const saved = stored ? (JSON.parse(stored) as Tournament) : null;
-            if (saved && storedGameId === pathGameId) {
-              setTournament(extendTournamentToEndTime(saved));
-              setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
-            } else {
-              setNotice('เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
-            }
-          } catch {
-            localStorage.removeItem(STORAGE_KEY);
-            localStorage.removeItem(STORAGE_GAME_ID_KEY);
+          const backup = readLocalBackup();
+          if (backup.tournament && backup.gameId === pathGameId) {
+            setTournament(extendTournamentToEndTime(backup.tournament));
+            setSyncStatus('error');
+            setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
+          } else {
             setNotice('เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
           }
         } finally {
@@ -2309,6 +2356,7 @@ export default function FootballApp() {
 
       setTournament(null);
       setGameId('');
+      setSyncStatus('local');
       setView('home');
       if (!cancelled) setHydrated(true);
     }
@@ -2322,12 +2370,10 @@ export default function FootballApp() {
     tournamentRef.current = tournament;
     if (!hydrated) return;
     if (tournament) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
+      writeLocalBackup(tournament, gameId);
       if (!gameId) {
-        localStorage.removeItem(STORAGE_GAME_ID_KEY);
         return;
       }
-      localStorage.setItem(STORAGE_GAME_ID_KEY, gameId);
       const serialized = JSON.stringify(tournament);
       if (serialized === lastRemoteStateRef.current) return;
       lastLocalChangeRef.current = Date.now();
@@ -2335,14 +2381,51 @@ export default function FootballApp() {
         void saveSharedGame(gameId, tournament)
           .then((game) => {
             lastRemoteStateRef.current = JSON.stringify(game.state);
+            if (JSON.stringify(tournamentRef.current) === serialized)
+              setSyncStatus('saved');
           })
-          .catch(() => setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง'));
+          .catch(() => {
+            setSyncStatus('error');
+            setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
+          });
       }, 450);
       return () => window.clearTimeout(timer);
     }
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(STORAGE_GAME_ID_KEY);
+    clearLocalBackup();
   }, [tournament, hydrated, gameId]);
+  useEffect(() => {
+    if (!hydrated || !gameId) return;
+    const flushLatestState = () => {
+      const value = tournamentRef.current;
+      if (!value) return;
+      const serialized = JSON.stringify(value);
+      if (
+        serialized === lastRemoteStateRef.current ||
+        serialized === lastExitFlushRef.current
+      )
+        return;
+      lastExitFlushRef.current = serialized;
+      void saveSharedGame(gameId, value, { keepalive: true })
+        .then((game) => {
+          lastRemoteStateRef.current = JSON.stringify(game.state);
+          if (JSON.stringify(tournamentRef.current) === serialized)
+            setSyncStatus('saved');
+        })
+        .catch(() => {
+          lastExitFlushRef.current = '';
+          setSyncStatus('error');
+        });
+    };
+    const flushWhenHidden = () => {
+      if (document.visibilityState === 'hidden') flushLatestState();
+    };
+    window.addEventListener('pagehide', flushLatestState);
+    document.addEventListener('visibilitychange', flushWhenHidden);
+    return () => {
+      window.removeEventListener('pagehide', flushLatestState);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
+    };
+  }, [hydrated, gameId]);
   useEffect(() => {
     if (!hydrated || !gameId) return;
     const poll = window.setInterval(() => {
@@ -2354,6 +2437,7 @@ export default function FootballApp() {
           lastRemoteStateRef.current = serialized;
           if (serialized !== JSON.stringify(tournamentRef.current)) {
             setTournament(extendTournamentToEndTime(game.state));
+            setSyncStatus('saved');
           }
         })
         .catch(() => undefined);
@@ -2393,7 +2477,12 @@ export default function FootballApp() {
           annotations: { readOnlyHint: false, untrustedContentHint: false },
           execute: () => {
             const demo = createDemoTournament();
+            tournamentRef.current = demo;
+            lastRemoteStateRef.current = '';
+            setGameId('');
+            setSyncStatus('local');
             setTournament(demo);
+            window.history.replaceState({}, '', gamePath());
             setView('home');
             return {
               status: 'loaded',
@@ -2443,18 +2532,39 @@ export default function FootballApp() {
     void register().catch(() => undefined);
     return () => lifecycle.abort();
   }, []);
+  function applyTournament(value: Tournament) {
+    tournamentRef.current = value;
+    lastExitFlushRef.current = '';
+    setSyncStatus(
+      gameId && JSON.stringify(value) !== lastRemoteStateRef.current
+        ? 'saving'
+        : gameId
+          ? 'saved'
+          : 'local',
+    );
+    setTournament(value);
+  }
   async function publishTournament(value: Tournament, message: string) {
+    tournamentRef.current = value;
+    lastRemoteStateRef.current = '';
+    lastExitFlushRef.current = '';
+    setGameId('');
+    setSyncStatus('saving');
     setTournament(value);
     setSelectedTeamId(value.teams[0]?.id ?? '');
     setView('home');
+    window.history.replaceState({}, '', gamePath());
     try {
       const game = await createSharedGame(value, bangkokDateCode());
       lastRemoteStateRef.current = JSON.stringify(game.state);
       setGameId(game.id);
       setTournament(game.state);
+      tournamentRef.current = game.state;
+      setSyncStatus('saved');
       window.history.pushState({}, '', gamePath(game.id));
       setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
     } catch {
+      setSyncStatus('local');
       setNotice(`${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`);
     }
   }
@@ -2485,6 +2595,8 @@ export default function FootballApp() {
       lastRemoteStateRef.current = JSON.stringify(value);
       setGameId(game.id);
       setTournament(value);
+      tournamentRef.current = value;
+      setSyncStatus('saved');
       setSelectedTeamId(value.teams[0]?.id ?? '');
       setSelectedMatchId('');
       window.history.pushState({}, '', gamePath(game.id));
@@ -2497,6 +2609,7 @@ export default function FootballApp() {
     if (deletedGameId !== gameId) return;
     setTournament(null);
     setGameId('');
+    setSyncStatus('local');
     lastRemoteStateRef.current = '';
     window.history.replaceState({}, '', gamePath());
   }
@@ -2566,9 +2679,10 @@ export default function FootballApp() {
           {tournament && view === 'home' && (
             <HomeScreen
               tournament={tournament}
+              syncStatus={syncStatus}
               onNavigate={setView}
               onOpenMatch={openMatch}
-              onUpdate={setTournament}
+              onUpdate={applyTournament}
             />
           )}
           {tournament && view === 'teams' && (
@@ -2579,7 +2693,7 @@ export default function FootballApp() {
               team={selectedTeam}
               onBack={() => setView('teams')}
               onUpdate={(team) =>
-                setTournament(
+                applyTournament(
                   assignGoalkeepers({
                     ...tournament,
                     teams: tournament.teams.map((item) =>
@@ -2594,12 +2708,15 @@ export default function FootballApp() {
             <ScheduleScreen
               tournament={tournament}
               onOpenMatch={openMatch}
-              onUpdate={setTournament}
+              onUpdate={applyTournament}
               onStandings={() => setView('standings')}
             />
           )}
           {tournament && view === 'tactics' && (
-            <TacticsScreen tournament={tournament} onUpdate={setTournament} />
+            <TacticsScreen
+              tournament={tournament}
+              onUpdate={applyTournament}
+            />
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen
@@ -2612,7 +2729,7 @@ export default function FootballApp() {
               tournament={tournament}
               match={selectedMatch}
               onBack={() => setView('schedule')}
-              onUpdate={setTournament}
+              onUpdate={applyTournament}
             />
           )}
           {tournament && view === 'share' && (
@@ -2633,7 +2750,7 @@ export default function FootballApp() {
                 void publishTournament(tournament, 'สร้างลิงก์ให้เกมนี้แล้ว')
               }
               onSave={(value) => {
-                setTournament(value);
+                applyTournament(value);
                 setNotice('บันทึกการตั้งค่าแล้ว');
               }}
               onGames={() => setView('games')}
@@ -2642,6 +2759,7 @@ export default function FootballApp() {
               onReset={() => {
                 setTournament(null);
                 setGameId('');
+                setSyncStatus('local');
                 lastRemoteStateRef.current = '';
                 window.history.pushState({}, '', gamePath());
                 setView('home');
