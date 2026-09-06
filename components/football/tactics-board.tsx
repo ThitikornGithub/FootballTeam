@@ -18,7 +18,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from 'react';
 
 import { Button } from '@/components/ui/button';
@@ -127,8 +126,8 @@ function markerLabel(marker: TacticMarker, tournament: Tournament) {
 type TacticPath = {
   id: string;
   kind: 'run' | 'pass';
-  fromMarkerId: string;
-  toMarkerId: string;
+  from: { x: number; y: number };
+  to: { x: number; y: number };
 };
 
 type TacticStep = {
@@ -176,9 +175,11 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
   ]);
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [tool, setTool] = useState<TacticTool>('move');
-  const [pathStartMarkerId, setPathStartMarkerId] = useState<string | null>(
-    null,
-  );
+  const [pathPreview, setPathPreview] = useState<{
+    kind: 'run' | 'pass';
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+  } | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [notice, setNotice] = useState('');
   const currentStep = steps[activeStepIndex] ?? steps[0];
@@ -204,7 +205,22 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
           tournamentTeamIds.split('|').includes(saved.board.teamBId);
         if (!savedTeamsAreValid || !saved.steps?.length) return;
         setBoard(saved.board!);
-        setSteps(saved.steps.slice(0, 8));
+        setSteps(
+          saved.steps.slice(0, 8).map((step) => ({
+            ...step,
+            paths: Array.isArray(step.paths)
+              ? step.paths.filter(
+                  (path) =>
+                    path?.from &&
+                    path?.to &&
+                    Number.isFinite(path.from.x) &&
+                    Number.isFinite(path.from.y) &&
+                    Number.isFinite(path.to.x) &&
+                    Number.isFinite(path.to.y),
+                )
+              : [],
+          })),
+        );
         setActiveStepIndex(0);
         setNotice('โหลดร่าง Local Staging ที่บันทึกไว้แล้ว');
       } catch {
@@ -251,7 +267,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     ]);
     setActiveStepIndex(0);
     setTool('move');
-    setPathStartMarkerId(null);
+    setPathPreview(null);
     setIsPlaying(false);
   }
 
@@ -276,18 +292,18 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     );
   }
 
-  function positionFromPointer(event: ReactPointerEvent<HTMLButtonElement>) {
+  function positionFromPointer(clientX: number, clientY: number) {
     const pitch = pitchRef.current;
     if (!pitch) return null;
     const bounds = pitch.getBoundingClientRect();
     return {
       x: Math.min(
         95,
-        Math.max(5, ((event.clientX - bounds.left) / bounds.width) * 100),
+        Math.max(5, ((clientX - bounds.left) / bounds.width) * 100),
       ),
       y: Math.min(
         97,
-        Math.max(3, ((event.clientY - bounds.top) / bounds.height) * 100),
+        Math.max(3, ((clientY - bounds.top) / bounds.height) * 100),
       ),
     };
   }
@@ -335,7 +351,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     ]);
     setActiveStepIndex(activeStepIndex + 1);
     setTool('move');
-    setPathStartMarkerId(null);
+    setPathPreview(null);
   }
 
   function removeStep() {
@@ -344,7 +360,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
       current.filter((_, index) => index !== activeStepIndex),
     );
     setActiveStepIndex(Math.max(0, activeStepIndex - 1));
-    setPathStartMarkerId(null);
+    setPathPreview(null);
     setIsPlaying(false);
   }
 
@@ -360,39 +376,8 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
 
   function chooseTool(nextTool: TacticTool) {
     setTool(nextTool);
-    setPathStartMarkerId(null);
+    setPathPreview(null);
     setIsPlaying(false);
-  }
-
-  function choosePathMarker(markerId: string) {
-    if (tool === 'move' || !currentStep) return;
-    if (!pathStartMarkerId) {
-      setPathStartMarkerId(markerId);
-      return;
-    }
-    if (pathStartMarkerId === markerId) {
-      setPathStartMarkerId(null);
-      return;
-    }
-    setSteps((current) =>
-      current.map((step, index) =>
-        index === activeStepIndex
-          ? {
-              ...step,
-              paths: [
-                ...step.paths,
-                {
-                  id: prototypeId('path'),
-                  kind: tool,
-                  fromMarkerId: pathStartMarkerId,
-                  toMarkerId: markerId,
-                },
-              ],
-            }
-          : step,
-      ),
-    );
-    setPathStartMarkerId(null);
   }
 
   function clearPaths() {
@@ -401,7 +386,18 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
         index === activeStepIndex ? { ...step, paths: [] } : step,
       ),
     );
-    setPathStartMarkerId(null);
+    setPathPreview(null);
+  }
+
+  function undoLastPath() {
+    setSteps((current) =>
+      current.map((step, index) =>
+        index === activeStepIndex
+          ? { ...step, paths: step.paths.slice(0, -1) }
+          : step,
+      ),
+    );
+    setPathPreview(null);
   }
 
   function togglePlayback() {
@@ -416,7 +412,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     if (activeStepIndex >= steps.length - 1) setActiveStepIndex(0);
     setIsPlaying(true);
     setTool('move');
-    setPathStartMarkerId(null);
+    setPathPreview(null);
   }
 
   function savePrototype() {
@@ -526,7 +522,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                 onClick={() => {
                   setActiveStepIndex(index);
                   setIsPlaying(false);
-                  setPathStartMarkerId(null);
+                  setPathPreview(null);
                 }}
                 className={`h-10 shrink-0 rounded-xl px-3 text-sm font-black ${index === activeStepIndex ? 'bg-[#11823b] text-white' : 'border border-slate-200 bg-white text-slate-600'}`}
               >
@@ -572,18 +568,25 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
           </div>
           {tool !== 'move' && (
             <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
-              <span>
-                {pathStartMarkerId
-                  ? 'เลือกผู้เล่นหรือลูกบอลปลายทาง'
-                  : 'เลือกผู้เล่นหรือลูกบอลต้นทาง'}
-              </span>
-              <button
-                type="button"
-                onClick={clearPaths}
-                className="font-black text-red-600"
-              >
-                ล้างเส้น
-              </button>
+              <span>กดลากจากจุดใดก็ได้ไปยังพื้นที่หรือประตู</span>
+              <div className="flex shrink-0 gap-3">
+                <button
+                  type="button"
+                  onClick={undoLastPath}
+                  disabled={!currentStep?.paths.length}
+                  className="font-black text-slate-700 disabled:opacity-35"
+                >
+                  ย้อนเส้น
+                </button>
+                <button
+                  type="button"
+                  onClick={clearPaths}
+                  disabled={!currentStep?.paths.length}
+                  className="font-black text-red-600 disabled:opacity-35"
+                >
+                  ล้าง
+                </button>
+              </div>
             </div>
           )}
         </section>
@@ -591,7 +594,65 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
         <section
           ref={pitchRef}
           aria-label={`กระดานแท็กติก ${teamA?.name ?? ''} พบ ${teamB?.name ?? ''}`}
-          className="relative h-[540px] touch-pan-y overscroll-contain overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none"
+          onPointerDown={(event) => {
+            if (tool === 'move' || isPlaying) return;
+            event.preventDefault();
+            const position = positionFromPointer(event.clientX, event.clientY);
+            if (!position) return;
+            event.currentTarget.setPointerCapture(event.pointerId);
+            setPathPreview({ kind: tool, from: position, to: position });
+          }}
+          onPointerMove={(event) => {
+            if (
+              !pathPreview ||
+              !event.currentTarget.hasPointerCapture(event.pointerId)
+            )
+              return;
+            event.preventDefault();
+            const position = positionFromPointer(event.clientX, event.clientY);
+            if (position)
+              setPathPreview((current) =>
+                current ? { ...current, to: position } : current,
+              );
+          }}
+          onPointerUp={(event) => {
+            if (
+              !pathPreview ||
+              !event.currentTarget.hasPointerCapture(event.pointerId)
+            )
+              return;
+            event.preventDefault();
+            const position =
+              positionFromPointer(event.clientX, event.clientY) ??
+              pathPreview.to;
+            const distance = Math.hypot(
+              position.x - pathPreview.from.x,
+              position.y - pathPreview.from.y,
+            );
+            if (distance >= 3) {
+              const nextPath: TacticPath = {
+                id: prototypeId('path'),
+                kind: pathPreview.kind,
+                from: pathPreview.from,
+                to: position,
+              };
+              setSteps((current) =>
+                current.map((step, index) =>
+                  index === activeStepIndex
+                    ? { ...step, paths: [...step.paths, nextPath] }
+                    : step,
+                ),
+              );
+            }
+            setPathPreview(null);
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          onPointerCancel={(event) => {
+            setPathPreview(null);
+            if (event.currentTarget.hasPointerCapture(event.pointerId))
+              event.currentTarget.releasePointerCapture(event.pointerId);
+          }}
+          className={`relative h-[540px] overscroll-contain overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none ${tool === 'move' ? 'touch-pan-y' : 'touch-none cursor-crosshair'}`}
         >
           <div className="pointer-events-none absolute inset-3 border-2 border-white/80" />
           <div className="pointer-events-none absolute inset-x-3 top-1/2 border-t-2 border-white/80" />
@@ -628,26 +689,23 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                 <path d="M0,0 L8,4 L0,8 Z" fill="#ffffff" />
               </marker>
             </defs>
-            {currentStep?.paths.map((path) => {
-              const from = visibleMarkers.find(
-                (marker) => marker.id === path.fromMarkerId,
-              );
-              const to = visibleMarkers.find(
-                (marker) => marker.id === path.toMarkerId,
-              );
-              if (!from || !to) return null;
+            {[
+              ...(currentStep?.paths ?? []),
+              ...(pathPreview ? [{ id: 'path-preview', ...pathPreview }] : []),
+            ].map((path) => {
               const isRun = path.kind === 'run';
               return (
                 <line
                   key={path.id}
-                  x1={`${from.x}%`}
-                  y1={`${from.y}%`}
-                  x2={`${to.x}%`}
-                  y2={`${to.y}%`}
+                  x1={`${path.from.x}%`}
+                  y1={`${path.from.y}%`}
+                  x2={`${path.to.x}%`}
+                  y2={`${path.to.y}%`}
                   stroke={isRun ? '#ff9f1c' : '#ffffff'}
                   strokeWidth="4"
                   strokeDasharray={isRun ? '10 8' : undefined}
                   strokeLinecap="round"
+                  opacity={path.id === 'path-preview' ? 0.72 : 1}
                   markerEnd={`url(#${isRun ? 'tactic-run-arrow' : 'tactic-pass-arrow'})`}
                   className="drop-shadow-md"
                 />
@@ -672,11 +730,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                 onPointerDown={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  if (isPlaying) return;
-                  if (tool !== 'move') {
-                    choosePathMarker(marker.id);
-                    return;
-                  }
+                  if (isPlaying || tool !== 'move') return;
                   event.currentTarget.setPointerCapture(event.pointerId);
                   setDragPreview({
                     markerId: marker.id,
@@ -688,7 +742,10 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                   if (!event.currentTarget.hasPointerCapture(event.pointerId))
                     return;
                   event.preventDefault();
-                  const position = positionFromPointer(event);
+                  const position = positionFromPointer(
+                    event.clientX,
+                    event.clientY,
+                  );
                   if (position)
                     setDragPreview({ markerId: marker.id, ...position });
                 }}
@@ -696,7 +753,10 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                   if (!event.currentTarget.hasPointerCapture(event.pointerId))
                     return;
                   event.preventDefault();
-                  const position = positionFromPointer(event);
+                  const position = positionFromPointer(
+                    event.clientX,
+                    event.clientY,
+                  );
                   const finalPosition =
                     position ??
                     (dragPreview?.markerId === marker.id
@@ -716,7 +776,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                 onLostPointerCapture={() => setDragPreview(null)}
                 onDragStart={(event) => event.preventDefault()}
                 onKeyDown={(event) => moveFromKeyboard(event, marker)}
-                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none transition-[left,top] duration-700 ease-in-out will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${pathStartMarkerId === marker.id ? 'drop-shadow-[0_0_10px_#fbbf24]' : ''}`}
+                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none transition-[left,top] duration-700 ease-in-out will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
                 style={{ left: `${preview.x}%`, top: `${preview.y}%` }}
               >
                 <span
