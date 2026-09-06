@@ -239,10 +239,7 @@ function ScorePicker({
   return (
     <div className="rounded-2xl bg-slate-50 p-3">
       <div className="flex min-w-0 items-center justify-center gap-2">
-        <span
-          className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-          style={{ background: COLOR_HEX[color] }}
-        />
+        <TeamShirtIcon color={color} size="xs" />
         <p className="truncate text-sm font-black">{label}</p>
       </div>
       <div className="mt-2 flex items-center justify-center gap-2">
@@ -397,10 +394,7 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
                     <span className="w-4 shrink-0 text-center text-slate-400">
                       {index + 1}
                     </span>
-                    <span
-                      className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-                      style={{ background: COLOR_HEX[team.color] }}
-                    />
+                    <TeamShirtIcon color={team.color} size="xs" />
                     <span className="min-w-0 truncate">{team.name}</span>
                   </div>
                 </th>
@@ -1416,10 +1410,7 @@ function ScheduleScreen({
                           className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-1 px-1 text-left min-[370px]:px-2"
                         >
                           <span className="flex min-w-0 items-center gap-1.5">
-                            <span
-                              className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-                              style={{ background: COLOR_HEX[teamA.color] }}
-                            />
+                            <TeamShirtIcon color={teamA.color} size="xs" />
                             <span className="truncate text-sm font-black">
                               {teamA.name}
                             </span>
@@ -1428,10 +1419,7 @@ function ScheduleScreen({
                             vs
                           </span>
                           <span className="flex min-w-0 items-center gap-1.5">
-                            <span
-                              className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
-                              style={{ background: COLOR_HEX[teamB.color] }}
-                            />
+                            <TeamShirtIcon color={teamB.color} size="xs" />
                             <span className="truncate text-sm font-black">
                               {teamB.name}
                             </span>

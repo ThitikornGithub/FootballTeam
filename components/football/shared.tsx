@@ -43,11 +43,17 @@ export function TeamShirtIcon({
   className = '',
 }: {
   color: TeamColor;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   className?: string;
 }) {
   const classes =
-    size === 'sm' ? 'h-8 w-8' : size === 'lg' ? 'h-20 w-20' : 'h-12 w-12';
+    size === 'xs'
+      ? 'h-6 w-6'
+      : size === 'sm'
+        ? 'h-8 w-8'
+        : size === 'lg'
+          ? 'h-20 w-20'
+          : 'h-12 w-12';
   const isWhite = color === 'white';
   return (
     <svg
