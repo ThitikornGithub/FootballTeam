@@ -16,6 +16,8 @@ import {
   FolderOpen,
   GripVertical,
   LoaderCircle,
+  Lock,
+  LockOpen,
   Minus,
   Plus,
   RotateCcw,
@@ -190,6 +192,16 @@ function bangkokDateCode() {
     parts.map((part) => [part.type, part.value]),
   );
   return `${value.year}${value.month}${value.day}`;
+}
+
+function defaultGameName() {
+  const date = new Intl.DateTimeFormat('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(new Date());
+  return `Friendly Match · ${date}`;
 }
 
 function formatShareText(tournament: Tournament) {
@@ -689,7 +701,7 @@ function SetupScreen({
   const [gameName, setGameName] = useState(
     copyMode && tournament
       ? `${tournament.name} ใหม่`
-      : (tournament?.name ?? 'ฟุตบอลคืนนี้'),
+      : (tournament?.name ?? defaultGameName()),
   );
   const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 4);
   const [drafts, setDrafts] = useState(() =>
@@ -1082,6 +1094,7 @@ function TeamDetailScreen({
 }) {
   const [newName, setNewName] = useState('');
   const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const rotationLocked = Boolean(team.gkRotationLocked);
   const eligiblePlayers = team.players.filter((player) => !player.absentToday);
   const gkOrder = [
     ...team.gkRotation.filter((id) =>
@@ -1092,12 +1105,16 @@ function TeamDetailScreen({
       .filter((id) => !team.gkRotation.includes(id)),
   ];
   function randomizeGoalkeepers() {
+    if (rotationLocked) return;
     const order = shuffle(eligiblePlayers.map((player) => player.id));
     onUpdate({
       ...team,
       gkRotation: order,
       gkCycleOrders: order.length ? [order] : [],
     });
+  }
+  function toggleGoalkeeperLock() {
+    onUpdate({ ...team, gkRotationLocked: !rotationLocked });
   }
   function updatePlayers(players: Team['players']) {
     const ids = new Set(players.map((player) => player.id));
@@ -1141,20 +1158,35 @@ function TeamDetailScreen({
           </div>
         </section>
         <section className="settings-card">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="section-title">ลำดับผู้รักษาประตู</h2>
-              <p className="section-note">วนตามลำดับนี้ในแต่ละเกม</p>
+              <p className="section-note">
+                {rotationLocked
+                  ? 'ล็อกแล้ว · ปลดล็อกก่อนสุ่มลำดับใหม่'
+                  : 'วนตามลำดับนี้ในแต่ละเกม'}
+              </p>
             </div>
-            <Button
-              onClick={randomizeGoalkeepers}
-              disabled={eligiblePlayers.length === 0}
-              variant="outline"
-              className="h-10 rounded-xl border-[#9dd2ab] font-black text-[#087632]"
-            >
-              <Shuffle />
-              สุ่มลำดับ
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={randomizeGoalkeepers}
+                disabled={eligiblePlayers.length === 0 || rotationLocked}
+                variant="outline"
+                className="h-10 rounded-xl border-[#9dd2ab] px-3 font-black text-[#087632]"
+              >
+                <Shuffle />
+                สุ่มลำดับ
+              </Button>
+              <Button
+                onClick={toggleGoalkeeperLock}
+                variant={rotationLocked ? 'default' : 'outline'}
+                aria-pressed={rotationLocked}
+                className={`h-10 rounded-xl px-3 font-black ${rotationLocked ? 'bg-slate-900 text-white' : 'border-slate-300 text-slate-700'}`}
+              >
+                {rotationLocked ? <Lock /> : <LockOpen />}
+                {rotationLocked ? 'ปลดล็อก' : 'ล็อกคิว'}
+              </Button>
+            </div>
           </div>
           {gkOrder.length > 0 ? (
             <div className="grid grid-cols-2 gap-2">
@@ -2399,7 +2431,7 @@ function SettingsScreen({
           <Button
             onClick={onCreateNew}
             variant="outline"
-            className="h-12 w-full rounded-xl font-black"
+            className="mt-3 h-12 w-full rounded-xl font-black"
           >
             <Plus />
             สร้างตารางใหม่
@@ -3076,7 +3108,11 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'tactics' && (
-            <TacticsScreen tournament={tournament} />
+            <TacticsScreen
+              tournament={tournament}
+              onUpdate={applyTournament}
+              onCopyLink={() => void copyGameLink()}
+            />
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen

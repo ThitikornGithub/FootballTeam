@@ -23,6 +23,8 @@ import {
 import { Button } from '@/components/ui/button';
 import {
   type TacticMarker,
+  type TacticPath,
+  type TacticStep,
   type TacticsBoard,
   type Team,
   type Tournament,
@@ -51,30 +53,43 @@ function formationPosition(index: number, isTeamA: boolean) {
   };
 }
 
+function markerIdentity(marker: TacticMarker) {
+  return marker.kind === 'ball'
+    ? 'ball'
+    : `${marker.teamId ?? ''}:${marker.playerId ?? marker.id}`;
+}
+
+function reconcileMarkers(
+  freshMarkers: TacticMarker[],
+  storedMarkers: TacticMarker[],
+) {
+  const storedByIdentity = new Map(
+    storedMarkers.map((marker) => [markerIdentity(marker), marker]),
+  );
+  return freshMarkers.map((marker) => {
+    const stored = storedByIdentity.get(markerIdentity(marker));
+    return stored ? { ...marker, x: stored.x, y: stored.y } : marker;
+  });
+}
+
 function reconcileBoard(
   tournament: Tournament,
   storedBoard: TacticsBoard,
 ): TacticsBoard {
   const fresh = makeBoard(tournament, storedBoard.teamAId, storedBoard.teamBId);
-  const storedByIdentity = new Map(
-    storedBoard.markers.map((marker) => [
-      marker.kind === 'ball'
-        ? 'ball'
-        : `${marker.teamId ?? ''}:${marker.playerId ?? marker.id}`,
-      marker,
-    ]),
-  );
   return {
     ...fresh,
     notes: storedBoard.notes,
-    markers: fresh.markers.map((marker) => {
-      const key =
-        marker.kind === 'ball'
-          ? 'ball'
-          : `${marker.teamId ?? ''}:${marker.playerId ?? marker.id}`;
-      const stored = storedByIdentity.get(key);
-      return stored ? { ...marker, x: stored.x, y: stored.y } : marker;
-    }),
+    animationSteps: storedBoard.animationSteps?.map((step) => ({
+      ...step,
+      markers: reconcileMarkers(fresh.markers, step.markers),
+      paths: step.paths.map((path) => ({
+        ...path,
+        from: { ...path.from },
+        to: { ...path.to },
+      })),
+    })),
+    markers: reconcileMarkers(fresh.markers, storedBoard.markers),
   };
 }
 
@@ -127,20 +142,6 @@ function markerLabel(marker: TacticMarker, tournament: Tournament) {
   );
 }
 
-type TacticPath = {
-  id: string;
-  kind: 'run' | 'pass';
-  from: { x: number; y: number };
-  to: { x: number; y: number };
-};
-
-type TacticStep = {
-  id: string;
-  title: string;
-  markers: TacticMarker[];
-  paths: TacticPath[];
-};
-
 type TacticTool = 'move' | 'run' | 'pass';
 type TacticMode = 'position' | 'animation';
 
@@ -185,7 +186,15 @@ function markersAtPathDestinations(step: TacticStep) {
   return nextMarkers;
 }
 
-export function TacticsScreen({ tournament }: { tournament: Tournament }) {
+export function TacticsScreen({
+  tournament,
+  onUpdate,
+  onCopyLink,
+}: {
+  tournament: Tournament;
+  onUpdate: (value: Tournament) => void;
+  onCopyLink: () => void;
+}) {
   const pitchRef = useRef<HTMLDivElement>(null);
   const [dragPreview, setDragPreview] = useState<{
     markerId: string;
@@ -201,17 +210,31 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
   const candidateBoard = hasValidTeams ? storedBoard : makeBoard(tournament);
   const initialBoard = reconcileBoard(tournament, candidateBoard);
   const [board, setBoard] = useState(initialBoard);
-  const [steps, setSteps] = useState<TacticStep[]>([
-    {
-      id: prototypeId('step'),
-      title: 'ตำแหน่งเริ่มต้น',
-      markers: copyMarkers(initialBoard.markers),
-      paths: [],
-    },
-  ]);
+  const [steps, setSteps] = useState<TacticStep[]>(() =>
+    initialBoard.animationSteps?.length
+      ? initialBoard.animationSteps.map((step) => ({
+          ...step,
+          markers: copyMarkers(step.markers),
+          paths: step.paths.map((path) => ({
+            ...path,
+            from: { ...path.from },
+            to: { ...path.to },
+          })),
+        }))
+      : [
+          {
+            id: prototypeId('step'),
+            title: 'ตำแหน่งเริ่มต้น',
+            markers: copyMarkers(initialBoard.markers),
+            paths: [],
+          },
+        ],
+  );
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [mode, setMode] = useState<TacticMode>('position');
-  const [animationHasContent, setAnimationHasContent] = useState(false);
+  const [animationHasContent, setAnimationHasContent] = useState(
+    Boolean(initialBoard.animationSteps?.length),
+  );
   const [tool, setTool] = useState<TacticTool>('move');
   const [pathPreview, setPathPreview] = useState<{
     kind: 'run' | 'pass';
@@ -236,59 +259,8 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
             : (currentStep?.paths ?? [])
           : []
         : (currentStep?.paths ?? []);
-  const tournamentTeamIds = tournament.teams.map((team) => team.id).join('|');
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      try {
-        const raw = window.localStorage.getItem(
-          `football-tactics-staging:${tournament.id}`,
-        );
-        if (!raw) return;
-        const saved = JSON.parse(raw) as {
-          board?: TacticsBoard;
-          steps?: TacticStep[];
-        };
-        const savedTeamsAreValid =
-          saved.board &&
-          tournamentTeamIds.split('|').includes(saved.board.teamAId) &&
-          tournamentTeamIds.split('|').includes(saved.board.teamBId);
-        if (!savedTeamsAreValid || !saved.steps?.length) return;
-        const restoredBoard = saved.board!;
-        const restoredSteps = saved.steps.slice(0, 8).map((step) => ({
-          ...step,
-          paths: Array.isArray(step.paths)
-            ? step.paths.filter(
-                (path) =>
-                  path?.from &&
-                  path?.to &&
-                  Number.isFinite(path.from.x) &&
-                  Number.isFinite(path.from.y) &&
-                  Number.isFinite(path.to.x) &&
-                  Number.isFinite(path.to.y),
-              )
-            : [],
-        }));
-        setBoard(restoredBoard);
-        setSteps(restoredSteps);
-        setAnimationHasContent(
-          restoredSteps.length > 1 ||
-            restoredSteps.some((step) => step.paths.length > 0) ||
-            JSON.stringify(restoredSteps[0]?.markers) !==
-              JSON.stringify(restoredBoard.markers),
-        );
-        setActiveStepIndex(0);
-        setNotice('โหลดร่าง Local Staging ที่บันทึกไว้แล้ว');
-      } catch {
-        window.localStorage.removeItem(
-          `football-tactics-staging:${tournament.id}`,
-        );
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [tournament.id, tournamentTeamIds]);
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -516,22 +488,15 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     setPathPreview(null);
   }
 
-  function savePrototype() {
-    window.localStorage.setItem(
-      `football-tactics-staging:${tournament.id}`,
-      JSON.stringify({ board, steps }),
-    );
-    setNotice('บันทึกร่างไว้ใน Local Staging แล้ว');
-  }
-
-  async function copyPrototypeLink() {
-    const link = `${window.location.origin}${window.location.pathname}#tactics-staging`;
-    try {
-      await navigator.clipboard.writeText(link);
-      setNotice('คัดลอกลิงก์ Local Staging แล้ว');
-    } catch {
-      setNotice('เบราว์เซอร์นี้ยังคัดลอกลิงก์ไม่ได้');
-    }
+  function savePlan() {
+    onUpdate({
+      ...tournament,
+      tactics: {
+        ...board,
+        animationSteps: animationHasContent ? steps : undefined,
+      },
+    });
+    setNotice('บันทึกกระดานแท็กติกเข้าเกมแล้ว');
   }
 
   const toolOptions: Array<{
@@ -548,9 +513,6 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     <>
       <PageHeader title="กระดานแท็กติก" eyebrow={tournament.name} />
       <div className="space-y-4 px-4 py-4 pb-8">
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-black text-amber-800">
-          LOCAL STAGING · แบบร่างนี้ยังไม่บันทึกเข้าเกมจริง
-        </div>
         <section className="settings-card space-y-2">
           <div>
             <h2 className="section-title">รูปแบบกระดาน</h2>
@@ -1045,7 +1007,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
         <div className="grid grid-cols-2 gap-2">
           <Button
             type="button"
-            onClick={savePrototype}
+            onClick={savePlan}
             className="h-12 rounded-xl bg-[#11823b] font-black"
           >
             <Save />
@@ -1054,7 +1016,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
           <Button
             type="button"
             variant="outline"
-            onClick={() => void copyPrototypeLink()}
+            onClick={onCopyLink}
             className="h-12 rounded-xl font-black"
           >
             <Share2 />

@@ -188,7 +188,75 @@ assert(
   }) === null,
   'Runtime validation must reject impossible persisted score values',
 );
+const persistedTactics = {
+  teamAId: tournament.teams[0].id,
+  teamBId: tournament.teams[1].id,
+  markers: [
+    {
+      id: 'tactic-ball',
+      kind: 'ball' as const,
+      label: 'บอล',
+      x: 50,
+      y: 50,
+    },
+  ],
+  notes: 'ทดสอบแผน',
+  animationSteps: [
+    {
+      id: 'step-1',
+      title: 'เริ่มต้น',
+      markers: [
+        {
+          id: 'tactic-ball',
+          kind: 'ball' as const,
+          label: 'บอล',
+          x: 50,
+          y: 50,
+        },
+      ],
+      paths: [
+        {
+          id: 'path-1',
+          kind: 'pass' as const,
+          from: { x: 50, y: 50 },
+          to: { x: 60, y: 35 },
+        },
+      ],
+    },
+  ],
+};
+assert(
+  parseTournament({
+    ...tournament,
+    teams: tournament.teams.map((team, index) => ({
+      ...team,
+      gkRotationLocked: index === 0,
+    })),
+    tactics: persistedTactics,
+  }) !== null,
+  'Runtime validation must accept the GK lock and animated tactics state',
+);
+assert(
+  parseTournament({
+    ...tournament,
+    tactics: {
+      ...persistedTactics,
+      animationSteps: [
+        {
+          ...persistedTactics.animationSteps[0],
+          paths: [
+            {
+              ...persistedTactics.animationSteps[0].paths[0],
+              to: { x: 101, y: 35 },
+            },
+          ],
+        },
+      ],
+    },
+  }) === null,
+  'Runtime validation must reject tactic paths outside the pitch',
+);
 
 console.log(
-  'Engine checks passed: defaults, repeats, scores, standings, overtime, GK fairness, progress, switching, and persisted-state validation.',
+  'Engine checks passed: defaults, repeats, scores, standings, overtime, GK fairness, progress, switching, and enhanced persisted-state validation.',
 );

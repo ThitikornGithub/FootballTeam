@@ -24,6 +24,7 @@ export type Team = {
   players: Player[];
   gkRotation: string[];
   gkCycleOrders: string[][];
+  gkRotationLocked?: boolean;
 };
 
 export type MatchStatus = 'upcoming' | 'current' | 'finished';
@@ -52,11 +53,26 @@ export type TacticMarker = {
   y: number;
 };
 
+export type TacticPath = {
+  id: string;
+  kind: 'run' | 'pass';
+  from: { x: number; y: number };
+  to: { x: number; y: number };
+};
+
+export type TacticStep = {
+  id: string;
+  title: string;
+  markers: TacticMarker[];
+  paths: TacticPath[];
+};
+
 export type TacticsBoard = {
   teamAId: string;
   teamBId: string;
   markers: TacticMarker[];
   notes: string;
+  animationSteps?: TacticStep[];
 };
 
 export type Tournament = {

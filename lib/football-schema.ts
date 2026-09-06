@@ -2,6 +2,8 @@ import {
   TEAM_COLORS,
   type Match,
   type TacticMarker,
+  type TacticPath,
+  type TacticStep,
   type TacticsBoard,
   type Team,
   type Tournament,
@@ -38,6 +40,11 @@ function parseTeam(value: unknown): Team | null {
     !TEAM_COLOR_SET.has(String(value.color)) ||
     !Array.isArray(value.gkRotation) ||
     !Array.isArray(value.gkCycleOrders)
+  )
+    return null;
+  if (
+    value.gkRotationLocked !== undefined &&
+    typeof value.gkRotationLocked !== 'boolean'
   )
     return null;
 
@@ -143,7 +150,57 @@ function parseTactics(
     !value.markers.every((marker) => parseMarker(marker, teamIds))
   )
     return null;
+  if (
+    value.animationSteps !== undefined &&
+    (!Array.isArray(value.animationSteps) ||
+      value.animationSteps.length < 1 ||
+      value.animationSteps.length > 8 ||
+      !value.animationSteps.every((step) => parseTacticStep(step, teamIds)))
+  )
+    return null;
   return value as TacticsBoard;
+}
+
+function parsePoint(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.x === 'number' &&
+    Number.isFinite(value.x) &&
+    value.x >= 0 &&
+    value.x <= 100 &&
+    typeof value.y === 'number' &&
+    Number.isFinite(value.y) &&
+    value.y >= 0 &&
+    value.y <= 100
+  );
+}
+
+function parseTacticPath(value: unknown): value is TacticPath {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    value.id.length > 0 &&
+    ['run', 'pass'].includes(String(value.kind)) &&
+    parsePoint(value.from) &&
+    parsePoint(value.to)
+  );
+}
+
+function parseTacticStep(
+  value: unknown,
+  teamIds: Set<string>,
+): value is TacticStep {
+  return (
+    isRecord(value) &&
+    isString(value.id) &&
+    value.id.length > 0 &&
+    isString(value.title) &&
+    value.title.length <= 40 &&
+    Array.isArray(value.markers) &&
+    value.markers.every((marker) => parseMarker(marker, teamIds)) &&
+    Array.isArray(value.paths) &&
+    value.paths.every(parseTacticPath)
+  );
 }
 
 export function parseTournament(value: unknown): Tournament | null {

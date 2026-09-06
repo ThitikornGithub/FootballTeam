@@ -39,6 +39,7 @@ export function makeTeam(
     players,
     gkRotation: rotation,
     gkCycleOrders: rotation.length ? [rotation] : [],
+    gkRotationLocked: false,
   };
 }
 
