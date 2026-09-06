@@ -1,6 +1,6 @@
 import { COLOR_HEX } from '@/components/football/shared';
 import { addMinutes, calculateStandings } from '@/lib/football-engine';
-import type { Tournament } from '@/lib/football-types';
+import type { TeamColor, Tournament } from '@/lib/football-types';
 
 const CARD_WIDTH = 1080;
 const CARD_HEIGHT = 1350;
@@ -48,6 +48,43 @@ function fitText(
     next = next.slice(0, -1);
   }
   return `${next}…`;
+}
+
+function drawTeamShirt(
+  context: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  size: number,
+  color: TeamColor,
+) {
+  const scale = size / 64;
+  const left = centerX - size / 2;
+  const top = centerY - size / 2;
+  context.save();
+  context.translate(left, top);
+  context.scale(scale, scale);
+  context.beginPath();
+  context.moveTo(22, 7);
+  context.lineTo(10, 12);
+  context.lineTo(3, 26);
+  context.lineTo(13, 31);
+  context.lineTo(18, 23);
+  context.lineTo(18, 57);
+  context.lineTo(46, 57);
+  context.lineTo(46, 23);
+  context.lineTo(51, 31);
+  context.lineTo(61, 26);
+  context.lineTo(54, 12);
+  context.lineTo(42, 7);
+  context.bezierCurveTo(40, 12, 24, 12, 22, 7);
+  context.closePath();
+  context.fillStyle = COLOR_HEX[color];
+  context.fill();
+  context.strokeStyle = color === 'white' ? '#94a3b8' : '#ffffff';
+  context.lineWidth = 1.8;
+  context.lineJoin = 'round';
+  context.stroke();
+  context.restore();
 }
 
 function formatThaiDate(isoDate: string) {
@@ -131,13 +168,7 @@ export function renderStandingsShareCard(
     : 'ยังไม่มีผลการแข่งขัน';
   context.fillText(fitText(context, leaderText, 850), 88, 410);
   if (leaderTeam) {
-    context.beginPath();
-    context.arc(954, 373, 29, 0, Math.PI * 2);
-    context.fillStyle = COLOR_HEX[leaderTeam.color];
-    context.fill();
-    context.strokeStyle = leaderTeam.color === 'white' ? '#94a3b8' : '#ffffff';
-    context.lineWidth = 4;
-    context.stroke();
+    drawTeamShirt(context, 954, 373, 58, leaderTeam.color);
   }
 
   const tableX = 54;
@@ -208,13 +239,7 @@ export function renderStandingsShareCard(
     context.textAlign = 'center';
     context.fillText(String(index + 1), columns.rank, center);
 
-    context.beginPath();
-    context.arc(132, center, rowHeight < 76 ? 13 : 16, 0, Math.PI * 2);
-    context.fillStyle = COLOR_HEX[team.color];
-    context.fill();
-    context.strokeStyle = team.color === 'white' ? '#94a3b8' : '#ffffff';
-    context.lineWidth = 3;
-    context.stroke();
+    drawTeamShirt(context, 132, center, rowHeight < 76 ? 30 : 36, team.color);
 
     context.fillStyle = '#071120';
     context.textAlign = 'left';
