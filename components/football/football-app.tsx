@@ -3076,7 +3076,7 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'tactics' && (
-            <TacticsScreen tournament={tournament} onUpdate={applyTournament} />
+            <TacticsScreen tournament={tournament} />
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen

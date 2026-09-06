@@ -1,6 +1,18 @@
 'use client';
 
-import { RotateCcw } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Footprints,
+  Move,
+  Pause,
+  Play,
+  Plus,
+  RotateCcw,
+  Save,
+  Share2,
+  Trash2,
+} from 'lucide-react';
 import {
   useEffect,
   useRef,
@@ -112,13 +124,33 @@ function markerLabel(marker: TacticMarker, tournament: Tournament) {
   );
 }
 
-export function TacticsScreen({
-  tournament,
-  onUpdate,
-}: {
-  tournament: Tournament;
-  onUpdate: (value: Tournament) => void;
-}) {
+type TacticPath = {
+  id: string;
+  kind: 'run' | 'pass';
+  fromMarkerId: string;
+  toMarkerId: string;
+};
+
+type TacticStep = {
+  id: string;
+  title: string;
+  markers: TacticMarker[];
+  paths: TacticPath[];
+};
+
+type TacticTool = 'move' | 'run' | 'pass';
+
+function prototypeId(prefix: string) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+    return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function copyMarkers(markers: TacticMarker[]) {
+  return markers.map((marker) => ({ ...marker }));
+}
+
+export function TacticsScreen({ tournament }: { tournament: Tournament }) {
   const pitchRef = useRef<HTMLDivElement>(null);
   const [dragPreview, setDragPreview] = useState<{
     markerId: string;
@@ -132,42 +164,86 @@ export function TacticsScreen({
     tournament.teams.some((team) => team.id === storedBoard.teamBId) &&
     storedBoard.teamAId !== storedBoard.teamBId;
   const candidateBoard = hasValidTeams ? storedBoard : makeBoard(tournament);
-  const board = reconcileBoard(tournament, candidateBoard);
-  const boardNeedsRepair =
-    JSON.stringify(board) !== JSON.stringify(storedBoard);
+  const initialBoard = reconcileBoard(tournament, candidateBoard);
+  const [board, setBoard] = useState(initialBoard);
+  const [steps, setSteps] = useState<TacticStep[]>([
+    {
+      id: prototypeId('step'),
+      title: 'ตำแหน่งเริ่มต้น',
+      markers: copyMarkers(initialBoard.markers),
+      paths: [],
+    },
+  ]);
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
+  const [tool, setTool] = useState<TacticTool>('move');
+  const [pathStartMarkerId, setPathStartMarkerId] = useState<string | null>(
+    null,
+  );
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [notice, setNotice] = useState('');
+  const currentStep = steps[activeStepIndex] ?? steps[0];
+  const visibleMarkers = currentStep?.markers ?? board.markers;
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
 
-  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- repair stale tactic markers after roster changes. */
   useEffect(() => {
-    if (boardNeedsRepair) onUpdate({ ...tournament, tactics: board });
-  }, [boardNeedsRepair]);
-  /* oxlint-enable react-hooks/exhaustive-deps, react/react-compiler */
+    if (!isPlaying) return;
+    const reachedLastStep = activeStepIndex >= steps.length - 1;
+    const timer = window.setTimeout(
+      () => {
+        if (reachedLastStep) setIsPlaying(false);
+        else setActiveStepIndex((index) => index + 1);
+      },
+      reachedLastStep ? 250 : 1250,
+    );
+    return () => window.clearTimeout(timer);
+  }, [activeStepIndex, isPlaying, steps.length]);
 
-  function updateBoard(nextBoard: TacticsBoard) {
-    onUpdate({ ...tournament, tactics: nextBoard });
-  }
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 2400);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   function resetBoard(teamAId = board.teamAId, teamBId = board.teamBId) {
-    updateBoard({
+    const nextBoard = {
       ...makeBoard(tournament, teamAId, teamBId),
       notes: board.notes,
-    });
+    };
+    setBoard(nextBoard);
+    setSteps([
+      {
+        id: prototypeId('step'),
+        title: 'ตำแหน่งเริ่มต้น',
+        markers: copyMarkers(nextBoard.markers),
+        paths: [],
+      },
+    ]);
+    setActiveStepIndex(0);
+    setTool('move');
+    setPathStartMarkerId(null);
+    setIsPlaying(false);
   }
 
   function moveMarker(markerId: string, x: number, y: number) {
-    updateBoard({
-      ...board,
-      markers: board.markers.map((marker) =>
-        marker.id === markerId
+    setSteps((current) =>
+      current.map((step, index) =>
+        index === activeStepIndex
           ? {
-              ...marker,
-              x: Math.min(95, Math.max(5, x)),
-              y: Math.min(97, Math.max(3, y)),
+              ...step,
+              markers: step.markers.map((marker) =>
+                marker.id === markerId
+                  ? {
+                      ...marker,
+                      x: Math.min(95, Math.max(5, x)),
+                      y: Math.min(97, Math.max(3, y)),
+                    }
+                  : marker,
+              ),
             }
-          : marker,
+          : step,
       ),
-    });
+    );
   }
 
   function positionFromPointer(event: ReactPointerEvent<HTMLButtonElement>) {
@@ -214,10 +290,140 @@ export function TacticsScreen({
     resetBoard(board.teamAId, teamBId);
   }
 
+  function addStep() {
+    if (!currentStep || steps.length >= 8) return;
+    const nextStep: TacticStep = {
+      id: prototypeId('step'),
+      title: `จังหวะ ${steps.length + 1}`,
+      markers: copyMarkers(currentStep.markers),
+      paths: [],
+    };
+    setSteps((current) => [
+      ...current.slice(0, activeStepIndex + 1),
+      nextStep,
+      ...current.slice(activeStepIndex + 1),
+    ]);
+    setActiveStepIndex(activeStepIndex + 1);
+    setTool('move');
+    setPathStartMarkerId(null);
+  }
+
+  function removeStep() {
+    if (steps.length <= 1) return;
+    setSteps((current) =>
+      current.filter((_, index) => index !== activeStepIndex),
+    );
+    setActiveStepIndex(Math.max(0, activeStepIndex - 1));
+    setPathStartMarkerId(null);
+    setIsPlaying(false);
+  }
+
+  function updateStepTitle(value: string) {
+    setSteps((current) =>
+      current.map((step, index) =>
+        index === activeStepIndex
+          ? { ...step, title: value.slice(0, 40) }
+          : step,
+      ),
+    );
+  }
+
+  function chooseTool(nextTool: TacticTool) {
+    setTool(nextTool);
+    setPathStartMarkerId(null);
+    setIsPlaying(false);
+  }
+
+  function choosePathMarker(markerId: string) {
+    if (tool === 'move' || !currentStep) return;
+    if (!pathStartMarkerId) {
+      setPathStartMarkerId(markerId);
+      return;
+    }
+    if (pathStartMarkerId === markerId) {
+      setPathStartMarkerId(null);
+      return;
+    }
+    setSteps((current) =>
+      current.map((step, index) =>
+        index === activeStepIndex
+          ? {
+              ...step,
+              paths: [
+                ...step.paths,
+                {
+                  id: prototypeId('path'),
+                  kind: tool,
+                  fromMarkerId: pathStartMarkerId,
+                  toMarkerId: markerId,
+                },
+              ],
+            }
+          : step,
+      ),
+    );
+    setPathStartMarkerId(null);
+  }
+
+  function clearPaths() {
+    setSteps((current) =>
+      current.map((step, index) =>
+        index === activeStepIndex ? { ...step, paths: [] } : step,
+      ),
+    );
+    setPathStartMarkerId(null);
+  }
+
+  function togglePlayback() {
+    if (isPlaying) {
+      setIsPlaying(false);
+      return;
+    }
+    if (steps.length < 2) {
+      setNotice('เพิ่มอย่างน้อย 2 จังหวะก่อนเล่นแผน');
+      return;
+    }
+    if (activeStepIndex >= steps.length - 1) setActiveStepIndex(0);
+    setIsPlaying(true);
+    setTool('move');
+    setPathStartMarkerId(null);
+  }
+
+  function savePrototype() {
+    window.localStorage.setItem(
+      `football-tactics-staging:${tournament.id}`,
+      JSON.stringify({ board, steps }),
+    );
+    setNotice('บันทึกร่างไว้ใน Local Staging แล้ว');
+  }
+
+  async function copyPrototypeLink() {
+    const link = `${window.location.origin}${window.location.pathname}#tactics-staging`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setNotice('คัดลอกลิงก์ Local Staging แล้ว');
+    } catch {
+      setNotice('เบราว์เซอร์นี้ยังคัดลอกลิงก์ไม่ได้');
+    }
+  }
+
+  const toolOptions: Array<{
+    id: TacticTool;
+    label: string;
+    icon: typeof Move;
+  }> = [
+    { id: 'move', label: 'ย้าย', icon: Move },
+    { id: 'run', label: 'เส้นวิ่ง', icon: Footprints },
+    { id: 'pass', label: 'ส่งบอล', icon: ArrowRight },
+  ];
+
   return (
     <>
       <PageHeader title="กระดานแท็กติก" eyebrow={tournament.name} />
       <div className="space-y-4 px-4 py-4 pb-8">
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs font-black text-amber-800">
+          LOCAL STAGING · แบบร่างนี้ยังไม่บันทึกเข้าเกมจริง
+        </div>
         <section className="settings-card">
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
             <select
@@ -252,7 +458,7 @@ export function TacticsScreen({
           </div>
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-xs font-bold text-slate-500">
-              ลากผู้เล่นและลูกบอลเพื่อจัดแผน · บันทึกอัตโนมัติ
+              ลากเพื่อจัดแผน หรือเลือกเส้นแล้วแตะต้นทางและปลายทาง
             </p>
             <Button
               type="button"
@@ -264,6 +470,92 @@ export function TacticsScreen({
               รีเซ็ต
             </Button>
           </div>
+        </section>
+
+        <section className="settings-card space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h2 className="section-title">จังหวะการเล่น</h2>
+              <p className="section-note">สร้างได้สูงสุด 8 จังหวะ</p>
+            </div>
+            <Button
+              type="button"
+              onClick={addStep}
+              disabled={steps.length >= 8}
+              className="h-10 rounded-xl bg-[#11823b] px-3 text-xs font-black"
+            >
+              <Plus />
+              เพิ่มจังหวะ
+            </Button>
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
+            {steps.map((step, index) => (
+              <button
+                key={step.id}
+                type="button"
+                onClick={() => {
+                  setActiveStepIndex(index);
+                  setIsPlaying(false);
+                  setPathStartMarkerId(null);
+                }}
+                className={`h-10 shrink-0 rounded-xl px-3 text-sm font-black ${index === activeStepIndex ? 'bg-[#11823b] text-white' : 'border border-slate-200 bg-white text-slate-600'}`}
+              >
+                {index + 1}. {step.title || `จังหวะ ${index + 1}`}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <input
+              aria-label="ชื่อจังหวะ"
+              value={currentStep?.title ?? ''}
+              onChange={(event) => updateStepTitle(event.target.value)}
+              className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-[#35a95f]"
+              placeholder="ตั้งชื่อจังหวะ"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={removeStep}
+              disabled={steps.length <= 1}
+              aria-label="ลบจังหวะนี้"
+              className="h-11 w-11 shrink-0 rounded-xl p-0 text-red-600"
+            >
+              <Trash2 />
+            </Button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            {toolOptions.map((option) => {
+              const Icon = option.icon;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={tool === option.id}
+                  onClick={() => chooseTool(option.id)}
+                  className={`flex h-11 items-center justify-center gap-1.5 rounded-xl text-xs font-black ${tool === option.id ? 'bg-slate-900 text-white' : 'border border-slate-200 bg-white text-slate-600'}`}
+                >
+                  <Icon className="h-4 w-4" />
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          {tool !== 'move' && (
+            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
+              <span>
+                {pathStartMarkerId
+                  ? 'เลือกผู้เล่นหรือลูกบอลปลายทาง'
+                  : 'เลือกผู้เล่นหรือลูกบอลต้นทาง'}
+              </span>
+              <button
+                type="button"
+                onClick={clearPaths}
+                className="font-black text-red-600"
+              >
+                ล้างเส้น
+              </button>
+            </div>
+          )}
         </section>
 
         <section
@@ -280,7 +572,60 @@ export function TacticsScreen({
           <div className="pointer-events-none absolute left-1/2 top-3 h-8 w-1/3 -translate-x-1/2 border-2 border-t-0 border-white/80" />
           <div className="pointer-events-none absolute bottom-3 left-1/2 h-8 w-1/3 -translate-x-1/2 border-2 border-b-0 border-white/80" />
 
-          {board.markers.map((marker) => {
+          <svg
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-[5] h-full w-full"
+          >
+            <defs>
+              <marker
+                id="tactic-run-arrow"
+                markerWidth="8"
+                markerHeight="8"
+                refX="7"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M0,0 L8,4 L0,8 Z" fill="#ff9f1c" />
+              </marker>
+              <marker
+                id="tactic-pass-arrow"
+                markerWidth="8"
+                markerHeight="8"
+                refX="7"
+                refY="4"
+                orient="auto"
+              >
+                <path d="M0,0 L8,4 L0,8 Z" fill="#ffffff" />
+              </marker>
+            </defs>
+            {currentStep?.paths.map((path) => {
+              const from = visibleMarkers.find(
+                (marker) => marker.id === path.fromMarkerId,
+              );
+              const to = visibleMarkers.find(
+                (marker) => marker.id === path.toMarkerId,
+              );
+              if (!from || !to) return null;
+              const isRun = path.kind === 'run';
+              return (
+                <line
+                  key={path.id}
+                  x1={`${from.x}%`}
+                  y1={`${from.y}%`}
+                  x2={`${to.x}%`}
+                  y2={`${to.y}%`}
+                  stroke={isRun ? '#ff9f1c' : '#ffffff'}
+                  strokeWidth="4"
+                  strokeDasharray={isRun ? '10 8' : undefined}
+                  strokeLinecap="round"
+                  markerEnd={`url(#${isRun ? 'tactic-run-arrow' : 'tactic-pass-arrow'})`}
+                  className="drop-shadow-md"
+                />
+              );
+            })}
+          </svg>
+
+          {visibleMarkers.map((marker) => {
             const team = tournament.teams.find(
               (item) => item.id === marker.teamId,
             );
@@ -297,6 +642,11 @@ export function TacticsScreen({
                 onPointerDown={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
+                  if (isPlaying) return;
+                  if (tool !== 'move') {
+                    choosePathMarker(marker.id);
+                    return;
+                  }
                   event.currentTarget.setPointerCapture(event.pointerId);
                   setDragPreview({
                     markerId: marker.id,
@@ -336,7 +686,7 @@ export function TacticsScreen({
                 onLostPointerCapture={() => setDragPreview(null)}
                 onDragStart={(event) => event.preventDefault()}
                 onKeyDown={(event) => moveFromKeyboard(event, marker)}
-                className="absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 cursor-grab flex-col items-center outline-none will-change-transform active:cursor-grabbing focus-visible:ring-4 focus-visible:ring-white/80"
+                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none transition-[left,top] duration-700 ease-in-out will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'} ${pathStartMarkerId === marker.id ? 'drop-shadow-[0_0_10px_#fbbf24]' : ''}`}
                 style={{ left: `${preview.x}%`, top: `${preview.y}%` }}
               >
                 <span
@@ -362,6 +712,64 @@ export function TacticsScreen({
           })}
         </section>
 
+        <section className="settings-card space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-black text-[#11823b]">PLAYBACK</p>
+              <h2 className="section-title">
+                จังหวะ {activeStepIndex + 1} จาก {steps.length}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={activeStepIndex === 0 || isPlaying}
+                onClick={() => setActiveStepIndex((index) => index - 1)}
+                aria-label="จังหวะก่อนหน้า"
+                className="h-10 w-10 rounded-full p-0"
+              >
+                <ArrowLeft />
+              </Button>
+              <Button
+                type="button"
+                onClick={togglePlayback}
+                aria-label={isPlaying ? 'หยุดเล่นแผน' : 'เล่นแผน'}
+                className="h-12 w-12 rounded-full bg-[#11823b] p-0"
+              >
+                {isPlaying ? <Pause /> : <Play />}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={activeStepIndex >= steps.length - 1 || isPlaying}
+                onClick={() => setActiveStepIndex((index) => index + 1)}
+                aria-label="จังหวะถัดไป"
+                className="h-10 w-10 rounded-full p-0"
+              >
+                <ArrowRight />
+              </Button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {steps.map((step, index) => (
+              <button
+                key={step.id}
+                type="button"
+                aria-label={`ไปจังหวะ ${index + 1}`}
+                onClick={() => {
+                  setActiveStepIndex(index);
+                  setIsPlaying(false);
+                }}
+                className={`h-2.5 flex-1 rounded-full transition-colors ${index <= activeStepIndex ? 'bg-[#11823b]' : 'bg-slate-200'}`}
+              />
+            ))}
+          </div>
+          <p className="text-center text-xs font-bold text-slate-500">
+            {isPlaying ? 'กำลังเล่นแผน…' : currentStep?.title}
+          </p>
+        </section>
+
         <section className="settings-card">
           <label htmlFor="tactics-notes" className="section-title">
             โน้ตแผนการเล่น
@@ -370,7 +778,7 @@ export function TacticsScreen({
             id="tactics-notes"
             value={board.notes}
             onChange={(event) =>
-              updateBoard({ ...board, notes: event.target.value.slice(0, 500) })
+              setBoard({ ...board, notes: event.target.value.slice(0, 500) })
             }
             rows={4}
             placeholder="เช่น เพรสแดนบน, เปลี่ยนตัวทุก 5 นาที, ลูกเตะมุมให้ใครเปิด…"
@@ -380,6 +788,30 @@ export function TacticsScreen({
             {board.notes.length}/500
           </p>
         </section>
+        <div className="grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            onClick={savePrototype}
+            className="h-12 rounded-xl bg-[#11823b] font-black"
+          >
+            <Save />
+            บันทึกร่าง
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void copyPrototypeLink()}
+            className="h-12 rounded-xl font-black"
+          >
+            <Share2 />
+            คัดลอกลิงก์
+          </Button>
+        </div>
+        {notice && (
+          <div className="sticky bottom-20 z-30 rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white shadow-xl">
+            {notice}
+          </div>
+        )}
       </div>
     </>
   );
