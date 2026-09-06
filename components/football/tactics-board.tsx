@@ -183,8 +183,38 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
   const [notice, setNotice] = useState('');
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers = currentStep?.markers ?? board.markers;
+  const tournamentTeamIds = tournament.teams.map((team) => team.id).join('|');
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = window.localStorage.getItem(
+          `football-tactics-staging:${tournament.id}`,
+        );
+        if (!raw) return;
+        const saved = JSON.parse(raw) as {
+          board?: TacticsBoard;
+          steps?: TacticStep[];
+        };
+        const savedTeamsAreValid =
+          saved.board &&
+          tournamentTeamIds.split('|').includes(saved.board.teamAId) &&
+          tournamentTeamIds.split('|').includes(saved.board.teamBId);
+        if (!savedTeamsAreValid || !saved.steps?.length) return;
+        setBoard(saved.board!);
+        setSteps(saved.steps.slice(0, 8));
+        setActiveStepIndex(0);
+        setNotice('โหลดร่าง Local Staging ที่บันทึกไว้แล้ว');
+      } catch {
+        window.localStorage.removeItem(
+          `football-tactics-staging:${tournament.id}`,
+        );
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [tournament.id, tournamentTeamIds]);
 
   useEffect(() => {
     if (!isPlaying) return;
