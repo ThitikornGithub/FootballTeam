@@ -39,6 +39,10 @@ const TEAM_A_POSITIONS = [
   [50, 48],
 ] as const;
 
+const PLAYBACK_MOVE_MS = 1600;
+const PLAYBACK_STEP_MS = 2200;
+const PLAYBACK_START_DELAY_MS = 350;
+
 function formationPosition(index: number, isTeamA: boolean) {
   const [x, y] = TEAM_A_POSITIONS[index] ?? [50, 48];
   return {
@@ -215,6 +219,10 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
   const [notice, setNotice] = useState('');
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers = currentStep?.markers ?? board.markers;
+  const visiblePaths =
+    isPlaying && activeStepIndex > 0
+      ? (steps[activeStepIndex - 1]?.paths ?? [])
+      : (currentStep?.paths ?? []);
   const tournamentTeamIds = tournament.teams.map((team) => team.id).join('|');
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
@@ -271,7 +279,11 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
         if (reachedLastStep) setIsPlaying(false);
         else setActiveStepIndex((index) => index + 1);
       },
-      reachedLastStep ? 250 : 1250,
+      reachedLastStep
+        ? PLAYBACK_STEP_MS
+        : activeStepIndex === 0
+          ? PLAYBACK_START_DELAY_MS
+          : PLAYBACK_STEP_MS,
     );
     return () => window.clearTimeout(timer);
   }, [activeStepIndex, isPlaying, steps.length]);
@@ -731,7 +743,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
               </marker>
             </defs>
             {[
-              ...(currentStep?.paths ?? []),
+              ...visiblePaths,
               ...(pathPreview ? [{ id: 'path-preview', ...pathPreview }] : []),
             ].map((path) => {
               const isRun = path.kind === 'run';
@@ -817,8 +829,14 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                 onLostPointerCapture={() => setDragPreview(null)}
                 onDragStart={(event) => event.preventDefault()}
                 onKeyDown={(event) => moveFromKeyboard(event, marker)}
-                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${isPlaying ? 'transition-[left,top] duration-700 ease-in-out' : ''} ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
-                style={{ left: `${preview.x}%`, top: `${preview.y}%` }}
+                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${isPlaying ? 'transition-[left,top] ease-in-out' : ''} ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
+                style={{
+                  left: `${preview.x}%`,
+                  top: `${preview.y}%`,
+                  transitionDuration: isPlaying
+                    ? `${PLAYBACK_MOVE_MS}ms`
+                    : undefined,
+                }}
               >
                 <span
                   className={`grid place-items-center rounded-full border-white font-black shadow-lg ${isBall ? 'h-6 w-6 border-2 bg-white text-xs' : 'h-10 w-10 border-[3px] text-sm'}`}
