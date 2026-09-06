@@ -149,6 +149,37 @@ function copyMarkers(markers: TacticMarker[]) {
   return markers.map((marker) => ({ ...marker }));
 }
 
+function markersAtPathDestinations(step: TacticStep) {
+  const nextMarkers = copyMarkers(step.markers);
+  for (const path of step.paths) {
+    const targetMarker =
+      path.kind === 'pass'
+        ? step.markers.find((marker) => marker.kind === 'ball')
+        : step.markers
+            .filter((marker) => marker.kind === 'player')
+            .map((marker) => ({
+              marker,
+              distance: Math.hypot(
+                marker.x - path.from.x,
+                marker.y - path.from.y,
+              ),
+            }))
+            .sort((first, second) => first.distance - second.distance)
+            .find(({ distance }) => distance <= 10)?.marker;
+    if (!targetMarker) continue;
+    const index = nextMarkers.findIndex(
+      (marker) => marker.id === targetMarker.id,
+    );
+    if (index >= 0)
+      nextMarkers[index] = {
+        ...nextMarkers[index],
+        x: path.to.x,
+        y: path.to.y,
+      };
+  }
+  return nextMarkers;
+}
+
 export function TacticsScreen({ tournament }: { tournament: Tournament }) {
   const pitchRef = useRef<HTMLDivElement>(null);
   const [dragPreview, setDragPreview] = useState<{
@@ -341,7 +372,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     const nextStep: TacticStep = {
       id: prototypeId('step'),
       title: `จังหวะ ${steps.length + 1}`,
-      markers: copyMarkers(currentStep.markers),
+      markers: markersAtPathDestinations(currentStep),
       paths: [],
     };
     setSteps((current) => [
@@ -352,6 +383,11 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     setActiveStepIndex(activeStepIndex + 1);
     setTool('move');
     setPathPreview(null);
+    setNotice(
+      currentStep.paths.length
+        ? 'สร้างจังหวะใหม่และขยับตัวตามลูกศรแล้ว'
+        : 'สร้างจังหวะใหม่แล้ว ลากตัวไปตำแหน่งถัดไปได้เลย',
+    );
   }
 
   function removeStep() {
@@ -567,26 +603,31 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
             })}
           </div>
           {tool !== 'move' && (
-            <div className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
-              <span>กดลากจากจุดใดก็ได้ไปยังพื้นที่หรือประตู</span>
-              <div className="flex shrink-0 gap-3">
-                <button
-                  type="button"
-                  onClick={undoLastPath}
-                  disabled={!currentStep?.paths.length}
-                  className="font-black text-slate-700 disabled:opacity-35"
-                >
-                  ย้อนเส้น
-                </button>
-                <button
-                  type="button"
-                  onClick={clearPaths}
-                  disabled={!currentStep?.paths.length}
-                  className="font-black text-red-600 disabled:opacity-35"
-                >
-                  ล้าง
-                </button>
+            <div className="space-y-2 rounded-xl bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600">
+              <div className="flex items-center justify-between">
+                <span>กดลากจากจุดใดก็ได้ไปยังพื้นที่หรือประตู</span>
+                <div className="flex shrink-0 gap-3">
+                  <button
+                    type="button"
+                    onClick={undoLastPath}
+                    disabled={!currentStep?.paths.length}
+                    className="font-black text-slate-700 disabled:opacity-35"
+                  >
+                    ย้อนเส้น
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearPaths}
+                    disabled={!currentStep?.paths.length}
+                    className="font-black text-red-600 disabled:opacity-35"
+                  >
+                    ล้าง
+                  </button>
+                </div>
               </div>
+              <p className="text-xs text-[#087632]">
+                เพิ่มจังหวะแล้ว ผู้เล่นตามเส้นวิ่งและลูกบอลตามเส้นส่งจะขยับให้ทันที
+              </p>
             </div>
           )}
         </section>
@@ -776,7 +817,7 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                 onLostPointerCapture={() => setDragPreview(null)}
                 onDragStart={(event) => event.preventDefault()}
                 onKeyDown={(event) => moveFromKeyboard(event, marker)}
-                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none transition-[left,top] duration-700 ease-in-out will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
+                className={`absolute z-10 flex touch-none -translate-x-1/2 -translate-y-1/2 flex-col items-center outline-none will-change-transform focus-visible:ring-4 focus-visible:ring-white/80 ${isPlaying ? 'transition-[left,top] duration-700 ease-in-out' : ''} ${tool === 'move' && !isPlaying ? 'cursor-grab active:cursor-grabbing' : 'pointer-events-none'}`}
                 style={{ left: `${preview.x}%`, top: `${preview.y}%` }}
               >
                 <span
