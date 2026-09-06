@@ -1,4 +1,5 @@
 import type { Tournament } from '@/lib/football-types';
+import { parseTournament } from '@/lib/football-schema';
 
 const DATA_API_URL =
   'https://ep-falling-night-b3rsao2f.apirest.c-4.ap-southeast-1.aws.neon.tech/neondb/rest/v1';
@@ -26,6 +27,35 @@ export type FootballGameSummary = {
   updatedAt: string;
 };
 
+type SaveFootballGameResponse = StoredFootballGame & { conflict?: boolean };
+
+export class RevisionConflictError extends Error {
+  constructor(readonly latest: StoredFootballGame) {
+    super('The shared game changed on another device.');
+    this.name = 'RevisionConflictError';
+  }
+}
+
+function parseStoredGame(value: unknown): StoredFootballGame | null {
+  if (!value || typeof value !== 'object') return null;
+  const game = value as Record<string, unknown>;
+  const state = parseTournament(game.state);
+  if (
+    typeof game.id !== 'string' ||
+    !state ||
+    !Number.isInteger(game.revision) ||
+    Number(game.revision) < 1 ||
+    typeof game.updatedAt !== 'string'
+  )
+    throw new Error('ข้อมูลเกมจากฐานข้อมูลมีรูปแบบไม่ถูกต้อง');
+  return {
+    id: game.id,
+    state,
+    revision: Number(game.revision),
+    updatedAt: game.updatedAt,
+  };
+}
+
 async function callRpc<T>(
   name: string,
   body: Record<string, unknown>,
@@ -49,36 +79,68 @@ async function callRpc<T>(
   return (await response.json()) as T;
 }
 
-export function createSharedGame(tournament: Tournament, dateCode: string) {
-  return callRpc<StoredFootballGame>('create_football_game', {
+export async function createSharedGame(
+  tournament: Tournament,
+  dateCode: string,
+) {
+  const value = await callRpc<unknown>('create_football_game', {
     p_state: tournament,
     p_date_code: dateCode,
   });
+  const game = parseStoredGame(value);
+  if (!game) throw new Error('ฐานข้อมูลไม่ได้ส่งเกมที่สร้างกลับมา');
+  return game;
 }
 
-export function loadSharedGame(gameId: string) {
-  return callRpc<StoredFootballGame | null>('get_football_game', {
+export async function loadSharedGame(gameId: string) {
+  const value = await callRpc<unknown>('get_football_game', {
     p_game_id: gameId,
   });
+  return parseStoredGame(value);
 }
 
-export function saveSharedGame(
+export async function saveSharedGame(
   gameId: string,
   tournament: Tournament,
+  expectedRevision: number,
   options: { keepalive?: boolean } = {},
 ) {
-  return callRpc<StoredFootballGame>(
-    'save_football_game',
+  const value = await callRpc<SaveFootballGameResponse>(
+    'save_football_game_v2',
     {
       p_game_id: gameId,
       p_state: tournament,
+      p_expected_revision: expectedRevision,
     },
     options,
   );
+  const game = parseStoredGame(value);
+  if (!game) throw new Error('ฐานข้อมูลไม่ได้ส่งข้อมูลเกมกลับมา');
+  if (value.conflict) throw new RevisionConflictError(game);
+  return game;
 }
 
 export function listSharedGames() {
-  return callRpc<FootballGameSummary[]>('list_football_games', {});
+  return callRpc<unknown>('list_football_games', {}).then((value) => {
+    if (!Array.isArray(value)) throw new Error('รายการเกมมีรูปแบบไม่ถูกต้อง');
+    return value.map((item) => {
+      if (!item || typeof item !== 'object')
+        throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
+      const game = item as Record<string, unknown>;
+      if (
+        typeof game.id !== 'string' ||
+        typeof game.name !== 'string' ||
+        !Number.isInteger(game.teamCount) ||
+        !Number.isInteger(game.matchCount) ||
+        !Number.isInteger(game.finishedCount) ||
+        typeof game.startTime !== 'string' ||
+        typeof game.createdAt !== 'string' ||
+        typeof game.updatedAt !== 'string'
+      )
+        throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
+      return game as FootballGameSummary;
+    });
+  });
 }
 
 export function deleteSharedGame(gameId: string) {

@@ -396,8 +396,7 @@ export function prioritizeUpcomingMatches(
     );
     const [match] = remaining.splice(matchIndex >= 0 ? matchIndex : 0, 1);
     if (!match) continue;
-    const reversed =
-      match.teamAId === teamBId && match.teamBId === teamAId;
+    const reversed = match.teamAId === teamBId && match.teamBId === teamAId;
     prioritized.push({
       ...match,
       teamAId,
@@ -435,7 +434,8 @@ export function prioritizeUpcomingMatches(
     return {
       ...next,
       ...scheduled,
-      status: editableIndex === 1 ? ('current' as const) : ('upcoming' as const),
+      status:
+        editableIndex === 1 ? ('current' as const) : ('upcoming' as const),
     };
   });
 
@@ -621,15 +621,11 @@ export function setMatchStatus(
     (match) => match.id === matchId,
   );
   if (targetIndex < 0) return tournament;
-  const matches = tournament.matches.map((match, index) => {
+  const matches = tournament.matches.map((match) => {
     if (status === 'current') {
       if (match.id === matchId) return { ...match, status: 'current' as const };
       if (match.status === 'current')
-        return {
-          ...match,
-          status:
-            index < targetIndex ? ('finished' as const) : ('upcoming' as const),
-        };
+        return { ...match, status: 'upcoming' as const };
     }
     if (match.id === matchId) return { ...match, status };
     return match;

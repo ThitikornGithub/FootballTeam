@@ -2,7 +2,7 @@
 
 อัปเดตล่าสุด: 6 กันยายน 2026  
 ขอบเขตการตรวจ: source code, scheduling engine, Neon persistence, GitHub Pages deployment, dependency audit และข้อมูลที่อยู่ใน Neon ณ วันที่ตรวจ  
-สถานะโค้ดที่ใช้ตรวจ: `33ce7bc` (`Smooth tactics board touch controls`)
+สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ bug-fix วันที่ 6 กันยายน 2026
 
 ## 1. ภาพรวมโปรเจกต์
 
@@ -11,7 +11,7 @@ FootballTeam เป็น mobile-first web app สำหรับกลุ่ม
 ความสามารถหลัก:
 
 - สร้างตารางแบบ round robin และวนรอบต่อจนเต็มช่วงเวลาที่กำหนด
-- ค่าเริ่มต้น 4 ทีม เวลา 19:00–22:00 แข่ง 10 นาที พัก 2 นาที
+- ค่าเริ่มต้น 4 ทีม เวลา 19:00–22:00 แข่ง 7 นาที พัก 1 นาที
 - เลือกคู่แรกตอนสร้างเกม และเลือก 1–2 คู่ถัดไปจากหน้าตั้งค่า
 - จัดการรายชื่อผู้เล่น สถานะมาวันนี้/ขาดวันนี้ และคิวผู้รักษาประตูแยกตามทีม
 - ใส่สกอร์ จบเกม แก้สกอร์ ยกเลิกผล และเพิ่มเกมเมื่อเล่นต่อ
@@ -50,21 +50,22 @@ Technology:
 
 ## 3. Source map
 
-| Path | Responsibility |
-| --- | --- |
-| `components/football/football-app.tsx` | หน้าหลักทั้งหมด, navigation, setup, teams, schedule, score, settings, share, game list และ sync lifecycle |
-| `components/football/tactics-board.tsx` | กระดาน tactic และ pointer/touch interaction |
-| `components/football/shared.tsx` | header, bottom navigation, team colors และ shared controls |
-| `lib/football-engine.ts` | scheduling, match status, score, standings, overtime และ GK assignment |
-| `lib/football-types.ts` | domain types ทั้งหมด |
-| `lib/football-data-api.ts` | Neon Data API endpoint, public credential และ RPC client |
-| `lib/standings-share-card.ts` | วาดและ export PNG ตารางคะแนน |
-| `lib/demo-data.ts` | ข้อมูลตัวอย่าง 4 ทีม |
-| `db/neon-schema.sql` | table, RPC functions และ grants ของ Neon |
-| `scripts/verify-engine.ts` | engine smoke checks |
-| `scripts/github-pages-404.html` | redirect deep path ของ GitHub Pages กลับเข้า SPA |
-| `.github/workflows/deploy-pages.yml` | build และ deploy ทุกครั้งที่ push `main` |
-| `next.config.ts` | static export และ `/FootballTeam` asset prefix |
+| Path                                    | Responsibility                                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `components/football/football-app.tsx`  | หน้าหลักทั้งหมด, navigation, setup, teams, schedule, score, settings, share, game list และ sync lifecycle |
+| `components/football/tactics-board.tsx` | กระดาน tactic และ pointer/touch interaction                                                               |
+| `components/football/shared.tsx`        | header, bottom navigation, team colors และ shared controls                                                |
+| `lib/football-engine.ts`                | scheduling, match status, score, standings, overtime และ GK assignment                                    |
+| `lib/football-types.ts`                 | domain types ทั้งหมด                                                                                      |
+| `lib/football-data-api.ts`              | Neon Data API endpoint, public credential และ RPC client                                                  |
+| `lib/football-schema.ts`                | Runtime validation ของ state ที่มาจาก DB/local backup                                                     |
+| `lib/standings-share-card.ts`           | วาดและ export PNG ตารางคะแนน                                                                              |
+| `lib/demo-data.ts`                      | ข้อมูลตัวอย่าง 4 ทีม                                                                                      |
+| `db/neon-schema.sql`                    | table, RPC functions และ grants ของ Neon                                                                  |
+| `scripts/verify-engine.ts`              | engine smoke checks                                                                                       |
+| `scripts/github-pages-404.html`         | redirect deep path ของ GitHub Pages กลับเข้า SPA                                                          |
+| `.github/workflows/deploy-pages.yml`    | build และ deploy ทุกครั้งที่ push `main`                                                                  |
+| `next.config.ts`                        | static export และ `/FootballTeam` asset prefix                                                            |
 
 `components/ui/` ส่วนใหญ่เป็น generated UI catalog ไม่ใช่ทุกไฟล์ที่ถูกใช้งานจริง หลีกเลี่ยงการแก้ทั้งโฟลเดอร์โดยไม่จำเป็น
 
@@ -97,26 +98,29 @@ RPC ที่ browser เรียกได้:
 
 - `create_football_game`
 - `get_football_game`
-- `save_football_game`
+- `save_football_game` (legacy compatibility)
+- `save_football_game_v2` (optimistic revision check)
 - `list_football_games`
 - `delete_football_game`
 
 พฤติกรรมปัจจุบัน:
 
 1. เมื่อเปิด deep link แอปโหลด state จาก Neon
-2. เมื่อแก้ state แอปเขียน local backup ทันที และ debounce การบันทึก Neon 450 ms
-3. เมื่อ page ถูกซ่อนหรือปิด มี keepalive flush เพื่อพยายามส่ง state ล่าสุด
-4. ทุก 4 วินาที แอป poll Neon เพื่อรับการแก้ไขจากอุปกรณ์อื่น
-5. สถานะบนหน้า Home คือ `กำลังบันทึก`, `บันทึกแล้ว`, `ซิงก์ไม่สำเร็จ` หรือ `เฉพาะเครื่อง`
+2. เมื่อแก้ state แอปเขียน local backup ทันที เก็บ save queue และ debounce 450 ms
+3. การบันทึกใช้ `save_football_game_v2(p_expected_revision)` เพื่อป้องกันการเขียนทับข้ามเครื่อง
+4. เมื่อ page ถูกซ่อนหรือปิด มี keepalive flush เพื่อพยายามส่ง state ล่าสุด
+5. แอป poll Neon ทุก 15 วินาทีเฉพาะตอนหน้า visible และไม่ apply remote ขณะมี local dirty state
+6. ถ้า revision ชนกันจะแสดงตัวเลือก “ใช้ข้อมูลล่าสุด” หรือ “เก็บข้อมูลเครื่องนี้”
+7. สถานะบนหน้า Home คือ `กำลังบันทึก`, `บันทึกแล้ว`, `ซิงก์ไม่สำเร็จ`, `ข้อมูลชนกัน` หรือ `เฉพาะเครื่อง`
 
-ข้อสำคัญ: `revision` ใน DB ถูกเพิ่มทุกครั้งที่ save แต่ client ยังไม่ได้ใช้ revision ทำ optimistic concurrency control จึงยังเป็น last-write-wins
+Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql`; ต้อง apply migration นี้ก่อน deploy frontend ที่เรียก v2
 
 ## 6. URL และ routing
 
 - Root `/FootballTeam/` เปิดหน้าเริ่มต้น 3 ปุ่มเสมอ
 - Game URL ใช้ `/FootballTeam/gameYYYYMMDD-N`
 - GitHub Pages ไม่มี SPA rewrite จริง จึงใช้ `404.html` เก็บ path ใน `sessionStorage`, redirect ไป root แล้ว React คืน path ก่อนอ่าน Game ID
-- Browser back/forward ยังไม่ได้ synchronize กับ app state ผ่าน `popstate`; navigation หลักควรใช้ปุ่มในแอป
+- มี `popstate` listener แล้ว ดังนั้น Back/Forward จะโหลด game หรือกลับ Home ให้ตรงกับ URL
 
 ## 7. Security model ที่ตั้งใจไว้
 
@@ -177,96 +181,29 @@ Automated checks ที่ผ่าน:
 - TypeScript `--noEmit`
 - Engine smoke checks: defaults, round-robin repeats, time window, score, standings, overtime, GK fairness และ reopen match
 - GitHub Pages production build ด้วย Node 24 ในรอบ audit นี้
+- `npm audit`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.4 และ Wrangler 4.129.0
+- Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
+- Local UI smoke test ที่ 320px: Home, score input, standings table, schedule, tactics marker และ player controls ไม่ล้นขอบ
 
 ยังไม่มี automated browser/E2E tests และรอบ audit นี้ไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
 
-## 10. Open findings และ known risks
+## 10. Resolved findings และ known limitations
 
-### P1 — Data integrity
+รายการ P1/P2 ที่ตรวจพบในรอบก่อนถูกแก้แล้ว: revision CAS และ conflict UI, serialized save queue/retry, local draft recovery, safe match transition, tactic roster reconciliation, runtime schema validation, responsive score/table/player controls, score cap ที่ 99, settings copy, `popstate` history, และ `npm test`
 
-#### 1. Multi-device edits สามารถเขียนทับกันได้
+ข้อจำกัดที่ยังตั้งใจคงไว้:
 
-`save_football_game` เพิ่ม revision แต่ไม่รับ expected revision และ client ไม่ส่ง revision กลับไปตรวจ สองเครื่องที่แก้พร้อมกันจึงเป็น last-write-wins การเปลี่ยน score จากเครื่องหนึ่งอาจถูก state เก่าจากอีกเครื่องเขียนทับทั้งก้อน
+- GitHub Pages ไม่มี server-side rewrite จริง จึงอาจตอบ 404 ชั่วครู่เมื่อเปิด `/FootballTeam/game...` โดยตรงก่อน `404.html` redirect กลับเข้า SPA
+- ยังไม่มี automated browser/E2E suite; รอบนี้มี local UI smoke test ที่ 320px และต้องตรวจ touch/native share บนอุปกรณ์จริงเมื่อมีโอกาส
+- แอปเปิดให้ทุกคนที่มีลิงก์แก้ไขและลบได้ตาม requirement กลุ่มเล็ก จึงไม่เหมาะกับข้อมูลสำคัญ
 
-แนวทางแก้: เพิ่ม `p_expected_revision`, update ด้วย `where revision = p_expected_revision`, คืน conflict เมื่อ revision ไม่ตรง แล้วทำ conflict/reload UI หรือ merge เฉพาะ field ที่เปลี่ยน
-
-#### 2. Reconnect/poll อาจทับ local change ที่ยังส่งไม่สำเร็จ
-
-เมื่อ autosave fail แอปเก็บ local backup ไว้ แต่ poll ที่กลับมาสำเร็จภายหลังสามารถนำ remote state เก่ามาแทน local state ก่อนมี retry ที่แน่นอน
-
-แนวทางแก้: มี explicit dirty state และ save queue; ห้าม poll apply remote ขณะ dirty/in-flight; retry ด้วย backoff; ใช้ revision conflict control ร่วมกัน
-
-#### 3. เกมที่สร้างไม่สำเร็จบน Neon กู้กลับหลัง reload ไม่ได้จาก UI
-
-เมื่อ create RPC fail แอปแสดงเกมเป็น `เฉพาะเครื่อง` และเขียน backup แต่ root route ตั้งใจไม่ restore local tournament ปัจจุบันยังไม่มีปุ่ม retry publish หลังการ์ดข้อมูลการแข่งขันถูกเอาออกจาก Settings ดังนั้น refresh/ปิดหน้าอาจทำให้เกม local-only หายจากหน้าจอ แม้ bytes อาจยังอยู่ใน localStorage
-
-แนวทางแก้: เพิ่ม recovery banner ที่ root หรือบันทึก draft list แยก พร้อมปุ่ม “ลองบันทึกขึ้นฐานข้อมูลอีกครั้ง”
-
-### P2 — Functional correctness
-
-#### 4. กดเริ่มแมตช์อนาคตทำให้แมตช์ปัจจุบันจบโดยไม่มีสกอร์
-
-`setMatchStatus(..., 'current')` เปลี่ยน current match เดิมที่อยู่ก่อน target เป็น `finished` แม้ไม่มี score ขณะที่ match ระหว่างกลางยังเป็น `upcoming` ตรวจซ้ำด้วย engine edge-case แล้วเกิดจริง
-
-แนวทางแก้: ก่อนเริ่ม match อื่นให้ถามว่าจะพัก/ย้าย current เดิมกลับเป็น upcoming หรือบันทึกผลก่อน ห้ามสร้าง finished match ที่ score ไม่ครบโดยไม่ยืนยัน
-
-#### 5. กระดาน tactic ไม่ reconcile เมื่อ roster เปลี่ยน
-
-ถ้าสร้าง tactic แล้วเพิ่มหรือลบผู้เล่น `storedBoard` ยังถือว่า valid ตราบใดที่สองทีมยังอยู่ ผู้เล่นใหม่จึงไม่เพิ่มเป็น marker และผู้เล่นที่ลบอาจยังเหลือ marker พร้อม label เก่า จนกด reset หรือเปลี่ยนทีม
-
-แนวทางแก้: reconcile markers ด้วย current player IDs ทุกครั้งที่อ่าน board โดยรักษาพิกัดของ marker ที่ยังอยู่
-
-#### 6. ไม่มี runtime schema validation สำหรับ state จาก DB/local backup
-
-client cast JSON เป็น `Tournament` โดยตรง และ RPC ตรวจเพียงว่า state เป็น JSON object ผู้ที่ถือ public credential สามารถส่ง object รูปแบบผิด ทำให้หน้าจอ throw ตอนอ่าน `teams`, `matches` หรือวันที่
-
-แนวทางแก้: เพิ่ม versioned schema validation ที่ client และ validation ใน RPC ก่อน save; reject state ใหญ่หรือ field ที่ผิดประเภท
-
-### P2 — Dependency/security maintenance
-
-`npm audit` วันที่ตรวจรายงาน 11 packages ใน dependency tree: 8 high, 2 moderate, 1 low; เมื่อใช้ `--omit=dev` ยังรายงาน 5 high และ 1 low ตามการจัดประเภท package ของ npm
-
-รายการ direct upgrade ที่ audit เสนอมี `react-server-dom-webpack 19.2.8`, `vinext 1.0.0-beta.9`, `vite 8.2.2` และ `@cloudflare/vite-plugin 1.54.4` พร้อม transitive fixes ผ่าน Wrangler/Miniflare
-
-เว็บ production เป็น static GitHub Pages และไม่ได้เปิด Vinext server functions จึงลด exploit surface ของ server-side advisories หลายรายการ แต่ไม่ควรปล่อยค้าง ควร upgrade เป็นชุดใน branch แยกและรัน full regression/build ก่อน merge โดยรักษา React package versions ให้เข้าชุดกัน
-
-### P3 — UX/maintenance
-
-#### 7. Browser back/forward ไม่เปลี่ยน app view/state
-
-โค้ดใช้ `history.pushState/replaceState` แต่ไม่มี `popstate` listener ผู้ใช้กด browser Back อาจเห็น URL เปลี่ยนแต่ UI ยังเป็นเกมเดิม
-
-#### 8. ลดจำนวนทีมระหว่าง setup อาจทำให้คู่แรกที่แสดงกับคู่ที่ submit ไม่ตรงกัน
-
-UI clamp select index ด้วย `Math.min` แต่ state index เดิมไม่ถูก normalize ทันที เมื่อเลือกจำนวนทีมน้อยลงบางลำดับ คู่แรกที่ส่งเข้า engine อาจ fallback หรือถูกมองข้าม
-
-#### 9. Score input จำกัดการพิมพ์ 2 หลัก แต่ปุ่ม `+` เพิ่มเกิน 99 ได้
-
-เป็น inconsistency เล็กน้อย ควรกำหนดเพดานเดียวกันหรือยอมรับ score ไม่จำกัดทั้งสองทาง
-
-#### 10. Copy ใน Settings ไม่ตรงกับความสามารถจริง
-
-ข้อความระบุว่า “จำนวนทีมและรายชื่อผู้เล่นแก้ได้จากหน้าทีม” แต่หน้าทีมปัจจุบันแก้ได้เฉพาะ roster/attendance/GK order ไม่ได้แก้จำนวนทีม ชื่อทีม หรือสีเสื้อ
-
-#### 11. Game deep link ตอบ HTTP 404 ก่อน JavaScript redirect
-
-ข้อจำกัดของ GitHub Pages ทำให้ `/FootballTeam/game...` ตอบ `404` และส่ง custom `404.html` มากู้ path ใน browser ผู้ใช้ทั่วไปที่เปิด JavaScript จึงเข้าเกมได้ แต่ link preview bot, crawler หรือ client ที่ไม่รัน JavaScript อาจมองว่า link เสียหรือสร้าง preview ไม่ได้
-
-แนวทางแก้ถ้าต้องการ HTTP 200 จริง: เปลี่ยนไปใช้ hosting ที่รองรับ SPA rewrite เช่น Vercel/Cloudflare Pages หรือใช้ hash route; สำหรับ GitHub Pages ปัจจุบันให้ถือเป็น known platform limitation
-
-#### 12. Test command ยังไม่ถูกประกาศใน package scripts
-
-มี `scripts/verify-engine.ts` แต่ไม่มี `npm test` และยังไม่มี UI/sync/database contract tests ทำให้ regression สำคัญต้องอาศัย manual audit
+`npm audit` หลังแก้รายงาน 0 vulnerabilities และ production build ผ่าน
 
 ## 11. Recommended next work order
 
-1. แก้ P1 ทั้งสามข้อเป็นชุดเดียว: revision CAS, serialized save queue, dirty/offline retry และ local draft recovery
-2. เพิ่ม runtime Tournament schema + DB contract validation และ state size limit
-3. แก้ match transition ไม่ให้ finished โดยไม่มี score
-4. ทำ tactics roster reconciliation
-5. เพิ่ม automated tests สำหรับ sync conflict, reconnect, match state machine, setup team-count change และ tactics roster changes
-6. upgrade dependencies ใน branch แยก แล้วรัน lint/typecheck/engine/build/E2E
-7. เพิ่ม `npm test` ให้เรียก engine checks และต่อยอดเป็น UI/sync contract tests
+1. เพิ่ม browser/E2E contract tests สำหรับ score, sync conflict, reconnect และ deep link
+2. พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ HTTP 200 สำหรับทุก game path และ preview bot
+3. เพิ่ม rate limit/authentication หากนำไปใช้นอกกลุ่มเพื่อน
 
 ## 12. Rules for the next agent
 

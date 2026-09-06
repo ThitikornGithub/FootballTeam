@@ -41,6 +41,16 @@ import {
 } from './shared';
 import { Button } from '@/components/ui/button';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Table,
   TableBody,
   TableCell,
@@ -87,10 +97,13 @@ import {
   createSharedGame,
   deleteSharedGame,
   type FootballGameSummary,
+  type StoredFootballGame,
   listSharedGames,
   loadSharedGame,
+  RevisionConflictError,
   saveSharedGame,
 } from '@/lib/football-data-api';
+import { parseTournament } from '@/lib/football-schema';
 import { TacticsScreen } from './tactics-board';
 
 const STORAGE_KEY = 'football-match-maker-v1';
@@ -106,13 +119,14 @@ type AppView =
   | 'standings'
   | 'share'
   | 'games';
-type SyncStatus = 'local' | 'saving' | 'saved' | 'error';
+type SyncStatus = 'local' | 'saving' | 'saved' | 'error' | 'conflict';
 
 function readLocalBackup() {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
+    const tournament = stored ? parseTournament(JSON.parse(stored)) : null;
     return {
-      tournament: stored ? (JSON.parse(stored) as Tournament) : null,
+      tournament,
       gameId: localStorage.getItem(STORAGE_GAME_ID_KEY),
     };
   } catch {
@@ -153,7 +167,9 @@ function restoreGitHubPagesPath() {
 function gameIdFromPath() {
   const path = window.location.pathname;
   const relativePath =
-    BASE_PATH && path.startsWith(BASE_PATH) ? path.slice(BASE_PATH.length) : path;
+    BASE_PATH && path.startsWith(BASE_PATH)
+      ? path.slice(BASE_PATH.length)
+      : path;
   const candidate = relativePath.split('/').filter(Boolean)[0] ?? '';
   return GAME_ID_PATTERN.test(candidate) ? candidate : '';
 }
@@ -170,7 +186,9 @@ function bangkokDateCode() {
     month: '2-digit',
     day: '2-digit',
   }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const value = Object.fromEntries(
+    parts.map((part) => [part.type, part.value]),
+  );
   return `${value.year}${value.month}${value.day}`;
 }
 
@@ -233,7 +251,7 @@ function ScorePicker({
           onClick={() => onChange(String(Math.max(0, numericScore - 1)))}
           disabled={numericScore === 0}
           aria-label={`ลดสกอร์ ${label}`}
-          className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-35"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white disabled:opacity-35"
         >
           <Minus className="h-4 w-4" />
         </button>
@@ -248,13 +266,14 @@ function ScorePicker({
           onFocus={(event) => event.currentTarget.select()}
           onBlur={() => !score && onChange('0')}
           aria-label={`สกอร์ทีม ${label}`}
-          className="h-10 w-12 rounded-xl border border-slate-200 bg-white text-center text-xl font-black tabular-nums outline-none focus:border-[#35a95f]"
+          className="h-11 w-14 shrink-0 rounded-xl border border-slate-200 bg-white text-center text-xl font-black tabular-nums outline-none focus:border-[#35a95f]"
         />
         <button
           type="button"
-          onClick={() => onChange(String(numericScore + 1))}
+          onClick={() => onChange(String(Math.min(99, numericScore + 1)))}
+          disabled={numericScore >= 99}
           aria-label={`เพิ่มสกอร์ ${label}`}
-          className="grid h-9 w-9 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]"
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632] disabled:opacity-35"
         >
           <Plus className="h-4 w-4" />
         </button>
@@ -302,7 +321,7 @@ function CurrentMatchControl({
           รายละเอียด
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 gap-2 min-[370px]:grid-cols-2">
         <ScorePicker
           label={teamA.name}
           color={teamA.color}
@@ -351,17 +370,15 @@ function CurrentMatchControl({
 function StandingsTable({ tournament }: { tournament: Tournament }) {
   const standings = calculateStandings(tournament);
   return (
-    <section className="overflow-x-auto rounded-[22px] border border-slate-200 bg-white">
-      <table className="w-full min-w-[430px] text-center text-sm">
+    <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
+      <table className="w-full table-fixed text-center text-xs sm:text-sm">
         <thead className="bg-[#e5f5e9] text-[#087632]">
           <tr>
-            <th className="px-3 py-3 text-left">อันดับ / ทีม</th>
-            <th className="px-2 py-3">แข่ง</th>
-            <th className="px-2 py-3">ช</th>
-            <th className="px-2 py-3">ส</th>
-            <th className="px-2 py-3">พ</th>
-            <th className="px-2 py-3">+/-</th>
-            <th className="px-3 py-3">แต้ม</th>
+            <th className="w-[38%] px-2 py-3 text-left">ทีม</th>
+            <th className="w-[12%] px-1 py-3">แข่ง</th>
+            <th className="w-[22%] px-1 py-3">ช-ส-พ</th>
+            <th className="w-[13%] px-1 py-3">+/-</th>
+            <th className="w-[15%] px-2 py-3">แต้ม</th>
           </tr>
         </thead>
         <tbody>
@@ -371,24 +388,31 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
             )!;
             return (
               <tr key={standing.teamId} className="border-t border-slate-100">
-                <td className="px-3 py-3 text-left">
-                  <div className="flex items-center gap-2 font-black">
-                    <span className="w-5 text-center text-slate-400">
+                <th
+                  scope="row"
+                  aria-label={`อันดับ ${index + 1} ทีม ${team.name}`}
+                  className="px-2 py-3 text-left"
+                >
+                  <div className="flex min-w-0 items-center gap-1.5 font-black">
+                    <span className="w-4 shrink-0 text-center text-slate-400">
                       {index + 1}
                     </span>
-                    <TeamShirtIcon color={team.color} size="sm" />
-                    <span className="truncate">{team.name}</span>
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full border border-slate-200"
+                      style={{ background: COLOR_HEX[team.color] }}
+                    />
+                    <span className="min-w-0 truncate">{team.name}</span>
                   </div>
+                </th>
+                <td className="px-1 py-3 font-bold">{standing.played}</td>
+                <td className="px-1 py-3 font-bold tabular-nums">
+                  {standing.won}-{standing.drawn}-{standing.lost}
                 </td>
-                <td className="px-2 py-3 font-bold">{standing.played}</td>
-                <td className="px-2 py-3 font-bold">{standing.won}</td>
-                <td className="px-2 py-3 font-bold">{standing.drawn}</td>
-                <td className="px-2 py-3 font-bold">{standing.lost}</td>
-                <td className="px-2 py-3 font-bold">
+                <td className="px-1 py-3 font-bold">
                   {standing.goalDifference > 0 ? '+' : ''}
                   {standing.goalDifference}
                 </td>
-                <td className="px-3 py-3 text-base font-black text-[#087632]">
+                <td className="px-2 py-3 text-base font-black text-[#087632]">
                   {standing.points}
                 </td>
               </tr>
@@ -404,10 +428,16 @@ function EmptyHome({
   onSetup,
   onDemo,
   onGames,
+  recoverableDraft,
+  onRecover,
+  onDiscardDraft,
 }: {
   onSetup: () => void;
   onDemo: () => void;
   onGames: () => void;
+  recoverableDraft: Tournament | null;
+  onRecover: () => void;
+  onDiscardDraft: () => void;
 }) {
   return (
     <div className="flex min-h-[calc(100dvh-140px)] flex-col items-center justify-center px-7 pb-16 text-center">
@@ -420,6 +450,28 @@ function EmptyHome({
       <p className="max-w-xs text-sm font-medium leading-6 text-slate-500">
         สร้างตารางแบบพบกันหมด พร้อมหมุนเวียนผู้รักษาประตูให้ทุกทีม
       </p>
+      {recoverableDraft && (
+        <section className="mt-5 w-full max-w-xs rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left">
+          <p className="truncate font-black text-amber-900">
+            มีเกมที่ยังไม่ได้บันทึก: {recoverableDraft.name}
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button
+              onClick={onRecover}
+              className="h-10 rounded-xl bg-amber-700 font-black"
+            >
+              เปิดต่อ
+            </Button>
+            <Button
+              onClick={onDiscardDraft}
+              variant="outline"
+              className="h-10 rounded-xl font-black"
+            >
+              ไม่ใช้แล้ว
+            </Button>
+          </div>
+        </section>
+      )}
       <Button
         onClick={onSetup}
         className="mt-7 h-13 w-full max-w-xs rounded-2xl bg-[#11823b] text-base font-black"
@@ -448,16 +500,22 @@ function EmptyHome({
 
 function HomeScreen({
   tournament,
+  gameId,
   syncStatus,
   onNavigate,
   onOpenMatch,
   onUpdate,
+  onPublish,
+  onCopyLink,
 }: {
   tournament: Tournament;
+  gameId: string;
   syncStatus: SyncStatus;
   onNavigate: (view: AppView) => void;
   onOpenMatch: (id: string) => void;
   onUpdate: (value: Tournament) => void;
+  onPublish: () => void;
+  onCopyLink: () => void;
 }) {
   const current =
     tournament.matches.find((match) => match.status === 'current') ??
@@ -494,26 +552,44 @@ function HomeScreen({
         eyebrow={tournament.name}
         action={
           <div
-            className={`flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-black ${syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
+            aria-label={`สถานะข้อมูล: ${syncStatus}`}
+            title={`สถานะข้อมูล: ${syncStatus}`}
+            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 min-[350px]:px-2.5 text-xs font-black ${syncStatus === 'conflict' ? 'bg-orange-50 text-orange-700' : syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
           >
             {syncStatus === 'saving' ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : syncStatus === 'error' || syncStatus === 'local' ? (
+            ) : syncStatus === 'error' ||
+              syncStatus === 'local' ||
+              syncStatus === 'conflict' ? (
               <CloudOff className="h-4 w-4" />
             ) : (
               <Cloud className="h-4 w-4" />
             )}
-            {syncStatus === 'saving'
-              ? 'กำลังบันทึก'
-              : syncStatus === 'saved'
-                ? 'บันทึกแล้ว'
-                : syncStatus === 'error'
-                  ? 'ซิงก์ไม่สำเร็จ'
-                  : 'เฉพาะเครื่อง'}
+            <span className="hidden min-[350px]:inline">
+              {syncStatus === 'saving'
+                ? 'กำลังบันทึก'
+                : syncStatus === 'saved'
+                  ? 'บันทึกแล้ว'
+                  : syncStatus === 'error'
+                    ? 'ซิงก์ไม่สำเร็จ'
+                    : syncStatus === 'conflict'
+                      ? 'ข้อมูลชนกัน'
+                      : 'เฉพาะเครื่อง'}
+            </span>
           </div>
         }
       />
       <div className="space-y-4 px-4 py-4">
+        {syncStatus === 'local' && (
+          <button
+            type="button"
+            onClick={onPublish}
+            className="flex w-full items-center justify-between rounded-2xl border border-amber-200 bg-amber-50 p-3 text-left text-sm font-black text-amber-900"
+          >
+            <span>เกมนี้อยู่เฉพาะเครื่อง</span>
+            <span className="text-[#087632]">บันทึกขึ้นฐานข้อมูล</span>
+          </button>
+        )}
         <section className="grid grid-cols-3 gap-2">
           {actions.map(({ label, icon: Icon, view }) => (
             <button
@@ -530,14 +606,30 @@ function HomeScreen({
             </button>
           ))}
         </section>
+        {gameId && (
+          <button
+            type="button"
+            onClick={onCopyLink}
+            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-[#9dd2ab] bg-[#eef9f1] text-sm font-black text-[#087632] active:scale-[.99]"
+          >
+            <Copy className="h-4 w-4" />
+            คัดลอกลิงก์เกมให้เพื่อน
+          </button>
+        )}
         <section>
           <div className="mb-3 flex items-end justify-between">
             <div>
               <p className="text-lg font-black">
-                {current?.status === 'current' ? 'แข่งอยู่ตอนนี้' : 'เกมถัดไป'}
+                {current
+                  ? current.status === 'current'
+                    ? 'แข่งอยู่ตอนนี้'
+                    : 'เกมถัดไป'
+                  : 'การแข่งขันจบแล้ว'}
               </p>
               <p className="text-xs font-semibold text-slate-500">
-                ใส่สกอร์และจบเกมได้จากหน้านี้
+                {current
+                  ? 'ใส่สกอร์และจบเกมได้จากหน้านี้'
+                  : 'ดูผลการแข่งขันและตารางคะแนนได้ด้านล่าง'}
               </p>
             </div>
             {current && (
@@ -617,10 +709,10 @@ function SetupScreen({
     return index !== undefined && index >= 0 ? index : 1;
   });
   const [matchMinutes, setMatchMinutes] = useState(
-    tournament?.matchDurationMinutes ?? 10,
+    tournament?.matchDurationMinutes ?? 7,
   );
   const [breakMinutes, setBreakMinutes] = useState(
-    tournament?.breakDurationMinutes ?? 2,
+    tournament?.breakDurationMinutes ?? 1,
   );
   const [startTime, setStartTime] = useState(tournament?.startTime ?? '19:00');
   const [endTime, setEndTime] = useState(
@@ -644,6 +736,15 @@ function SetupScreen({
   const hasValidTimeRange = availableMinutes > 0;
   const enough =
     hasValidTimeRange && availableMinutes >= metrics.requiredMinutes;
+  function changeTeamCount(next: number) {
+    setTeamCount(next);
+    setFirstTeamIndex((current) => Math.min(current, next - 1));
+    setSecondTeamIndex((current) => {
+      const first = Math.min(firstTeamIndex, next - 1);
+      const bounded = Math.min(current, next - 1);
+      return bounded === first ? (first === 0 ? 1 : 0) : bounded;
+    });
+  }
   function submit() {
     if (
       !enough ||
@@ -702,7 +803,7 @@ function SetupScreen({
             value={teamCount}
             min={2}
             max={8}
-            onChange={setTeamCount}
+            onChange={changeTeamCount}
             suffix="ทีม"
           />
         </section>
@@ -748,7 +849,7 @@ function SetupScreen({
                       }
                       aria-label={`เลือกสี${COLOR_LABEL[color]}`}
                       aria-pressed={draft.color === color}
-                      className={`h-8 w-8 rounded-full border-2 ${draft.color === color ? 'ring-2 ring-[#11823b] ring-offset-2' : ''}`}
+                      className={`h-10 w-10 rounded-full border-2 ${draft.color === color ? 'ring-2 ring-[#11823b] ring-offset-2' : ''}`}
                       style={{
                         background: COLOR_HEX[color],
                         borderColor: color === 'white' ? '#94a3b8' : '#fff',
@@ -792,7 +893,9 @@ function SetupScreen({
               <span className="sr-only">ทีมที่สองของแมตช์แรก</span>
               <select
                 value={Math.min(secondTeamIndex, teamCount - 1)}
-                onChange={(event) => setSecondTeamIndex(Number(event.target.value))}
+                onChange={(event) =>
+                  setSecondTeamIndex(Number(event.target.value))
+                }
                 className="h-12 w-full rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
               >
                 {drafts.slice(0, teamCount).map((draft, index) => (
@@ -838,7 +941,7 @@ function SetupScreen({
           <div className="setting-row">
             <div>
               <h2 className="section-title">สนาม</h2>
-              <p className="section-note">V1 รองรับสนามเดียว</p>
+              <p className="section-note">รองรับ 1 สนาม</p>
             </div>
             <span className="rounded-xl bg-slate-100 px-4 py-3 font-black">
               1 สนาม 🔒
@@ -1091,7 +1194,7 @@ function TeamDetailScreen({
                       updatePlayers(reorder(team.players, dragIndex, index));
                     setDragIndex(null);
                   }}
-                  className={`flex items-center gap-2 border-b border-slate-100 bg-white p-2 last:border-0 ${player.absentToday ? 'opacity-55' : ''}`}
+                  className={`grid grid-cols-[28px_32px_minmax(0,1fr)] items-center gap-2 border-b border-slate-100 bg-white p-2 last:border-0 ${player.absentToday ? 'opacity-55' : ''}`}
                 >
                   <GripVertical className="h-5 w-5 shrink-0 text-slate-300" />
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5ea] text-xs font-black text-[#087632]">
@@ -1108,56 +1211,58 @@ function TeamDetailScreen({
                         ),
                       )
                     }
-                    className="h-10 min-w-0 flex-1 bg-transparent font-bold outline-none"
+                    className="h-10 min-w-0 bg-transparent font-bold outline-none"
                     aria-label={`ชื่อผู้เล่น ${index + 1}`}
                   />
-                  <button
-                    onClick={() =>
-                      updatePlayers(
-                        team.players.map((item) =>
-                          item.id === player.id
-                            ? { ...item, absentToday: !item.absentToday }
-                            : item,
-                        ),
-                      )
-                    }
-                    className={`rounded-lg px-2 py-1.5 text-[10px] font-black ${player.absentToday ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}
-                  >
-                    {player.absentToday ? 'ขาดวันนี้' : 'มาวันนี้'}
-                  </button>
-                  <div className="flex flex-col">
+                  <div className="col-span-3 flex items-center justify-end gap-2 pl-16">
                     <button
-                      disabled={index === 0}
                       onClick={() =>
-                        updatePlayers(reorder(team.players, index, index - 1))
+                        updatePlayers(
+                          team.players.map((item) =>
+                            item.id === player.id
+                              ? { ...item, absentToday: !item.absentToday }
+                              : item,
+                          ),
+                        )
                       }
-                      className="p-0.5 disabled:opacity-20"
-                      aria-label="เลื่อนขึ้น"
+                      className={`min-h-10 rounded-lg px-3 py-2 text-xs font-black ${player.absentToday ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}
                     >
-                      <ChevronUp className="h-4 w-4" />
+                      {player.absentToday ? 'ขาดวันนี้' : 'มาวันนี้'}
                     </button>
+                    <div className="flex gap-1">
+                      <button
+                        disabled={index === 0}
+                        onClick={() =>
+                          updatePlayers(reorder(team.players, index, index - 1))
+                        }
+                        className="grid h-10 w-10 place-items-center rounded-lg bg-slate-50 disabled:opacity-20"
+                        aria-label="เลื่อนขึ้น"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        disabled={index === team.players.length - 1}
+                        onClick={() =>
+                          updatePlayers(reorder(team.players, index, index + 1))
+                        }
+                        className="grid h-10 w-10 place-items-center rounded-lg bg-slate-50 disabled:opacity-20"
+                        aria-label="เลื่อนลง"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                    </div>
                     <button
-                      disabled={index === team.players.length - 1}
                       onClick={() =>
-                        updatePlayers(reorder(team.players, index, index + 1))
+                        updatePlayers(
+                          team.players.filter((item) => item.id !== player.id),
+                        )
                       }
-                      className="p-0.5 disabled:opacity-20"
-                      aria-label="เลื่อนลง"
+                      className="grid h-10 w-10 place-items-center rounded-lg text-red-500 hover:bg-red-50"
+                      aria-label={`ลบ ${player.name}`}
                     >
-                      <ChevronDown className="h-4 w-4" />
+                      <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
-                  <button
-                    onClick={() =>
-                      updatePlayers(
-                        team.players.filter((item) => item.id !== player.id),
-                      )
-                    }
-                    className="grid h-9 w-9 place-items-center rounded-lg text-red-500 hover:bg-red-50"
-                    aria-label={`ลบ ${player.name}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
                 </div>
               ))
             )}
@@ -1248,9 +1353,9 @@ function ScheduleScreen({
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableHead className="w-[88px] px-3">ช่วงเวลา</TableHead>
+                <TableHead className="w-[68px] px-2">เวลา</TableHead>
                 <TableHead>คู่แข่งขัน</TableHead>
-                <TableHead className="w-[76px] pr-3 text-right">ผล</TableHead>
+                <TableHead className="w-[58px] pr-2 text-right">ผล</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1291,7 +1396,7 @@ function ScheduleScreen({
                             : ''
                       }
                     >
-                      <TableCell className="px-3 py-3 align-middle font-black tabular-nums">
+                      <TableCell className="px-2 py-3 align-middle text-xs font-black tabular-nums">
                         <span className="block leading-4">
                           {match.startTime}
                         </span>
@@ -1308,7 +1413,7 @@ function ScheduleScreen({
                           type="button"
                           onClick={() => onOpenMatch(match.id)}
                           aria-label={`เปิดเกม ${match.matchNumber}: ${teamA.name} พบ ${teamB.name}`}
-                          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)] items-center gap-1 px-2 text-left"
+                          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-1 px-1 text-left min-[370px]:px-2"
                         >
                           <span className="flex min-w-0 items-center gap-1.5">
                             <span
@@ -1390,12 +1495,16 @@ function StandingsScreen({
   tournament: Tournament;
   onBack: () => void;
 }) {
+  const [showAllResults, setShowAllResults] = useState(false);
   const results = tournament.matches.filter(
     (match) =>
       match.status === 'finished' &&
       match.teamAScore !== undefined &&
       match.teamBScore !== undefined,
   );
+  const visibleResults = showAllResults
+    ? [...results].reverse()
+    : [...results].reverse().slice(0, 5);
   return (
     <>
       <PageHeader
@@ -1412,7 +1521,7 @@ function StandingsScreen({
           <h2 className="section-title mb-3">ผลการแข่งขัน</h2>
           {results.length ? (
             <div className="space-y-2">
-              {[...results].reverse().map((match) => {
+              {visibleResults.map((match) => {
                 const teamA = tournament.teams.find(
                   (team) => team.id === match.teamAId,
                 )!;
@@ -1420,20 +1529,32 @@ function StandingsScreen({
                   (team) => team.id === match.teamBId,
                 )!;
                 return (
-                  <div
-                    key={match.id}
-                    className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-xl bg-slate-50 p-3"
-                  >
-                    <span className="truncate text-right font-black">
-                      {teamA.name}
-                    </span>
-                    <span className="rounded-lg bg-white px-3 py-1 text-lg font-black tabular-nums text-[#087632] shadow-sm">
-                      {match.teamAScore} - {match.teamBScore}
-                    </span>
-                    <span className="truncate font-black">{teamB.name}</span>
+                  <div key={match.id} className="rounded-xl bg-slate-50 p-3">
+                    <p className="mb-1 text-xs font-bold text-slate-400">
+                      Match {match.matchNumber} · {match.startTime}
+                    </p>
+                    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                      <span className="truncate text-right font-black">
+                        {teamA.name}
+                      </span>
+                      <span className="rounded-lg bg-white px-3 py-1 text-lg font-black tabular-nums text-[#087632] shadow-sm">
+                        {match.teamAScore} - {match.teamBScore}
+                      </span>
+                      <span className="truncate font-black">{teamB.name}</span>
+                    </div>
                   </div>
                 );
               })}
+              {results.length > 5 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setShowAllResults((value) => !value)}
+                  className="h-11 w-full rounded-xl font-black text-[#087632]"
+                >
+                  {showAllResults ? 'ย่อรายการ' : `ดูทั้งหมด ${results.length} ผล`}
+                </Button>
+              )}
             </div>
           ) : (
             <p className="rounded-xl bg-slate-50 p-4 text-center text-sm font-semibold text-slate-500">
@@ -1489,7 +1610,7 @@ function MatchDetailScreen({
             <h2 className="section-title">บันทึกสกอร์</h2>
             <p className="section-note">ใส่ประตูของแต่ละทีมก่อนจบเกม</p>
           </div>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 min-[370px]:grid-cols-2">
             <ScorePicker
               label={teamA.name}
               color={teamA.color}
@@ -1839,47 +1960,41 @@ function GamesScreen({
           ))
         )}
       </div>
-      {confirmingGame && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/25 p-4 backdrop-blur-sm">
-          <section
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="delete-game-title"
-            aria-describedby="delete-game-description"
-            className="w-full max-w-sm rounded-[24px] bg-white p-5 shadow-2xl"
-          >
-            <h2 id="delete-game-title" className="text-lg font-black">
-              ลบ “{confirmingGame.name}”?
-            </h2>
-            <p
-              id="delete-game-description"
-              className="mt-2 text-sm font-semibold leading-6 text-slate-500"
-            >
+      <AlertDialog
+        open={Boolean(confirmingGame)}
+        onOpenChange={(open) => !open && !deletingId && setConfirmingId('')}
+      >
+        <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+          <AlertDialogHeader className="place-items-start text-left">
+            <AlertDialogTitle className="text-lg font-black">
+              ลบ “{confirmingGame?.name}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left font-semibold leading-6">
               เกม ตารางคะแนน รายชื่อทีม และผลแข่งจะถูกลบจากฐานข้อมูลถาวร
               ลิงก์เดิมจะเปิดเกมนี้ไม่ได้อีก
-            </p>
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setConfirmingId('')}
-                disabled={Boolean(deletingId)}
-                className="h-12 rounded-xl font-black"
-              >
-                ยกเลิก
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => void removeGame(confirmingGame.id)}
-                disabled={Boolean(deletingId)}
-                className="h-12 rounded-xl font-black"
-              >
-                <Trash2 />
-                {deletingId ? 'กำลังลบ…' : 'ลบถาวร'}
-              </Button>
-            </div>
-          </section>
-        </div>
-      )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 grid grid-cols-2 bg-white">
+            <AlertDialogCancel
+              disabled={Boolean(deletingId)}
+              className="h-12 rounded-xl font-black"
+            >
+              ยกเลิก
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() =>
+                confirmingGame && void removeGame(confirmingGame.id)
+              }
+              disabled={Boolean(deletingId)}
+              className="h-12 rounded-xl font-black"
+            >
+              <Trash2 />
+              {deletingId ? 'กำลังลบ…' : 'ลบถาวร'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -1903,7 +2018,9 @@ function SettingsPairPicker({
 }) {
   return (
     <fieldset disabled={disabled} className="rounded-2xl bg-slate-50 p-3">
-      <legend className="px-1 text-sm font-black text-slate-700">{label}</legend>
+      <legend className="px-1 text-sm font-black text-slate-700">
+        {label}
+      </legend>
       <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
         <select
           aria-label={`${label} ทีมแรก`}
@@ -1932,7 +2049,11 @@ function SettingsPairPicker({
           className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f] disabled:opacity-50"
         >
           {teams.map((team) => (
-            <option key={team.id} value={team.id} disabled={team.id === teamAId}>
+            <option
+              key={team.id}
+              value={team.id}
+              disabled={team.id === teamAId}
+            >
               {COLOR_LABEL[team.color]} · {team.name}
             </option>
           ))}
@@ -1961,6 +2082,9 @@ function SettingsScreen({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [name, setName] = useState(tournament.name);
+  const [teamColors, setTeamColors] = useState<Record<string, TeamColor>>(() =>
+    Object.fromEntries(tournament.teams.map((team) => [team.id, team.color])),
+  );
   const [matchMinutes, setMatchMinutes] = useState(
     tournament.matchDurationMinutes,
   );
@@ -2036,15 +2160,19 @@ function SettingsScreen({
       startTime,
       availableTimeMinutes: availableMinutes,
     });
-    const preferredPairs: Array<[string, string]> = [
-      [firstPairA, firstPairB],
-    ];
-    if (useSecondPair)
-      preferredPairs.push([secondPairA, secondPairB]);
+    const updatedWithColors = {
+      ...updated,
+      teams: updated.teams.map((team) => ({
+        ...team,
+        color: teamColors[team.id] ?? team.color,
+      })),
+    };
+    const preferredPairs: Array<[string, string]> = [[firstPairA, firstPairB]];
+    if (useSecondPair) preferredPairs.push([secondPairA, secondPairB]);
     onSave(
       remainingAfterSave > 0
-        ? prioritizeUpcomingMatches(updated, preferredPairs)
-        : updated,
+        ? prioritizeUpcomingMatches(updatedWithColors, preferredPairs)
+        : updatedWithColors,
     );
   }
 
@@ -2063,6 +2191,51 @@ function SettingsScreen({
               onChange={(event) => setName(event.target.value)}
               className="mt-2 h-12 w-full rounded-xl border border-slate-200 bg-white px-3 font-bold outline-none focus:border-[#35a95f]"
             />
+          </div>
+          <div className="border-t border-slate-100 pt-4">
+            <h2 className="section-title">สีเสื้อทีม</h2>
+            <p className="section-note">
+              เปลี่ยนสีหน้างานได้โดยไม่กระทบรายชื่อหรือผลแข่ง
+            </p>
+            <div className="mt-3 space-y-2">
+              {tournament.teams.map((team) => (
+                <div
+                  key={team.id}
+                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-2"
+                >
+                  <TeamShirtIcon
+                    color={teamColors[team.id] ?? team.color}
+                    size="sm"
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm font-black">
+                    {team.name}
+                  </span>
+                  <div className="flex basis-full justify-end gap-1">
+                    {TEAM_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        aria-label={`เปลี่ยนสีเสื้อทีม ${team.name} เป็น${COLOR_LABEL[color]}`}
+                        aria-pressed={
+                          (teamColors[team.id] ?? team.color) === color
+                        }
+                        onClick={() =>
+                          setTeamColors((current) => ({
+                            ...current,
+                            [team.id]: color,
+                          }))
+                        }
+                        className={`h-7 w-7 rounded-full border-2 ${(teamColors[team.id] ?? team.color) === color ? 'ring-2 ring-[#11823b] ring-offset-1' : ''}`}
+                        style={{
+                          background: COLOR_HEX[color],
+                          borderColor: color === 'white' ? '#94a3b8' : '#fff',
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="setting-row">
             <div>
@@ -2193,7 +2366,7 @@ function SettingsScreen({
         <section className="settings-card">
           <h2 className="section-title">ทางลัด</h2>
           <p className="section-note mt-1">
-            จำนวนทีมและรายชื่อผู้เล่นแก้ได้จากหน้าทีม โดยไม่กระทบผลแข่ง
+            รายชื่อผู้เล่นและคิว GK แก้ได้จากหน้าทีม โดยไม่กระทบผลแข่ง
           </p>
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Button
@@ -2231,45 +2404,32 @@ function SettingsScreen({
           {gameId ? 'ออกจากเกมนี้' : 'ลบเกมบนอุปกรณ์นี้'}
         </Button>
       </div>
-      {confirming && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/25 p-4 backdrop-blur-sm">
-          <section
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="reset-title"
-            aria-describedby="reset-description"
-            className="w-full max-w-sm rounded-[24px] bg-white p-5 shadow-2xl"
-          >
-            <h2 id="reset-title" className="text-lg font-black">
+      <AlertDialog open={confirming} onOpenChange={setConfirming}>
+        <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+          <AlertDialogHeader className="place-items-start text-left">
+            <AlertDialogTitle className="text-lg font-black">
               ลบการแข่งขันนี้?
-            </h2>
-            <p
-              id="reset-description"
-              className="mt-2 text-sm font-semibold leading-6 text-slate-500"
-            >
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left font-semibold leading-6">
               {gameId
                 ? 'เกมยังอยู่ในลิงก์เดิมและเปิดกลับมาได้ การออกจะล้างเฉพาะเกมที่เปิดอยู่บนอุปกรณ์นี้'
                 : 'ทีม รายชื่อผู้เล่น ตารางแข่งขัน และประวัติ GK จะถูกลบจากอุปกรณ์นี้'}
-            </p>
-            <div className="mt-5 grid grid-cols-2 gap-3">
-              <Button
-                variant="outline"
-                onClick={() => setConfirming(false)}
-                className="h-12 rounded-xl font-black"
-              >
-                ยกเลิก
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={onReset}
-                className="h-12 rounded-xl font-black"
-              >
-                ลบทั้งหมด
-              </Button>
-            </div>
-          </section>
-        </div>
-      )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 grid grid-cols-2 bg-white">
+            <AlertDialogCancel className="h-12 rounded-xl font-black">
+              ยกเลิก
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={onReset}
+              className="h-12 rounded-xl font-black"
+            >
+              ลบทั้งหมด
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -2284,10 +2444,96 @@ export default function FootballApp() {
   const [selectedMatchId, setSelectedMatchId] = useState('');
   const [notice, setNotice] = useState('');
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('local');
+  const [recoverableDraft, setRecoverableDraft] = useState<Tournament | null>(
+    null,
+  );
+  const [conflictRemote, setConflictRemote] =
+    useState<StoredFootballGame | null>(null);
+  const conflictRemoteRef = useRef<StoredFootballGame | null>(null);
   const tournamentRef = useRef<Tournament | null>(null);
+  const gameIdRef = useRef('');
   const lastRemoteStateRef = useRef('');
-  const lastLocalChangeRef = useRef(0);
-  const lastExitFlushRef = useRef('');
+  const remoteRevisionRef = useRef(0);
+  const queuedStateRef = useRef<Tournament | null>(null);
+  const saveInFlightRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const retryTimerRef = useRef<number | null>(null);
+
+  async function flushSharedState(
+    targetGameId = gameIdRef.current,
+    options: { keepalive?: boolean } = {},
+  ) {
+    if (
+      !targetGameId ||
+      saveInFlightRef.current ||
+      conflictRemoteRef.current ||
+      remoteRevisionRef.current < 1
+    )
+      return;
+    const value = queuedStateRef.current ?? tournamentRef.current;
+    if (!value) return;
+    const serialized = JSON.stringify(value);
+    if (serialized === lastRemoteStateRef.current) {
+      queuedStateRef.current = null;
+      dirtyRef.current = false;
+      setSyncStatus('saved');
+      return;
+    }
+
+    queuedStateRef.current = null;
+    saveInFlightRef.current = true;
+    let conflictDetected = false;
+    setSyncStatus('saving');
+    try {
+      const game = await saveSharedGame(
+        targetGameId,
+        value,
+        remoteRevisionRef.current,
+        options,
+      );
+      remoteRevisionRef.current = game.revision;
+      lastRemoteStateRef.current = JSON.stringify(game.state);
+      const latestSerialized = JSON.stringify(tournamentRef.current);
+      if (latestSerialized !== serialized) {
+        queuedStateRef.current = tournamentRef.current;
+        dirtyRef.current = true;
+      } else {
+        dirtyRef.current = false;
+        setSyncStatus('saved');
+      }
+    } catch (error) {
+      queuedStateRef.current = value;
+      dirtyRef.current = true;
+      if (error instanceof RevisionConflictError) {
+        conflictDetected = true;
+        remoteRevisionRef.current = error.latest.revision;
+        conflictRemoteRef.current = error.latest;
+        setConflictRemote(error.latest);
+        setSyncStatus('conflict');
+      } else {
+        setSyncStatus('error');
+        setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
+        if (!options.keepalive) {
+          if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+          retryTimerRef.current = window.setTimeout(
+            () => void flushSharedState(targetGameId),
+            3500,
+          );
+        }
+      }
+    } finally {
+      saveInFlightRef.current = false;
+      if (
+        queuedStateRef.current &&
+        !conflictDetected &&
+        !conflictRemoteRef.current &&
+        !options.keepalive
+      ) {
+        window.setTimeout(() => void flushSharedState(targetGameId), 0);
+      }
+    }
+  }
+
   /* oxlint-disable react/react-compiler -- hydration intentionally reads browser-only and remote state once. */
   useEffect(() => {
     let cancelled = false;
@@ -2295,6 +2541,7 @@ export default function FootballApp() {
       restoreGitHubPagesPath();
       const pathGameId = gameIdFromPath();
       if (pathGameId) {
+        gameIdRef.current = pathGameId;
         setGameId(pathGameId);
         try {
           const game = await loadSharedGame(pathGameId);
@@ -2302,6 +2549,8 @@ export default function FootballApp() {
           if (game) {
             const value = extendTournamentToEndTime(game.state);
             lastRemoteStateRef.current = JSON.stringify(value);
+            remoteRevisionRef.current = game.revision;
+            tournamentRef.current = value;
             setTournament(value);
             setSyncStatus('saved');
             writeLocalBackup(value, pathGameId);
@@ -2312,7 +2561,11 @@ export default function FootballApp() {
           if (cancelled) return;
           const backup = readLocalBackup();
           if (backup.tournament && backup.gameId === pathGameId) {
-            setTournament(extendTournamentToEndTime(backup.tournament));
+            const value = extendTournamentToEndTime(backup.tournament);
+            tournamentRef.current = value;
+            queuedStateRef.current = value;
+            dirtyRef.current = true;
+            setTournament(value);
             setSyncStatus('error');
             setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
           } else {
@@ -2325,7 +2578,13 @@ export default function FootballApp() {
       }
 
       setTournament(null);
+      tournamentRef.current = null;
+      gameIdRef.current = '';
       setGameId('');
+      const backup = readLocalBackup();
+      setRecoverableDraft(
+        backup.tournament && !backup.gameId ? backup.tournament : null,
+      );
       setSyncStatus('local');
       setView('home');
       if (!cancelled) setHydrated(true);
@@ -2341,50 +2600,24 @@ export default function FootballApp() {
     if (!hydrated) return;
     if (tournament) {
       writeLocalBackup(tournament, gameId);
-      if (!gameId) {
-        return;
-      }
+      if (!gameId) return;
       const serialized = JSON.stringify(tournament);
       if (serialized === lastRemoteStateRef.current) return;
-      lastLocalChangeRef.current = Date.now();
+      queuedStateRef.current = tournament;
+      dirtyRef.current = true;
+      setSyncStatus(remoteRevisionRef.current > 0 ? 'saving' : 'error');
       const timer = window.setTimeout(() => {
-        void saveSharedGame(gameId, tournament)
-          .then((game) => {
-            lastRemoteStateRef.current = JSON.stringify(game.state);
-            if (JSON.stringify(tournamentRef.current) === serialized)
-              setSyncStatus('saved');
-          })
-          .catch(() => {
-            setSyncStatus('error');
-            setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
-          });
+        void flushSharedState(gameId);
       }, 450);
       return () => window.clearTimeout(timer);
     }
-    clearLocalBackup();
+    return undefined;
   }, [tournament, hydrated, gameId]);
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- use the latest queued state through refs. */
   useEffect(() => {
     if (!hydrated || !gameId) return;
     const flushLatestState = () => {
-      const value = tournamentRef.current;
-      if (!value) return;
-      const serialized = JSON.stringify(value);
-      if (
-        serialized === lastRemoteStateRef.current ||
-        serialized === lastExitFlushRef.current
-      )
-        return;
-      lastExitFlushRef.current = serialized;
-      void saveSharedGame(gameId, value, { keepalive: true })
-        .then((game) => {
-          lastRemoteStateRef.current = JSON.stringify(game.state);
-          if (JSON.stringify(tournamentRef.current) === serialized)
-            setSyncStatus('saved');
-        })
-        .catch(() => {
-          lastExitFlushRef.current = '';
-          setSyncStatus('error');
-        });
+      if (dirtyRef.current) void flushSharedState(gameId, { keepalive: true });
     };
     const flushWhenHidden = () => {
       if (document.visibilityState === 'hidden') flushLatestState();
@@ -2399,21 +2632,45 @@ export default function FootballApp() {
   useEffect(() => {
     if (!hydrated || !gameId) return;
     const poll = window.setInterval(() => {
-      if (Date.now() - lastLocalChangeRef.current < 1600) return;
+      if (
+        document.visibilityState !== 'visible' ||
+        saveInFlightRef.current ||
+        conflictRemoteRef.current ||
+        (dirtyRef.current && remoteRevisionRef.current > 0)
+      )
+        return;
       void loadSharedGame(gameId)
         .then((game) => {
           if (!game) return;
-          const serialized = JSON.stringify(game.state);
-          lastRemoteStateRef.current = serialized;
-          if (serialized !== JSON.stringify(tournamentRef.current)) {
-            setTournament(extendTournamentToEndTime(game.state));
+          const value = extendTournamentToEndTime(game.state);
+          const serialized = JSON.stringify(value);
+          if (dirtyRef.current && remoteRevisionRef.current === 0) {
+            remoteRevisionRef.current = game.revision;
+            const conflict = { ...game, state: value };
+            conflictRemoteRef.current = conflict;
+            setConflictRemote(conflict);
+            setSyncStatus('conflict');
+            return;
+          }
+          if (game.revision > remoteRevisionRef.current) {
+            remoteRevisionRef.current = game.revision;
+            lastRemoteStateRef.current = serialized;
+            tournamentRef.current = value;
+            setTournament(value);
             setSyncStatus('saved');
           }
         })
         .catch(() => undefined);
-    }, 4000);
+    }, 15000);
     return () => window.clearInterval(poll);
-  }, [hydrated, gameId]);
+  }, [hydrated, gameId, conflictRemote]);
+  useEffect(
+    () => () => {
+      if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+    },
+    [],
+  );
+  /* oxlint-enable react-hooks/exhaustive-deps, react/react-compiler */
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(''), 2200);
@@ -2449,6 +2706,10 @@ export default function FootballApp() {
             const demo = createDemoTournament();
             tournamentRef.current = demo;
             lastRemoteStateRef.current = '';
+            remoteRevisionRef.current = 0;
+            queuedStateRef.current = null;
+            dirtyRef.current = false;
+            gameIdRef.current = '';
             setGameId('');
             setSyncStatus('local');
             setTournament(demo);
@@ -2504,20 +2765,26 @@ export default function FootballApp() {
   }, []);
   function applyTournament(value: Tournament) {
     tournamentRef.current = value;
-    lastExitFlushRef.current = '';
     setSyncStatus(
-      gameId && JSON.stringify(value) !== lastRemoteStateRef.current
-        ? 'saving'
-        : gameId
-          ? 'saved'
-          : 'local',
+      conflictRemote
+        ? 'conflict'
+        : gameId && JSON.stringify(value) !== lastRemoteStateRef.current
+          ? 'saving'
+          : gameId
+            ? 'saved'
+            : 'local',
     );
     setTournament(value);
   }
   async function publishTournament(value: Tournament, message: string) {
     tournamentRef.current = value;
     lastRemoteStateRef.current = '';
-    lastExitFlushRef.current = '';
+    remoteRevisionRef.current = 0;
+    queuedStateRef.current = null;
+    dirtyRef.current = false;
+    conflictRemoteRef.current = null;
+    setConflictRemote(null);
+    gameIdRef.current = '';
     setGameId('');
     setSyncStatus('saving');
     setTournament(value);
@@ -2526,10 +2793,13 @@ export default function FootballApp() {
     window.history.replaceState({}, '', gamePath());
     try {
       const game = await createSharedGame(value, bangkokDateCode());
-      lastRemoteStateRef.current = JSON.stringify(game.state);
+      const storedValue = extendTournamentToEndTime(game.state);
+      lastRemoteStateRef.current = JSON.stringify(storedValue);
+      remoteRevisionRef.current = game.revision;
+      gameIdRef.current = game.id;
       setGameId(game.id);
-      setTournament(game.state);
-      tournamentRef.current = game.state;
+      setTournament(storedValue);
+      tournamentRef.current = storedValue;
       setSyncStatus('saved');
       window.history.pushState({}, '', gamePath(game.id));
       setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
@@ -2540,7 +2810,32 @@ export default function FootballApp() {
   }
   function loadDemo() {
     const demo = createDemoTournament();
-    void publishTournament(demo, 'โหลดข้อมูลตัวอย่างแล้ว');
+    tournamentRef.current = demo;
+    gameIdRef.current = '';
+    remoteRevisionRef.current = 0;
+    lastRemoteStateRef.current = '';
+    queuedStateRef.current = null;
+    dirtyRef.current = false;
+    setGameId('');
+    setTournament(demo);
+    setRecoverableDraft(null);
+    setSyncStatus('local');
+    window.history.pushState({}, '', gamePath());
+    setView('home');
+    setNotice('โหลดข้อมูลตัวอย่างแล้ว · ยังไม่ได้บันทึกขึ้นฐานข้อมูล');
+  }
+  async function copyGameLink() {
+    if (!gameId) {
+      setNotice('เกมนี้ยังไม่มีลิงก์ เพราะยังไม่ได้บันทึกขึ้นฐานข้อมูล');
+      return;
+    }
+    const url = `${window.location.origin}${gamePath(gameId)}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice('คัดลอกลิงก์เกมแล้ว ส่งให้เพื่อนได้เลย');
+    } catch {
+      setNotice(`ลิงก์เกม: ${url}`);
+    }
   }
   function openNewSetup() {
     setSetupSource(null);
@@ -2554,7 +2849,7 @@ export default function FootballApp() {
     setSelectedMatchId(id);
     setView('match-detail');
   }
-  async function openSharedGame(gameIdToOpen: string) {
+  async function openSharedGame(gameIdToOpen: string, updateHistory = true) {
     try {
       const game = await loadSharedGame(gameIdToOpen);
       if (!game) {
@@ -2563,13 +2858,19 @@ export default function FootballApp() {
       }
       const value = extendTournamentToEndTime(game.state);
       lastRemoteStateRef.current = JSON.stringify(value);
+      remoteRevisionRef.current = game.revision;
+      gameIdRef.current = game.id;
+      queuedStateRef.current = null;
+      dirtyRef.current = false;
+      conflictRemoteRef.current = null;
+      setConflictRemote(null);
       setGameId(game.id);
       setTournament(value);
       tournamentRef.current = value;
       setSyncStatus('saved');
       setSelectedTeamId(value.teams[0]?.id ?? '');
       setSelectedMatchId('');
-      window.history.pushState({}, '', gamePath(game.id));
+      if (updateHistory) window.history.pushState({}, '', gamePath(game.id));
       setView('home');
     } catch {
       setNotice('เปิดเกมไม่สำเร็จ กรุณาลองใหม่');
@@ -2578,11 +2879,77 @@ export default function FootballApp() {
   function handleDeletedGame(deletedGameId: string) {
     if (deletedGameId !== gameId) return;
     setTournament(null);
+    tournamentRef.current = null;
+    gameIdRef.current = '';
     setGameId('');
     setSyncStatus('local');
     lastRemoteStateRef.current = '';
+    remoteRevisionRef.current = 0;
+    queuedStateRef.current = null;
+    dirtyRef.current = false;
     window.history.replaceState({}, '', gamePath());
   }
+  function recoverDraft() {
+    if (!recoverableDraft) return;
+    tournamentRef.current = recoverableDraft;
+    setTournament(recoverableDraft);
+    setRecoverableDraft(null);
+    setSyncStatus('local');
+    setView('home');
+  }
+  function discardDraft() {
+    clearLocalBackup();
+    setRecoverableDraft(null);
+    setNotice('ลบข้อมูลร่างในเครื่องแล้ว');
+  }
+  function useLatestConflictData() {
+    if (!conflictRemote) return;
+    const value = extendTournamentToEndTime(conflictRemote.state);
+    remoteRevisionRef.current = conflictRemote.revision;
+    lastRemoteStateRef.current = JSON.stringify(value);
+    queuedStateRef.current = null;
+    dirtyRef.current = false;
+    tournamentRef.current = value;
+    setTournament(value);
+    conflictRemoteRef.current = null;
+    setConflictRemote(null);
+    setSyncStatus('saved');
+    setNotice('ใช้ข้อมูลล่าสุดจากฐานข้อมูลแล้ว');
+  }
+  function overwriteConflictWithLocal() {
+    if (!conflictRemote || !tournamentRef.current) return;
+    remoteRevisionRef.current = conflictRemote.revision;
+    queuedStateRef.current = tournamentRef.current;
+    dirtyRef.current = true;
+    conflictRemoteRef.current = null;
+    setConflictRemote(null);
+    setSyncStatus('saving');
+    window.setTimeout(() => void flushSharedState(), 0);
+  }
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- browser history selects the game encoded in the URL. */
+  useEffect(() => {
+    const handlePopState = () => {
+      const pathGameId = gameIdFromPath();
+      if (pathGameId) {
+        void openSharedGame(pathGameId, false);
+        return;
+      }
+      tournamentRef.current = null;
+      gameIdRef.current = '';
+      remoteRevisionRef.current = 0;
+      queuedStateRef.current = null;
+      dirtyRef.current = false;
+      conflictRemoteRef.current = null;
+      setConflictRemote(null);
+      setTournament(null);
+      setGameId('');
+      setSyncStatus('local');
+      setView('home');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+  /* oxlint-enable react-hooks/exhaustive-deps, react/react-compiler */
   const mainView: MainView = [
     'home',
     'teams',
@@ -2625,6 +2992,9 @@ export default function FootballApp() {
                 onSetup={openNewSetup}
                 onDemo={loadDemo}
                 onGames={() => setView('games')}
+                recoverableDraft={recoverableDraft}
+                onRecover={recoverDraft}
+                onDiscardDraft={discardDraft}
               />
             </>
           )}
@@ -2649,10 +3019,13 @@ export default function FootballApp() {
           {tournament && view === 'home' && (
             <HomeScreen
               tournament={tournament}
+              gameId={gameId}
               syncStatus={syncStatus}
               onNavigate={setView}
               onOpenMatch={openMatch}
               onUpdate={applyTournament}
+              onPublish={() => void publishTournament(tournament, 'บันทึกเกมแล้ว')}
+              onCopyLink={() => void copyGameLink()}
             />
           )}
           {tournament && view === 'teams' && (
@@ -2683,10 +3056,7 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'tactics' && (
-            <TacticsScreen
-              tournament={tournament}
-              onUpdate={applyTournament}
-            />
+            <TacticsScreen tournament={tournament} onUpdate={applyTournament} />
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen
@@ -2723,10 +3093,18 @@ export default function FootballApp() {
               onGames={() => setView('games')}
               onTeams={() => setView('teams')}
               onReset={() => {
+                clearLocalBackup();
                 setTournament(null);
+                tournamentRef.current = null;
+                gameIdRef.current = '';
                 setGameId('');
                 setSyncStatus('local');
                 lastRemoteStateRef.current = '';
+                remoteRevisionRef.current = 0;
+                queuedStateRef.current = null;
+                dirtyRef.current = false;
+                conflictRemoteRef.current = null;
+                setConflictRemote(null);
                 window.history.pushState({}, '', gamePath());
                 setView('home');
                 setNotice(gameId ? 'ออกจากเกมนี้แล้ว' : 'ลบการแข่งขันแล้ว');
@@ -2737,15 +3115,41 @@ export default function FootballApp() {
         {tournament &&
           !['setup', 'match-detail', 'team-detail', 'share', 'games'].includes(
             view,
-          ) && (
-            <BottomNavigation active={mainView} onChange={setView} />
-          )}
+          ) && <BottomNavigation active={mainView} onChange={setView} />}
         {notice && (
           <output className="fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-sm font-black whitespace-nowrap text-white shadow-xl">
             <CircleCheck className="h-4 w-4 text-emerald-400" />
             {notice}
           </output>
         )}
+        <AlertDialog open={Boolean(conflictRemote)}>
+          <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+            <AlertDialogHeader className="place-items-start text-left">
+              <AlertDialogTitle className="text-lg font-black">
+                มีการแก้ไขจากอีกเครื่อง
+              </AlertDialogTitle>
+              <AlertDialogDescription className="text-left font-semibold leading-6">
+                ระบบหยุดการบันทึกไว้ก่อนเพื่อไม่ให้ข้อมูลของใครถูกทับ เลือกว่าจะโหลดข้อมูลล่าสุด
+                หรือใช้ข้อมูลที่อยู่บนเครื่องนี้แทน
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="mt-2 grid gap-2 bg-white">
+              <AlertDialogAction
+                variant="outline"
+                onClick={useLatestConflictData}
+                className="h-12 rounded-xl font-black"
+              >
+                ใช้ข้อมูลล่าสุด
+              </AlertDialogAction>
+              <AlertDialogAction
+                onClick={overwriteConflictWithLocal}
+                className="h-12 rounded-xl bg-[#11823b] font-black"
+              >
+                เก็บข้อมูลเครื่องนี้
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </main>
   );

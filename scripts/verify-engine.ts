@@ -9,8 +9,10 @@ import {
   reopenFinishedMatch,
   scheduleMetrics,
   scheduleWindowMetrics,
+  setMatchStatus,
   skipGoalkeeper,
 } from '../lib/football-engine';
+import { parseTournament } from '../lib/football-schema';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -165,7 +167,28 @@ assert(
     continuedTournament.matches.at(-1)?.startTime === '22:00',
   'Playing on must add one match and extend the end time by one slot',
 );
+const switchedCurrent = setMatchStatus(
+  tournament,
+  tournament.matches[3].id,
+  'current',
+);
+assert(
+  switchedCurrent.matches[0].status === 'upcoming' &&
+    switchedCurrent.matches[3].status === 'current',
+  'Starting a future match must not silently finish the previous live match',
+);
+assert(
+  parseTournament(tournament) !== null,
+  'A generated tournament must pass runtime validation',
+);
+assert(
+  parseTournament({
+    ...tournament,
+    matches: [{ ...tournament.matches[0], teamAScore: 100, teamBScore: 0 }],
+  }) === null,
+  'Runtime validation must reject impossible persisted score values',
+);
 
 console.log(
-  'Engine checks passed: defaults, repeats, scores, standings, overtime, GK fairness, and progress.',
+  'Engine checks passed: defaults, repeats, scores, standings, overtime, GK fairness, progress, switching, and persisted-state validation.',
 );

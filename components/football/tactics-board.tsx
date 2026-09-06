@@ -2,6 +2,7 @@
 
 import { RotateCcw } from 'lucide-react';
 import {
+  useEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -29,7 +30,37 @@ const TEAM_A_POSITIONS = [
 
 function formationPosition(index: number, isTeamA: boolean) {
   const [x, y] = TEAM_A_POSITIONS[index] ?? [50, 48];
-  return { x, y: isTeamA ? y : 100 - y };
+  return {
+    x: index === 6 ? (isTeamA ? 32 : 68) : x,
+    y: isTeamA ? y : 100 - y,
+  };
+}
+
+function reconcileBoard(
+  tournament: Tournament,
+  storedBoard: TacticsBoard,
+): TacticsBoard {
+  const fresh = makeBoard(tournament, storedBoard.teamAId, storedBoard.teamBId);
+  const storedByIdentity = new Map(
+    storedBoard.markers.map((marker) => [
+      marker.kind === 'ball'
+        ? 'ball'
+        : `${marker.teamId ?? ''}:${marker.playerId ?? marker.id}`,
+      marker,
+    ]),
+  );
+  return {
+    ...fresh,
+    notes: storedBoard.notes,
+    markers: fresh.markers.map((marker) => {
+      const key =
+        marker.kind === 'ball'
+          ? 'ball'
+          : `${marker.teamId ?? ''}:${marker.playerId ?? marker.id}`;
+      const stored = storedByIdentity.get(key);
+      return stored ? { ...marker, x: stored.x, y: stored.y } : marker;
+    }),
+  };
 }
 
 function teamMarkers(team: Team, isTeamA: boolean): TacticMarker[] {
@@ -100,9 +131,18 @@ export function TacticsScreen({
     tournament.teams.some((team) => team.id === storedBoard.teamAId) &&
     tournament.teams.some((team) => team.id === storedBoard.teamBId) &&
     storedBoard.teamAId !== storedBoard.teamBId;
-  const board = hasValidTeams ? storedBoard : makeBoard(tournament);
+  const candidateBoard = hasValidTeams ? storedBoard : makeBoard(tournament);
+  const board = reconcileBoard(tournament, candidateBoard);
+  const boardNeedsRepair =
+    JSON.stringify(board) !== JSON.stringify(storedBoard);
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
+
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- repair stale tactic markers after roster changes. */
+  useEffect(() => {
+    if (boardNeedsRepair) onUpdate({ ...tournament, tactics: board });
+  }, [boardNeedsRepair]);
+  /* oxlint-enable react-hooks/exhaustive-deps, react/react-compiler */
 
   function updateBoard(nextBoard: TacticsBoard) {
     onUpdate({ ...tournament, tactics: nextBoard });
@@ -130,9 +170,7 @@ export function TacticsScreen({
     });
   }
 
-  function positionFromPointer(
-    event: ReactPointerEvent<HTMLButtonElement>,
-  ) {
+  function positionFromPointer(event: ReactPointerEvent<HTMLButtonElement>) {
     const pitch = pitchRef.current;
     if (!pitch) return null;
     const bounds = pitch.getBoundingClientRect();
@@ -231,7 +269,7 @@ export function TacticsScreen({
         <section
           ref={pitchRef}
           aria-label={`กระดานแท็กติก ${teamA?.name ?? ''} พบ ${teamB?.name ?? ''}`}
-          className="relative h-[540px] touch-pan-y overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none"
+          className="relative h-[540px] touch-pan-y overscroll-contain overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none"
         >
           <div className="pointer-events-none absolute inset-3 border-2 border-white/80" />
           <div className="pointer-events-none absolute inset-x-3 top-1/2 border-t-2 border-white/80" />
@@ -302,7 +340,7 @@ export function TacticsScreen({
                 style={{ left: `${preview.x}%`, top: `${preview.y}%` }}
               >
                 <span
-                  className={`grid place-items-center rounded-full border-white font-black shadow-lg ${isBall ? 'h-7 w-7 border-2 bg-white text-sm' : 'h-10 w-10 border-[3px] text-sm'}`}
+                  className={`grid place-items-center rounded-full border-white font-black shadow-lg ${isBall ? 'h-6 w-6 border-2 bg-white text-xs' : 'h-10 w-10 border-[3px] text-sm'}`}
                   style={
                     isBall
                       ? undefined
