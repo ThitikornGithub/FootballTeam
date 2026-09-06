@@ -676,15 +676,21 @@ function HomeScreen({
 
 function SetupScreen({
   tournament,
+  copyMode = false,
   onCancel,
   onCreate,
 }: {
   tournament: Tournament | null;
+  copyMode?: boolean;
   onCancel: () => void;
   onCreate: (value: Tournament) => void;
 }) {
   const defaultNames = ['Green', 'Red', 'Blue', 'Yellow', 'White', 'Black'];
-  const [gameName, setGameName] = useState(tournament?.name ?? 'ฟุตบอลคืนนี้');
+  const [gameName, setGameName] = useState(
+    copyMode && tournament
+      ? `${tournament.name} ใหม่`
+      : (tournament?.name ?? 'ฟุตบอลคืนนี้'),
+  );
   const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 4);
   const [drafts, setDrafts] = useState(() =>
     Array.from({ length: 8 }, (_, i) => ({
@@ -770,7 +776,13 @@ function SetupScreen({
   return (
     <>
       <PageHeader
-        title={tournament ? 'แก้ไขการแข่งขัน' : 'สร้างตารางใหม่'}
+        title={
+          copyMode
+            ? 'สร้างเกมจากการตั้งค่าเดิม'
+            : tournament
+              ? 'แก้ไขการแข่งขัน'
+              : 'สร้างตารางใหม่'
+        }
         eyebrow="Round Robin · 1 สนาม"
         onBack={onCancel}
       />
@@ -2055,6 +2067,7 @@ function SettingsScreen({
   tournament,
   gameId,
   onCreateNew,
+  onCopySettings,
   onSave,
   onGames,
   onTeams,
@@ -2063,6 +2076,7 @@ function SettingsScreen({
   tournament: Tournament;
   gameId: string;
   onCreateNew: () => void;
+  onCopySettings: () => void;
   onSave: (value: Tournament) => void;
   onGames: () => void;
   onTeams: () => void;
@@ -2375,9 +2389,17 @@ function SettingsScreen({
             </Button>
           </div>
           <Button
-            onClick={onCreateNew}
+            onClick={onCopySettings}
             variant="outline"
             className="mt-2 h-12 w-full rounded-xl font-black"
+          >
+            <Copy />
+            สร้างเกมใหม่จากการตั้งค่านี้
+          </Button>
+          <Button
+            onClick={onCreateNew}
+            variant="outline"
+            className="h-12 w-full rounded-xl font-black"
           >
             <Plus />
             สร้างตารางใหม่
@@ -2426,6 +2448,7 @@ export default function FootballApp() {
   const [tournament, setTournament] = useState<Tournament | null>(null);
   const [gameId, setGameId] = useState('');
   const [setupSource, setSetupSource] = useState<Tournament | null>(null);
+  const [setupCopyMode, setSetupCopyMode] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<AppView>('home');
   const [selectedTeamId, setSelectedTeamId] = useState('');
@@ -2827,6 +2850,13 @@ export default function FootballApp() {
   }
   function openNewSetup() {
     setSetupSource(null);
+    setSetupCopyMode(false);
+    setView('setup');
+  }
+  function openCopySetup() {
+    if (!tournament) return;
+    setSetupSource(tournament);
+    setSetupCopyMode(true);
     setView('setup');
   }
   function openTeam(id: string) {
@@ -2997,9 +3027,11 @@ export default function FootballApp() {
           {view === 'setup' && (
             <SetupScreen
               tournament={setupSource}
+              copyMode={setupCopyMode}
               onCancel={() => setView('home')}
               onCreate={(value) => {
                 setSetupSource(null);
+                setSetupCopyMode(false);
                 void publishTournament(value, 'สร้างตารางใหม่แล้ว');
               }}
             />
@@ -3074,6 +3106,7 @@ export default function FootballApp() {
               tournament={tournament}
               gameId={gameId}
               onCreateNew={openNewSetup}
+              onCopySettings={openCopySetup}
               onSave={(value) => {
                 applyTournament(value);
                 setNotice('บันทึกการตั้งค่าแล้ว');
