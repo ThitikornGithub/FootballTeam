@@ -39,8 +39,8 @@ const TEAM_A_POSITIONS = [
   [50, 48],
 ] as const;
 
-const PLAYBACK_MOVE_MS = 1600;
-const PLAYBACK_STEP_MS = 2200;
+const PLAYBACK_MOVE_MS = 1800;
+const PLAYBACK_STEP_MS = 2500;
 const PLAYBACK_START_DELAY_MS = 350;
 
 function formationPosition(index: number, isTeamA: boolean) {
@@ -216,13 +216,17 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
     to: { x: number; y: number };
   } | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [showPathsDuringPlayback, setShowPathsDuringPlayback] = useState(false);
   const [notice, setNotice] = useState('');
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers = currentStep?.markers ?? board.markers;
-  const visiblePaths =
-    isPlaying && activeStepIndex > 0
-      ? (steps[activeStepIndex - 1]?.paths ?? [])
-      : (currentStep?.paths ?? []);
+  const visiblePaths = isPlaying
+    ? showPathsDuringPlayback
+      ? activeStepIndex > 0
+        ? (steps[activeStepIndex - 1]?.paths ?? [])
+        : (currentStep?.paths ?? [])
+      : []
+    : (currentStep?.paths ?? []);
   const tournamentTeamIds = tournament.teams.map((team) => team.id).join('|');
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
@@ -836,6 +840,9 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
                   transitionDuration: isPlaying
                     ? `${PLAYBACK_MOVE_MS}ms`
                     : undefined,
+                  transitionTimingFunction: isPlaying
+                    ? 'cubic-bezier(0.4, 0, 0.2, 1)'
+                    : undefined,
                 }}
               >
                 <span
@@ -914,6 +921,22 @@ export function TacticsScreen({ tournament }: { tournament: Tournament }) {
               />
             ))}
           </div>
+          <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 text-sm font-black text-slate-700">
+            <span>
+              แสดงลูกศรตอนเล่น
+              <span className="ml-1 text-xs font-bold text-slate-400">
+                (ปิดไว้จะดูไหลลื่นกว่า)
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={showPathsDuringPlayback}
+              onChange={(event) =>
+                setShowPathsDuringPlayback(event.target.checked)
+              }
+              className="h-5 w-5 shrink-0 accent-[#11823b]"
+            />
+          </label>
           <p className="text-center text-xs font-bold text-slate-500">
             {isPlaying ? 'กำลังเล่นแผน…' : currentStep?.title}
           </p>
