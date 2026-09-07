@@ -4,17 +4,15 @@ import {
   CalendarDays,
   CalendarRange,
   Check,
-  ChevronDown,
   ChevronRight,
-  ChevronUp,
   CircleAlert,
   CircleCheck,
   Cloud,
   CloudOff,
   Copy,
   Download,
-  EllipsisVertical,
   FolderOpen,
+  GripVertical,
   LoaderCircle,
   Lock,
   LockOpen,
@@ -29,7 +27,14 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 
 import {
   BottomNavigation,
@@ -43,13 +48,6 @@ import {
 } from './shared';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -128,11 +126,6 @@ const PLAYER_POSITION_META: Record<
   PlayerPosition,
   { shortLabel: string; fullLabel: string; className: string }
 > = {
-  goalkeeper: {
-    shortLabel: 'GK',
-    fullLabel: 'ผู้รักษาประตู',
-    className: 'border-amber-200 bg-amber-50 text-amber-700',
-  },
   defender: {
     shortLabel: 'D',
     fullLabel: 'กองหลัง',
@@ -1245,6 +1238,10 @@ function TeamDetailScreen({
 }) {
   const [newName, setNewName] = useState('');
   const [newPositions, setNewPositions] = useState<PlayerPosition[]>([]);
+  const [dragPlayers, setDragPlayers] = useState<Team['players'] | null>(null);
+  const [draggingPlayerId, setDraggingPlayerId] = useState<string | null>(null);
+  const dragPlayersRef = useRef<Team['players'] | null>(null);
+  const draggingPlayerIdRef = useRef<string | null>(null);
   const rotationLocked = Boolean(team.gkRotationLocked);
   const eligiblePlayers = team.players.filter((player) => !player.absentToday);
   const gkOrder = [
@@ -1283,6 +1280,52 @@ function TeamDetailScreen({
       ),
     });
   }
+  function startPlayerDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    playerId: string,
+  ) {
+    if (team.players.length < 2 || event.button !== 0) return;
+    event.preventDefault();
+    const players = [...team.players];
+    dragPlayersRef.current = players;
+    draggingPlayerIdRef.current = playerId;
+    setDragPlayers(players);
+    setDraggingPlayerId(playerId);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function movePlayerDrag(event: ReactPointerEvent<HTMLButtonElement>) {
+    const players = dragPlayersRef.current;
+    const playerId = draggingPlayerIdRef.current;
+    if (!playerId || !players) return;
+    event.preventDefault();
+    const target = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLElement>('[data-player-id]');
+    const targetId = target?.dataset.playerId;
+    const fromIndex = players.findIndex(
+      (player) => player.id === playerId,
+    );
+    const toIndex = players.findIndex((player) => player.id === targetId);
+    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
+    const nextPlayers = reorder(players, fromIndex, toIndex);
+    dragPlayersRef.current = nextPlayers;
+    setDragPlayers(nextPlayers);
+  }
+  function finishPlayerDrag(
+    event: ReactPointerEvent<HTMLButtonElement>,
+    saveOrder: boolean,
+  ) {
+    if (!draggingPlayerIdRef.current) return;
+    event.preventDefault();
+    const nextPlayers = dragPlayersRef.current;
+    dragPlayersRef.current = null;
+    draggingPlayerIdRef.current = null;
+    setDragPlayers(null);
+    setDraggingPlayerId(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    if (saveOrder && nextPlayers) updatePlayers(nextPlayers);
+  }
   function addPlayer() {
     const name = newName.trim();
     if (!name) return;
@@ -1290,6 +1333,7 @@ function TeamDetailScreen({
     setNewName('');
     setNewPositions([]);
   }
+  const displayedPlayers = dragPlayers ?? team.players;
   return (
     <>
       <PageHeader
@@ -1366,7 +1410,7 @@ function TeamDetailScreen({
           <div className="mb-3">
             <h2 className="section-title">รายชื่อผู้เล่น</h2>
             <p className="section-note">
-              ตำแหน่ง: GK ประตู · D หลัง · M กลาง · W ปีก · F หน้า (เลือกได้หลายตำแหน่ง)
+              ลากที่หมายเลขเพื่อเรียง · ตำแหน่ง D หลัง · M กลาง · W ปีก · F หน้า
             </p>
           </div>
           <div>
@@ -1376,14 +1420,29 @@ function TeamDetailScreen({
               </div>
             ) : (
               <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                {team.players.map((player, index) => (
+                {displayedPlayers.map((player, index) => (
                   <div
                     key={player.id}
-                    className="flex min-w-0 items-center gap-1.5 px-2 py-2"
+                    data-player-id={player.id}
+                    className={`flex min-w-0 items-center gap-1.5 px-2 py-2 transition ${draggingPlayerId === player.id ? 'relative z-10 bg-emerald-50 shadow-md' : 'bg-white'}`}
                   >
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5ea] text-xs font-black text-[#087632]">
+                    <button
+                      type="button"
+                      onPointerDown={(event) =>
+                        startPlayerDrag(event, player.id)
+                      }
+                      onPointerMove={movePlayerDrag}
+                      onPointerUp={(event) => finishPlayerDrag(event, true)}
+                      onPointerCancel={(event) =>
+                        finishPlayerDrag(event, false)
+                      }
+                      className="flex h-9 w-9 shrink-0 touch-none items-center justify-center gap-0.5 rounded-lg bg-[#e6f5ea] text-xs font-black text-[#087632] cursor-grab active:cursor-grabbing"
+                      aria-label={`ลากเพื่อย้ายลำดับ ${player.name} ปัจจุบันลำดับ ${index + 1}`}
+                      title="กดค้างแล้วลากเพื่อเรียงลำดับ"
+                    >
+                      <GripVertical className="h-3.5 w-3.5" />
                       {index + 1}
-                    </span>
+                    </button>
                     <input
                       value={player.name}
                       onChange={(event) =>
@@ -1432,53 +1491,19 @@ function TeamDetailScreen({
                         <CircleCheck className="h-4 w-4" />
                       )}
                     </button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger
-                        render={
-                          <button
-                            type="button"
-                            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
-                            aria-label={`จัดการ ${player.name}`}
-                          />
-                        }
-                      >
-                        <EllipsisVertical className="h-4 w-4" />
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="w-40">
-                        <DropdownMenuItem
-                          disabled={index === 0}
-                          onClick={() =>
-                            updatePlayers(reorder(team.players, index, index - 1))
-                          }
-                        >
-                          <ChevronUp />
-                          เลื่อนขึ้น
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={index === team.players.length - 1}
-                          onClick={() =>
-                            updatePlayers(reorder(team.players, index, index + 1))
-                          }
-                        >
-                          <ChevronDown />
-                          เลื่อนลง
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          variant="destructive"
-                          onClick={() =>
-                            updatePlayers(
-                              team.players.filter(
-                                (item) => item.id !== player.id,
-                              ),
-                            )
-                          }
-                        >
-                          <Trash2 />
-                          ลบผู้เล่น
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updatePlayers(
+                          team.players.filter((item) => item.id !== player.id),
+                        )
+                      }
+                      className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-red-500 hover:bg-red-50"
+                      aria-label={`ลบ ${player.name}`}
+                      title="ลบผู้เล่น"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -1508,7 +1533,7 @@ function TeamDetailScreen({
             </div>
             <div className="mt-3">
               <p className="mb-2 text-xs font-bold text-slate-500">
-                ตำแหน่งที่เล่นได้: GK · D · M · W · F (เลือกได้หลายตำแหน่ง)
+                ตำแหน่งที่เล่นได้: D · M · W · F (เลือกได้หลายตำแหน่ง)
               </p>
               <PlayerPositionPicker
                 playerName={newName || 'ผู้เล่นใหม่'}

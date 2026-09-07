@@ -219,6 +219,23 @@ assert(
   parseTournament(legacyPlayersWithoutPositions) !== null,
   'Persisted players created before position tags existed must remain valid',
 );
+const legacyGoalkeeperPosition = {
+  ...tournament,
+  teams: tournament.teams.map((team, teamIndex) => ({
+    ...team,
+    players: team.players.map((player, playerIndex) =>
+      teamIndex === 0 && playerIndex === 0
+        ? { ...player, positions: ['goalkeeper', 'defender'] }
+        : player,
+    ),
+  })),
+};
+const migratedGoalkeeperPosition = parseTournament(legacyGoalkeeperPosition);
+assert(
+  migratedGoalkeeperPosition?.teams[0].players[0].positions?.join(',') ===
+    'defender',
+  'Legacy goalkeeper position tags must migrate to field positions without losing the game',
+);
 assert(
   parseTournament({
     ...tournament,

@@ -31,12 +31,12 @@ const colors: TeamColor[] = [
 ];
 
 const demoPositions: PlayerPosition[][] = [
-  ['goalkeeper'],
   ['defender'],
   ['defender', 'midfielder'],
   ['defender'],
   ['midfielder', 'winger'],
   ['winger', 'forward'],
+  ['forward'],
   ['forward'],
 ];
 

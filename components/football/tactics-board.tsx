@@ -36,6 +36,8 @@ import {
   type TacticPath,
   type TacticStep,
   type TacticsBoard,
+  type Player,
+  type PlayerPosition,
   type Team,
   type Tournament,
 } from '@/lib/football-types';
@@ -51,16 +53,71 @@ const TEAM_A_POSITIONS = [
   [50, 48],
 ] as const;
 
+const PLAYER_POSITION_SHORT: Record<PlayerPosition, string> = {
+  defender: 'D',
+  midfielder: 'M',
+  winger: 'W',
+  forward: 'F',
+};
+
+const OUTFIELD_POSITION_SLOTS: Record<
+  PlayerPosition,
+  readonly (readonly [number, number])[]
+> = {
+  defender: [
+    [26, 78],
+    [50, 76],
+    [74, 78],
+    [35, 69],
+    [65, 69],
+    [50, 66],
+  ],
+  midfielder: [
+    [32, 62],
+    [68, 62],
+    [50, 58],
+    [24, 57],
+    [76, 57],
+    [50, 52],
+  ],
+  winger: [
+    [17, 56],
+    [83, 56],
+    [20, 46],
+    [80, 46],
+    [26, 40],
+    [74, 40],
+  ],
+  forward: [
+    [38, 44],
+    [62, 44],
+    [50, 38],
+    [28, 36],
+    [72, 36],
+    [50, 31],
+  ],
+};
+
 const PLAYBACK_MOVE_MS = 1800;
 const PLAYBACK_STEP_MS = 2500;
 const PLAYBACK_START_DELAY_MS = 350;
 
-function formationPosition(index: number, isTeamA: boolean) {
+function formationPosition(
+  index: number,
+  isTeamA: boolean,
+): { x: number; y: number } {
   const [x, y] = TEAM_A_POSITIONS[index] ?? [50, 48];
   return {
     x: index === 6 ? (isTeamA ? 32 : 68) : x,
     y: isTeamA ? y : 100 - y,
   };
+}
+
+function orientPosition(
+  position: readonly [number, number],
+  isTeamA: boolean,
+) {
+  return { x: position[0], y: isTeamA ? position[1] : 100 - position[1] };
 }
 
 function markerIdentity(marker: TacticMarker) {
@@ -104,9 +161,36 @@ function reconcileBoard(
 }
 
 function teamMarkers(team: Team, isTeamA: boolean): TacticMarker[] {
+  const availablePlayers = team.players
+    .filter((player) => !player.absentToday)
+    .slice(0, 7);
+  const goalkeeperId = team.gkRotation.find((id) =>
+    availablePlayers.some((player) => player.id === id),
+  );
+  const goalkeeper =
+    availablePlayers.find((player) => player.id === goalkeeperId) ??
+    availablePlayers[0];
+  const orderedPlayers = goalkeeper
+    ? [
+        goalkeeper,
+        ...availablePlayers.filter((player) => player.id !== goalkeeper.id),
+      ]
+    : [];
+  const usedSlots = new Map<PlayerPosition, number>();
+
   return Array.from({ length: 7 }, (_, index) => {
-    const player = team.players[index];
-    const position = formationPosition(index, isTeamA);
+    const player = orderedPlayers[index];
+    const primaryPosition = player?.positions?.[0];
+    let position = formationPosition(index, isTeamA);
+    if (player && index > 0 && primaryPosition) {
+      const slotIndex = usedSlots.get(primaryPosition) ?? 0;
+      const slots = OUTFIELD_POSITION_SLOTS[primaryPosition];
+      position = orientPosition(
+        slots[Math.min(slotIndex, slots.length - 1)],
+        isTeamA,
+      );
+      usedSlots.set(primaryPosition, slotIndex + 1);
+    }
     return {
       id: `tactic-${isTeamA ? 'a' : 'b'}-${player?.id ?? index + 1}`,
       kind: 'player' as const,
@@ -116,6 +200,12 @@ function teamMarkers(team: Team, isTeamA: boolean): TacticMarker[] {
       ...position,
     };
   });
+}
+
+function playerPositionLabel(player?: Player) {
+  return player?.positions?.map(
+    (position) => PLAYER_POSITION_SHORT[position],
+  ).join('/');
 }
 
 function makeBoard(
@@ -325,7 +415,7 @@ export function TacticsScreen({
         animationSteps: board.animationSteps,
       };
       setBoard(nextBoard);
-      setNotice('รีเซ็ตเฉพาะตำแหน่งแล้ว แผน Animation ยังอยู่');
+      setNotice('จัดผู้เล่นตามตำแหน่งในทีมแล้ว แผน Animation ยังอยู่');
     } else {
       setSteps([
         {
@@ -623,7 +713,7 @@ export function TacticsScreen({
               className="h-9 shrink-0 rounded-xl px-3 text-xs font-black"
             >
               <RotateCcw />
-              รีเซ็ต
+              {mode === 'position' ? 'จัดตามตำแหน่ง' : 'รีเซ็ต'}
             </Button>
           </div>
         </section>
@@ -856,6 +946,10 @@ export function TacticsScreen({
               (item) => item.id === marker.teamId,
             );
             const label = markerLabel(marker, tournament);
+            const player = team?.players.find(
+              (item) => item.id === marker.playerId,
+            );
+            const positionLabel = playerPositionLabel(player);
             const isBall = marker.kind === 'ball';
             const preview =
               dragPreview?.markerId === marker.id ? dragPreview : marker;
@@ -863,7 +957,7 @@ export function TacticsScreen({
               <button
                 key={marker.id}
                 type="button"
-                aria-label={`ย้าย ${label}`}
+                aria-label={`ย้าย ${label}${positionLabel ? ` ตำแหน่ง ${positionLabel}` : ''}`}
                 draggable={false}
                 onPointerDown={(event) => {
                   event.preventDefault();
@@ -940,8 +1034,9 @@ export function TacticsScreen({
                   {isBall ? '⚽' : label.slice(0, 2)}
                 </span>
                 {!isBall && (
-                  <span className="mt-0.5 max-w-16 truncate rounded-md bg-slate-950/70 px-1.5 py-0.5 text-[10px] font-black text-white">
+                  <span className="mt-0.5 max-w-20 truncate rounded-md bg-slate-950/70 px-1.5 py-0.5 text-[10px] font-black text-white">
                     {label}
+                    {positionLabel ? ` · ${positionLabel}` : ''}
                   </span>
                 )}
               </button>
@@ -1073,12 +1168,12 @@ export function TacticsScreen({
           <AlertDialogHeader className="place-items-start text-left">
             <AlertDialogTitle className="text-lg font-black">
               {mode === 'position'
-                ? 'รีเซ็ตตำแหน่งบนกระดาน?'
+                ? 'จัดผู้เล่นตามตำแหน่งใหม่?'
                 : 'ล้างแผน Animation?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left font-semibold leading-6">
               {mode === 'position'
-                ? 'ผู้เล่นและลูกบอลจะกลับไปตำแหน่งเริ่มต้นเฉพาะโหมดนี้ ส่วนจังหวะ Animation และโน้ตจะยังอยู่'
+                ? 'ผู้เล่นที่มาวันนี้จะถูกจัดตามตำแหน่ง D, M, W และ F โดยคนแรกในคิว GK จะอยู่หน้าประตู ส่วน Animation และโน้ตจะยังอยู่'
                 : 'ทุกจังหวะและเส้นใน Animation จะถูกล้าง ส่วนตำแหน่งบนกระดานปกติและโน้ตจะยังอยู่'}
             </AlertDialogDescription>
           </AlertDialogHeader>

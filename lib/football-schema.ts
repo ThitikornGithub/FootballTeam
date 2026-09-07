@@ -12,6 +12,10 @@ import {
 
 const TEAM_COLOR_SET = new Set<string>(TEAM_COLORS);
 const PLAYER_POSITION_SET = new Set<string>(PLAYER_POSITIONS);
+const PERSISTED_PLAYER_POSITION_SET = new Set<string>([
+  ...PLAYER_POSITIONS,
+  'goalkeeper',
+]);
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,7 +68,8 @@ function parseTeam(value: unknown): Team | null {
       player.positions !== undefined &&
       (!Array.isArray(player.positions) ||
         !player.positions.every(
-          (position) => isString(position) && PLAYER_POSITION_SET.has(position),
+          (position) =>
+            isString(position) && PERSISTED_PLAYER_POSITION_SET.has(position),
         ) ||
         !uniqueStrings(player.positions))
     )
@@ -84,7 +89,21 @@ function parseTeam(value: unknown): Team | null {
     )
   )
     return null;
-  return value as Team;
+  return {
+    ...value,
+    players: players.map((player) => {
+      const record = player as Record<string, unknown>;
+      return {
+        ...record,
+        positions: Array.isArray(record.positions)
+          ? record.positions.filter(
+              (position) =>
+                isString(position) && PLAYER_POSITION_SET.has(position),
+            )
+          : undefined,
+      };
+    }),
+  } as Team;
 }
 
 function parseMatch(value: unknown, teamIds: Set<string>): Match | null {
@@ -244,5 +263,5 @@ export function parseTournament(value: unknown): Tournament | null {
   if (!uniqueStrings(matchIds)) return null;
   if (value.tactics !== undefined && !parseTactics(value.tactics, teamIdSet))
     return null;
-  return value as Tournament;
+  return { ...value, teams: teams as Team[] } as Tournament;
 }

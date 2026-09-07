@@ -12,7 +12,6 @@ export const TEAM_COLORS = [
 export type TeamColor = (typeof TEAM_COLORS)[number];
 
 export const PLAYER_POSITIONS = [
-  'goalkeeper',
   'defender',
   'midfielder',
   'winger',
