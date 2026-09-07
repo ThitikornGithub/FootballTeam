@@ -76,7 +76,7 @@ Technology:
 - `id`, `name`, `createdAt`
 - `teams[]`
   - team id, name, shirt color
-  - `players[]`, `absentToday` และ `positions[]` (`goalkeeper`, `defender`, `midfielder`, `forward`)
+  - `players[]`, `absentToday` และ `positions[]` (`goalkeeper`, `defender`, `midfielder`, `winger`, `forward`)
   - `gkRotation[]`, `gkCycleOrders[][]`
 - เวลาเริ่ม ระยะเวลาแข่ง เวลาพัก และเวลาที่มีทั้งหมด
 - `matches[]`

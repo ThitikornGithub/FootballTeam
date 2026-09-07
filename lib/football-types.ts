@@ -15,6 +15,7 @@ export const PLAYER_POSITIONS = [
   'goalkeeper',
   'defender',
   'midfielder',
+  'winger',
   'forward',
 ] as const;
 

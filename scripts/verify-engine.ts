@@ -202,6 +202,12 @@ assert(
   ),
   'Demo players must demonstrate one or more playable positions',
 );
+assert(
+  tournament.teams.some((team) =>
+    team.players.some((player) => player.positions?.includes('winger')),
+  ),
+  'Demo players must include the winger position',
+);
 const legacyPlayersWithoutPositions = {
   ...tournament,
   teams: tournament.teams.map((team) => ({

@@ -143,6 +143,11 @@ const PLAYER_POSITION_META: Record<
     fullLabel: 'กองกลาง',
     className: 'border-violet-200 bg-violet-50 text-violet-700',
   },
+  winger: {
+    shortLabel: 'W',
+    fullLabel: 'ปีก',
+    className: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  },
   forward: {
     shortLabel: 'F',
     fullLabel: 'กองหน้า',
@@ -1219,7 +1224,7 @@ function PlayerPositionPicker({
                     ),
               )
             }
-            className={`${compact ? 'grid h-8 w-7 shrink-0 place-items-center rounded-lg p-0 text-[10px]' : 'min-h-9 rounded-full px-3 text-xs'} border font-black transition ${selected ? meta.className : 'border-slate-200 bg-white text-slate-400'}`}
+            className={`${compact ? 'grid h-8 w-6 shrink-0 place-items-center rounded-lg p-0 text-[10px]' : 'min-h-9 rounded-full px-3 text-xs'} border font-black transition ${selected ? meta.className : 'border-slate-200 bg-white text-slate-400'}`}
           >
             {meta.shortLabel}
           </button>
@@ -1361,7 +1366,7 @@ function TeamDetailScreen({
           <div className="mb-3">
             <h2 className="section-title">รายชื่อผู้เล่น</h2>
             <p className="section-note">
-              ตำแหน่ง: GK ประตู · D หลัง · M กลาง · F หน้า (เลือกได้หลายตำแหน่ง)
+              ตำแหน่ง: GK ประตู · D หลัง · M กลาง · W ปีก · F หน้า (เลือกได้หลายตำแหน่ง)
             </p>
           </div>
           <div>
@@ -1503,7 +1508,7 @@ function TeamDetailScreen({
             </div>
             <div className="mt-3">
               <p className="mb-2 text-xs font-bold text-slate-500">
-                ตำแหน่งที่เล่นได้: GK · D · M · F (เลือกได้หลายตำแหน่ง)
+                ตำแหน่งที่เล่นได้: GK · D · M · W · F (เลือกได้หลายตำแหน่ง)
               </p>
               <PlayerPositionPicker
                 playerName={newName || 'ผู้เล่นใหม่'}

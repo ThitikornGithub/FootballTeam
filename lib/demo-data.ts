@@ -35,8 +35,8 @@ const demoPositions: PlayerPosition[][] = [
   ['defender'],
   ['defender', 'midfielder'],
   ['defender'],
-  ['midfielder'],
-  ['midfielder', 'forward'],
+  ['midfielder', 'winger'],
+  ['winger', 'forward'],
   ['forward'],
 ];
 
