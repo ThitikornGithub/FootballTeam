@@ -29,7 +29,7 @@ import {
   Trophy,
   Users,
 } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import {
   BottomNavigation,
@@ -42,6 +42,7 @@ import {
   TeamShirtIcon,
 } from './shared';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -89,25 +90,24 @@ import {
   type Tournament,
 } from '@/lib/football-types';
 import {
-  canvasToPngBlob,
-  downloadShareCard,
-  renderStandingsShareCard,
-  scheduledEndTime,
-  shareCardFilename,
-} from '@/lib/standings-share-card';
-import {
   createSharedGame,
   deleteSharedGame,
   type FootballGameSummary,
   type StoredFootballGame,
   listSharedGames,
   loadSharedGame,
+  prefetchSharedGames,
+  readCachedSharedGames,
   RevisionConflictError,
   saveSharedGame,
 } from '@/lib/football-data-api';
 import { parseTournament } from '@/lib/football-schema';
 import { newestPendingState, syncRetryDelayMs } from '@/lib/football-sync';
-import { TacticsScreen } from './tactics-board';
+const TacticsScreen = lazy(() =>
+  import('./tactics-board').then((module) => ({
+    default: module.TacticsScreen,
+  })),
+);
 
 const STORAGE_KEY = 'football-match-maker-v1';
 const STORAGE_GAME_ID_KEY = 'football-match-maker-game-id';
@@ -213,6 +213,13 @@ function defaultGameName() {
     day: 'numeric',
   }).format(new Date());
   return `Friendly Match · ${date}`;
+}
+
+function scheduledEndTime(tournament: Tournament) {
+  const lastMatch = tournament.matches.at(-1);
+  return lastMatch
+    ? addMinutes(lastMatch.startTime, tournament.matchDurationMinutes)
+    : tournament.startTime;
 }
 
 function formatShareText(tournament: Tournament) {
@@ -1837,7 +1844,10 @@ function ShareScreen({
   useEffect(() => {
     let cancelled = false;
     async function draw() {
-      await document.fonts?.ready;
+      const [{ renderStandingsShareCard }] = await Promise.all([
+        import('@/lib/standings-share-card'),
+        document.fonts?.ready,
+      ]);
       if (!cancelled && canvasRef.current) {
         renderStandingsShareCard(canvasRef.current, tournament);
       }
@@ -1848,10 +1858,20 @@ function ShareScreen({
     };
   }, [tournament]);
 
-  async function makeBlob() {
+  async function makeShareCard() {
     if (!canvasRef.current) throw new Error('ยังสร้างรูปไม่เสร็จ');
+    const {
+      canvasToPngBlob,
+      downloadShareCard,
+      renderStandingsShareCard,
+      shareCardFilename,
+    } = await import('@/lib/standings-share-card');
     renderStandingsShareCard(canvasRef.current, tournament);
-    return canvasToPngBlob(canvasRef.current);
+    return {
+      blob: await canvasToPngBlob(canvasRef.current),
+      downloadShareCard,
+      filename: shareCardFilename(tournament),
+    };
   }
 
   async function copy() {
@@ -1865,8 +1885,8 @@ function ShareScreen({
 
   async function download() {
     try {
-      const blob = await makeBlob();
-      downloadShareCard(blob, shareCardFilename(tournament));
+      const { blob, downloadShareCard, filename } = await makeShareCard();
+      downloadShareCard(blob, filename);
       onNotice('ดาวน์โหลดรูปตารางคะแนนแล้ว');
     } catch {
       onNotice('สร้างรูปไม่สำเร็จ กรุณาลองใหม่');
@@ -1877,8 +1897,8 @@ function ShareScreen({
     if (isSharing) return;
     setIsSharing(true);
     try {
-      const blob = await makeBlob();
-      const file = new File([blob], shareCardFilename(tournament), {
+      const { blob, downloadShareCard, filename } = await makeShareCard();
+      const file = new File([blob], filename, {
         type: 'image/png',
       });
       if (navigator.share && navigator.canShare?.({ files: [file] })) {
@@ -1962,12 +1982,15 @@ function GamesScreen({
   onNotice,
 }: {
   onBack: () => void;
-  onOpen: (gameId: string) => void;
+  onOpen: (gameId: string) => void | Promise<void>;
   onDeleted: (gameId: string) => void;
   onNotice: (message: string) => void;
 }) {
-  const [games, setGames] = useState<FootballGameSummary[]>([]);
+  const [games, setGames] = useState<FootballGameSummary[]>(() =>
+    readCachedSharedGames(),
+  );
   const [loading, setLoading] = useState(true);
+  const [openingId, setOpeningId] = useState('');
   const [deletingId, setDeletingId] = useState('');
   const [confirmingId, setConfirmingId] = useState('');
 
@@ -2007,12 +2030,22 @@ function GamesScreen({
     }
   }
 
+  async function openGame(gameId: string) {
+    if (openingId) return;
+    setOpeningId(gameId);
+    try {
+      await onOpen(gameId);
+    } finally {
+      setOpeningId('');
+    }
+  }
+
   const confirmingGame = games.find((game) => game.id === confirmingId);
   return (
     <>
       <PageHeader
         title="เกมทั้งหมด"
-        eyebrow={`${games.length} เกมใน FootballTeam`}
+        eyebrow={`${games.length} เกมใน FootballTeam${loading && games.length ? ' · กำลังอัปเดต' : ''}`}
         onBack={onBack}
         action={
           <button
@@ -2028,9 +2061,17 @@ function GamesScreen({
       />
       <div className="space-y-3 px-4 py-4 pb-8">
         {loading && games.length === 0 ? (
-          <div className="rounded-[22px] border border-slate-200 bg-white p-8 text-center font-bold text-slate-500">
-            กำลังโหลดเกม…
-          </div>
+          Array.from({ length: 3 }, (_, index) => (
+            <div
+              key={index}
+              className="rounded-[22px] border border-slate-200 bg-white p-4"
+              aria-hidden="true"
+            >
+              <Skeleton className="h-5 w-2/3 rounded-lg" />
+              <Skeleton className="mt-2 h-3 w-4/5 rounded-lg" />
+              <Skeleton className="mt-4 h-10 w-full rounded-xl" />
+            </div>
+          ))
         ) : games.length === 0 ? (
           <div className="rounded-[22px] border border-slate-200 bg-white p-8 text-center">
             <FolderOpen className="mx-auto h-10 w-10 text-slate-300" />
@@ -2048,7 +2089,8 @@ function GamesScreen({
               <div className="flex items-start gap-3">
                 <button
                   type="button"
-                  onClick={() => onOpen(game.id)}
+                  onClick={() => void openGame(game.id)}
+                  disabled={Boolean(openingId)}
                   className="min-w-0 flex-1 text-left"
                 >
                   <p className="truncate text-base font-black">{game.name}</p>
@@ -2067,14 +2109,20 @@ function GamesScreen({
               </div>
               <button
                 type="button"
-                onClick={() => onOpen(game.id)}
+                onClick={() => void openGame(game.id)}
+                disabled={Boolean(openingId)}
                 className="mt-3 flex w-full items-center justify-between rounded-xl bg-slate-50 px-3 py-2.5 text-left"
               >
                 <span className="text-sm font-bold text-slate-600">
-                  {game.teamCount} ทีม · {game.finishedCount}/{game.matchCount}{' '}
-                  แมตช์ · เริ่ม {game.startTime}
+                  {openingId === game.id
+                    ? 'กำลังเปิดเกม…'
+                    : `${game.teamCount} ทีม · ${game.finishedCount}/${game.matchCount} แมตช์ · เริ่ม ${game.startTime}`}
                 </span>
-                <ChevronRight className="h-5 w-5 text-slate-400" />
+                {openingId === game.id ? (
+                  <LoaderCircle className="h-5 w-5 animate-spin text-[#11823b]" />
+                ) : (
+                  <ChevronRight className="h-5 w-5 text-slate-400" />
+                )}
               </button>
             </article>
           ))
@@ -2780,6 +2828,10 @@ export default function FootballApp() {
   }, []);
   /* oxlint-enable react/react-compiler */
   useEffect(() => {
+    if (!hydrated || gameId) return;
+    void prefetchSharedGames().catch(() => undefined);
+  }, [hydrated, gameId]);
+  useEffect(() => {
     tournamentRef.current = tournament;
     if (!hydrated) return;
     if (tournament) {
@@ -3214,7 +3266,7 @@ export default function FootballApp() {
           {view === 'games' && (
             <GamesScreen
               onBack={() => setView('home')}
-              onOpen={(id) => void openSharedGame(id)}
+              onOpen={(id) => openSharedGame(id)}
               onDeleted={handleDeletedGame}
               onNotice={setNotice}
             />
@@ -3271,11 +3323,20 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'tactics' && (
-            <TacticsScreen
-              tournament={tournament}
-              onUpdate={applyTournament}
-              onCopyLink={() => void copyGameLink()}
-            />
+            <Suspense
+              fallback={
+                <div className="grid min-h-[520px] place-items-center font-black text-[#11823b]">
+                  <LoaderCircle className="h-6 w-6 animate-spin" />
+                  <span className="sr-only">กำลังเปิดกระดานแท็กติก</span>
+                </div>
+              }
+            >
+              <TacticsScreen
+                tournament={tournament}
+                onUpdate={applyTournament}
+                onCopyLink={() => void copyGameLink()}
+              />
+            </Suspense>
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen

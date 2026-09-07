@@ -3,7 +3,8 @@ import './globals.css';
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ?? 'https://football-match-maker.b-thitikorn.chatgpt.site';
+  process.env.NEXT_PUBLIC_SITE_URL ??
+  'https://football-match-maker.b-thitikorn.chatgpt.site';
 const publicAsset = (path: string) => `${basePath}${path}`;
 
 export const metadata: Metadata = {
@@ -34,6 +35,19 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="th"><body>{children}</body></html>;
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  return (
+    <html lang="th">
+      <head>
+        <link
+          rel="preconnect"
+          href="https://ep-falling-night-b3rsao2f.apirest.c-4.ap-southeast-1.aws.neon.tech"
+          crossOrigin="anonymous"
+        />
+      </head>
+      <body>{children}</body>
+    </html>
+  );
 }

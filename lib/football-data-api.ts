@@ -3,9 +3,11 @@ import { parseTournament } from '@/lib/football-schema';
 
 const DATA_API_URL =
   'https://ep-falling-night-b3rsao2f.apirest.c-4.ap-southeast-1.aws.neon.tech/neondb/rest/v1';
+const GAME_LIST_CACHE_KEY = 'football-match-maker-game-list-v1';
+const GAME_LIST_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // This is intentionally a shared, public app credential. Database permissions
-// restrict it to the three FootballTeam RPC functions.
+// restrict it to the FootballTeam RPC functions.
 const DATA_API_TOKEN =
   'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImExODE4Yjc3YmY4NmNjZjUwYzZhYzJjNyJ9.eyJyb2xlIjoiYW5vbnltb3VzIiwiaXNzIjoiZm9vdGJhbGwtdGVhbS1naXRodWItcGFnZXMiLCJpYXQiOjE3ODg2MzE3MDksImV4cCI6MjEwNDIwNzcwOX0.XQdzssujGrTt_-De63HCog5tV-CVWHFTkA-r0LO9Q3LKne1NZP1KpZcaElybivQjK9xBgYOA2sVmU-alQY-_jrB7rWKW6GN8fkZPoRVRpR07UBoLQm0N1_dDSk_KjA0KESecPWh8cW8KROPJGami3RK6-9t_U37RfhxwY5RLl3LnWw05wa6aNU9JBfFBoodx-py98L-jlwj2hHB4GqBKMHdsP-ovXk3FL1UhfBmxIyhjHBnSAUV78xSATd4CoGbN-GC68TbZFTLqmG6gFthmTIr3UlyfPWo8PMiIsCBcEz24oSZjUJW8mJADpu7zznwvA2z7VRlQLiOKy-XpjGu3BQ';
 
@@ -28,6 +30,13 @@ export type FootballGameSummary = {
 };
 
 type SaveFootballGameResponse = StoredFootballGame & { conflict?: boolean };
+type CachedGameList = {
+  cachedAt: number;
+  games: FootballGameSummary[];
+};
+
+let gameListRequest: Promise<FootballGameSummary[]> | null = null;
+let memoryGameList: CachedGameList | null = null;
 
 export class RevisionConflictError extends Error {
   constructor(readonly latest: StoredFootballGame) {
@@ -121,28 +130,95 @@ export async function saveSharedGame(
 }
 
 export function listSharedGames() {
-  return callRpc<unknown>('list_football_games', {}).then((value) => {
-    if (!Array.isArray(value)) throw new Error('รายการเกมมีรูปแบบไม่ถูกต้อง');
-    return value.map((item) => {
-      if (!item || typeof item !== 'object')
-        throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
-      const game = item as Record<string, unknown>;
-      if (
-        typeof game.id !== 'string' ||
-        typeof game.name !== 'string' ||
-        !Number.isInteger(game.teamCount) ||
-        !Number.isInteger(game.matchCount) ||
-        !Number.isInteger(game.finishedCount) ||
-        typeof game.startTime !== 'string' ||
-        typeof game.createdAt !== 'string' ||
-        typeof game.updatedAt !== 'string'
-      )
-        throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
-      return game as FootballGameSummary;
+  if (gameListRequest) return gameListRequest;
+  gameListRequest = callRpc<unknown>('list_football_games', {})
+    .then(parseGameList)
+    .then((games) => {
+      cacheGameList(games);
+      return games;
+    })
+    .finally(() => {
+      gameListRequest = null;
     });
+  return gameListRequest;
+}
+
+export function readCachedSharedGames() {
+  if (
+    memoryGameList &&
+    Date.now() - memoryGameList.cachedAt <= GAME_LIST_CACHE_MAX_AGE_MS
+  )
+    return memoryGameList.games;
+  if (typeof window === 'undefined') return [];
+  try {
+    const stored = localStorage.getItem(GAME_LIST_CACHE_KEY);
+    if (!stored) return [];
+    const cached = JSON.parse(stored) as CachedGameList;
+    if (
+      !Number.isFinite(cached.cachedAt) ||
+      Date.now() - cached.cachedAt > GAME_LIST_CACHE_MAX_AGE_MS
+    ) {
+      localStorage.removeItem(GAME_LIST_CACHE_KEY);
+      return [];
+    }
+    const games = parseGameList(cached.games);
+    memoryGameList = { cachedAt: cached.cachedAt, games };
+    return games;
+  } catch {
+    try {
+      localStorage.removeItem(GAME_LIST_CACHE_KEY);
+    } catch {
+      // Ignore browsers that block storage entirely.
+    }
+    return [];
+  }
+}
+
+export function prefetchSharedGames() {
+  return listSharedGames().then(() => undefined);
+}
+
+export async function deleteSharedGame(gameId: string) {
+  const deleted = await callRpc<boolean>('delete_football_game', {
+    p_game_id: gameId,
+  });
+  if (deleted) {
+    const remaining = readCachedSharedGames().filter(
+      (game) => game.id !== gameId,
+    );
+    cacheGameList(remaining);
+  }
+  return deleted;
+}
+
+function parseGameList(value: unknown): FootballGameSummary[] {
+  if (!Array.isArray(value)) throw new Error('รายการเกมมีรูปแบบไม่ถูกต้อง');
+  return value.map((item) => {
+    if (!item || typeof item !== 'object')
+      throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
+    const game = item as Record<string, unknown>;
+    if (
+      typeof game.id !== 'string' ||
+      typeof game.name !== 'string' ||
+      !Number.isInteger(game.teamCount) ||
+      !Number.isInteger(game.matchCount) ||
+      !Number.isInteger(game.finishedCount) ||
+      typeof game.startTime !== 'string' ||
+      typeof game.createdAt !== 'string' ||
+      typeof game.updatedAt !== 'string'
+    )
+      throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
+    return game as FootballGameSummary;
   });
 }
 
-export function deleteSharedGame(gameId: string) {
-  return callRpc<boolean>('delete_football_game', { p_game_id: gameId });
+function cacheGameList(games: FootballGameSummary[]) {
+  const cached = { cachedAt: Date.now(), games };
+  memoryGameList = cached;
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(GAME_LIST_CACHE_KEY, JSON.stringify(cached));
+  } catch {
+    // The memory cache still makes navigation within this tab instant.
+  }
 }

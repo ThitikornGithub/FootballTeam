@@ -1,8 +1,8 @@
 # FootballTeam — Project Handoff
 
-อัปเดตล่าสุด: 6 กันยายน 2026  
+อัปเดตล่าสุด: 8 กันยายน 2026
 ขอบเขตการตรวจ: source code, scheduling engine, Neon persistence, GitHub Pages deployment, dependency audit และข้อมูลที่อยู่ใน Neon ณ วันที่ตรวจ  
-สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ bug-fix วันที่ 6 กันยายน 2026
+สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ performance วันที่ 8 กันยายน 2026
 
 ## 1. ภาพรวมโปรเจกต์
 
@@ -112,6 +112,8 @@ RPC ที่ browser เรียกได้:
 5. แอป poll Neon ทุก 15 วินาทีเฉพาะตอนหน้า visible และไม่ apply remote ขณะมี local dirty state
 6. ถ้า revision ชนกันจะแสดงตัวเลือก “ใช้ข้อมูลล่าสุด” หรือ “เก็บข้อมูลเครื่องนี้”
 7. สถานะบนหน้า Home คือ `กำลังบันทึก`, `บันทึกแล้ว`, `ซิงก์ไม่สำเร็จ`, `ข้อมูลชนกัน` หรือ `เฉพาะเครื่อง`
+8. รายการเกมใช้ stale-while-revalidate: แสดง cache อายุไม่เกิน 24 ชั่วโมงทันที แล้วอัปเดตจาก Neon เบื้องหลัง โดยหน้าเริ่มต้นจะ prefetch รายการไว้ล่วงหน้า
+9. Neon free compute อาจใช้เวลาหลายวินาทีเมื่อปลุกจากสถานะ idle; หลังตื่นแล้ว RPC ปกติอยู่ระดับหลักสิบถึงหลักร้อยมิลลิวินาที จึงไม่ควรตีความ cold start ว่าเป็นปัญหาจากจำนวนแถวหรือ React render
 
 Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql`; ต้อง apply migration นี้ก่อน deploy frontend ที่เรียก v2
 
