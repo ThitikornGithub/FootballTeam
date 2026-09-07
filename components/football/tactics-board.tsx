@@ -22,6 +22,16 @@ import {
 
 import { Button } from '@/components/ui/button';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   type TacticMarker,
   type TacticPath,
   type TacticStep,
@@ -244,6 +254,7 @@ export function TacticsScreen({
   const [isPlaying, setIsPlaying] = useState(false);
   const [showPathsDuringPlayback, setShowPathsDuringPlayback] = useState(false);
   const [notice, setNotice] = useState('');
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers =
     mode === 'position'
@@ -304,6 +315,34 @@ export function TacticsScreen({
     setPathPreview(null);
     setIsPlaying(false);
     setAnimationHasContent(false);
+  }
+
+  function resetCurrentMode() {
+    if (mode === 'position') {
+      const nextBoard = {
+        ...makeBoard(tournament, board.teamAId, board.teamBId),
+        notes: board.notes,
+        animationSteps: board.animationSteps,
+      };
+      setBoard(nextBoard);
+      setNotice('รีเซ็ตเฉพาะตำแหน่งแล้ว แผน Animation ยังอยู่');
+    } else {
+      setSteps([
+        {
+          id: prototypeId('step'),
+          title: 'ตำแหน่งเริ่มต้น',
+          markers: copyMarkers(board.markers),
+          paths: [],
+        },
+      ]);
+      setAnimationHasContent(false);
+      setNotice('ล้างเฉพาะแผน Animation แล้ว ตำแหน่งปกติยังอยู่');
+    }
+    setActiveStepIndex(0);
+    setTool('move');
+    setPathPreview(null);
+    setIsPlaying(false);
+    setConfirmingReset(false);
   }
 
   function moveMarker(markerId: string, x: number, y: number) {
@@ -580,7 +619,7 @@ export function TacticsScreen({
             <Button
               type="button"
               variant="outline"
-              onClick={() => resetBoard()}
+              onClick={() => setConfirmingReset(true)}
               className="h-9 shrink-0 rounded-xl px-3 text-xs font-black"
             >
               <RotateCcw />
@@ -1029,6 +1068,34 @@ export function TacticsScreen({
           </div>
         )}
       </div>
+      <AlertDialog open={confirmingReset} onOpenChange={setConfirmingReset}>
+        <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+          <AlertDialogHeader className="place-items-start text-left">
+            <AlertDialogTitle className="text-lg font-black">
+              {mode === 'position'
+                ? 'รีเซ็ตตำแหน่งบนกระดาน?'
+                : 'ล้างแผน Animation?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left font-semibold leading-6">
+              {mode === 'position'
+                ? 'ผู้เล่นและลูกบอลจะกลับไปตำแหน่งเริ่มต้นเฉพาะโหมดนี้ ส่วนจังหวะ Animation และโน้ตจะยังอยู่'
+                : 'ทุกจังหวะและเส้นใน Animation จะถูกล้าง ส่วนตำแหน่งบนกระดานปกติและโน้ตจะยังอยู่'}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 grid grid-cols-2 bg-white">
+            <AlertDialogCancel className="h-12 rounded-xl font-black">
+              ยกเลิก
+            </AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={resetCurrentMode}
+              className="h-12 rounded-xl font-black"
+            >
+              รีเซ็ต
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

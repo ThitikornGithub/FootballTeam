@@ -106,10 +106,12 @@ import {
   saveSharedGame,
 } from '@/lib/football-data-api';
 import { parseTournament } from '@/lib/football-schema';
+import { newestPendingState, syncRetryDelayMs } from '@/lib/football-sync';
 import { TacticsScreen } from './tactics-board';
 
 const STORAGE_KEY = 'football-match-maker-v1';
 const STORAGE_GAME_ID_KEY = 'football-match-maker-game-id';
+const STORAGE_PENDING_SYNC_KEY = 'football-match-maker-pending-sync';
 const PAGES_PATH_KEY = 'football-pages-path';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
@@ -130,17 +132,25 @@ function readLocalBackup() {
     return {
       tournament,
       gameId: localStorage.getItem(STORAGE_GAME_ID_KEY),
+      pendingSync: localStorage.getItem(STORAGE_PENDING_SYNC_KEY) === '1',
     };
   } catch {
-    return { tournament: null, gameId: null };
+    return { tournament: null, gameId: null, pendingSync: false };
   }
 }
 
-function writeLocalBackup(tournament: Tournament, gameId = '') {
+function writeLocalBackup(
+  tournament: Tournament,
+  gameId = '',
+  pendingSync = false,
+) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
     if (gameId) localStorage.setItem(STORAGE_GAME_ID_KEY, gameId);
     else localStorage.removeItem(STORAGE_GAME_ID_KEY);
+    if (gameId && pendingSync)
+      localStorage.setItem(STORAGE_PENDING_SYNC_KEY, '1');
+    else localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
   } catch {
     // Neon remains the source of truth when browser storage is unavailable.
   }
@@ -150,6 +160,7 @@ function clearLocalBackup() {
   try {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_GAME_ID_KEY);
+    localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
   } catch {
     // Browser storage is only a best-effort offline backup.
   }
@@ -310,6 +321,28 @@ function CurrentMatchControl({
   const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
   const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
   const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
+
+  /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
+  useEffect(() => {
+    setScoreA(String(match.teamAScore ?? 0));
+    setScoreB(String(match.teamBScore ?? 0));
+  }, [match.id, match.teamAScore, match.teamBScore]);
+  /* oxlint-enable react/react-compiler */
+
+  function updateDraftScore(team: 'a' | 'b', value: string) {
+    if (team === 'a') setScoreA(value);
+    else setScoreB(value);
+    if (value === '') return;
+    onUpdate(
+      setMatchScore(
+        tournament,
+        match.id,
+        team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
+        team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+      ),
+    );
+  }
+
   return (
     <div className="rounded-[22px] border border-[#9dd2ab] bg-white p-4 shadow-[0_8px_24px_rgba(17,130,59,.08)]">
       <div className="mb-3 flex items-center justify-between">
@@ -335,15 +368,19 @@ function CurrentMatchControl({
           label={teamA.name}
           color={teamA.color}
           score={scoreA}
-          onChange={setScoreA}
+          onChange={(value) => updateDraftScore('a', value)}
         />
         <ScorePicker
           label={teamB.name}
           color={teamB.color}
           score={scoreB}
-          onChange={setScoreB}
+          onChange={(value) => updateDraftScore('b', value)}
         />
       </div>
+      <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] font-bold text-slate-500">
+        <Cloud className="h-3.5 w-3.5 text-[#11823b]" />
+        สกอร์ระหว่างแข่งบันทึกอัตโนมัติ กดจบเกมเมื่อแข่งเสร็จ
+      </p>
       <div className="mt-3">
         <Button
           type="button"
@@ -1639,6 +1676,28 @@ function MatchDetailScreen({
   const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
   const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
   const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
+
+  /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
+  useEffect(() => {
+    setScoreA(String(match.teamAScore ?? 0));
+    setScoreB(String(match.teamBScore ?? 0));
+  }, [match.id, match.teamAScore, match.teamBScore]);
+  /* oxlint-enable react/react-compiler */
+
+  function updateDraftScore(team: 'a' | 'b', value: string) {
+    if (team === 'a') setScoreA(value);
+    else setScoreB(value);
+    if (value === '' || match.status === 'finished') return;
+    onUpdate(
+      setMatchScore(
+        tournament,
+        match.id,
+        team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
+        team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+      ),
+    );
+  }
+
   return (
     <>
       <PageHeader
@@ -1670,15 +1729,21 @@ function MatchDetailScreen({
               label={teamA.name}
               color={teamA.color}
               score={scoreA}
-              onChange={setScoreA}
+              onChange={(value) => updateDraftScore('a', value)}
             />
             <ScorePicker
               label={teamB.name}
               color={teamB.color}
               score={scoreB}
-              onChange={setScoreB}
+              onChange={(value) => updateDraftScore('b', value)}
             />
           </div>
+          {match.status !== 'finished' && (
+            <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] font-bold text-slate-500">
+              <Cloud className="h-3.5 w-3.5 text-[#11823b]" />
+              สกอร์นี้บันทึกอัตโนมัติ แต่ยังไม่คิดในตารางคะแนน
+            </p>
+          )}
         </section>
         {match.status === 'upcoming' && (
           <Button
@@ -2524,6 +2589,25 @@ export default function FootballApp() {
   const saveInFlightRef = useRef(false);
   const dirtyRef = useRef(false);
   const retryTimerRef = useRef<number | null>(null);
+  const retryAttemptRef = useRef(0);
+
+  function cancelScheduledRetry(resetAttempt = true) {
+    if (retryTimerRef.current !== null) {
+      window.clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    if (resetAttempt) retryAttemptRef.current = 0;
+  }
+
+  function scheduleSyncRetry(targetGameId: string) {
+    if (retryTimerRef.current !== null) return;
+    const delay = syncRetryDelayMs(retryAttemptRef.current);
+    retryAttemptRef.current += 1;
+    retryTimerRef.current = window.setTimeout(() => {
+      retryTimerRef.current = null;
+      void flushSharedState(targetGameId);
+    }, delay);
+  }
 
   async function flushSharedState(
     targetGameId = gameIdRef.current,
@@ -2533,7 +2617,8 @@ export default function FootballApp() {
       !targetGameId ||
       saveInFlightRef.current ||
       conflictRemoteRef.current ||
-      remoteRevisionRef.current < 1
+      remoteRevisionRef.current < 1 ||
+      (retryTimerRef.current !== null && !options.keepalive)
     )
       return;
     const value = queuedStateRef.current ?? tournamentRef.current;
@@ -2543,12 +2628,14 @@ export default function FootballApp() {
       queuedStateRef.current = null;
       dirtyRef.current = false;
       setSyncStatus('saved');
+      writeLocalBackup(value, targetGameId, false);
       return;
     }
 
     queuedStateRef.current = null;
     saveInFlightRef.current = true;
     let conflictDetected = false;
+    let saveSucceeded = false;
     setSyncStatus('saving');
     try {
       const game = await saveSharedGame(
@@ -2559,19 +2646,31 @@ export default function FootballApp() {
       );
       remoteRevisionRef.current = game.revision;
       lastRemoteStateRef.current = JSON.stringify(game.state);
+      saveSucceeded = true;
+      cancelScheduledRetry();
       const latestSerialized = JSON.stringify(tournamentRef.current);
       if (latestSerialized !== serialized) {
         queuedStateRef.current = tournamentRef.current;
         dirtyRef.current = true;
+        if (tournamentRef.current)
+          writeLocalBackup(tournamentRef.current, targetGameId, true);
       } else {
         dirtyRef.current = false;
         setSyncStatus('saved');
+        writeLocalBackup(value, targetGameId, false);
       }
     } catch (error) {
-      queuedStateRef.current = value;
+      const latestPending = newestPendingState(
+        value,
+        queuedStateRef.current,
+        tournamentRef.current,
+      );
+      queuedStateRef.current = latestPending;
       dirtyRef.current = true;
+      writeLocalBackup(latestPending, targetGameId, true);
       if (error instanceof RevisionConflictError) {
         conflictDetected = true;
+        cancelScheduledRetry(false);
         remoteRevisionRef.current = error.latest.revision;
         conflictRemoteRef.current = error.latest;
         setConflictRemote(error.latest);
@@ -2579,17 +2678,12 @@ export default function FootballApp() {
       } else {
         setSyncStatus('error');
         setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
-        if (!options.keepalive) {
-          if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
-          retryTimerRef.current = window.setTimeout(
-            () => void flushSharedState(targetGameId),
-            3500,
-          );
-        }
+        if (!options.keepalive) scheduleSyncRetry(targetGameId);
       }
     } finally {
       saveInFlightRef.current = false;
       if (
+        saveSucceeded &&
         queuedStateRef.current &&
         !conflictDetected &&
         !conflictRemoteRef.current &&
@@ -2605,6 +2699,7 @@ export default function FootballApp() {
     let cancelled = false;
     async function hydrate() {
       restoreGitHubPagesPath();
+      const backup = readLocalBackup();
       const pathGameId = gameIdFromPath();
       if (pathGameId) {
         gameIdRef.current = pathGameId;
@@ -2613,19 +2708,43 @@ export default function FootballApp() {
           const game = await loadSharedGame(pathGameId);
           if (cancelled) return;
           if (game) {
-            const value = extendTournamentToEndTime(game.state);
-            lastRemoteStateRef.current = JSON.stringify(value);
+            const remoteValue = extendTournamentToEndTime(game.state);
+            const remoteSerialized = JSON.stringify(remoteValue);
+            lastRemoteStateRef.current = remoteSerialized;
             remoteRevisionRef.current = game.revision;
-            tournamentRef.current = value;
-            setTournament(value);
-            setSyncStatus('saved');
-            writeLocalBackup(value, pathGameId);
+            if (
+              backup.pendingSync &&
+              backup.tournament &&
+              backup.gameId === pathGameId
+            ) {
+              const localValue = extendTournamentToEndTime(backup.tournament);
+              if (JSON.stringify(localValue) !== remoteSerialized) {
+                const remoteGame = { ...game, state: remoteValue };
+                tournamentRef.current = localValue;
+                queuedStateRef.current = localValue;
+                dirtyRef.current = true;
+                conflictRemoteRef.current = remoteGame;
+                setTournament(localValue);
+                setConflictRemote(remoteGame);
+                setSyncStatus('conflict');
+                setNotice('มีข้อมูลในเครื่องที่ยังไม่ได้ซิงก์ กรุณาเลือกข้อมูลที่จะใช้');
+              } else {
+                tournamentRef.current = remoteValue;
+                setTournament(remoteValue);
+                setSyncStatus('saved');
+                writeLocalBackup(remoteValue, pathGameId, false);
+              }
+            } else {
+              tournamentRef.current = remoteValue;
+              setTournament(remoteValue);
+              setSyncStatus('saved');
+              writeLocalBackup(remoteValue, pathGameId, false);
+            }
           } else {
             setNotice('ไม่พบเกมจากลิงก์นี้');
           }
         } catch {
           if (cancelled) return;
-          const backup = readLocalBackup();
           if (backup.tournament && backup.gameId === pathGameId) {
             const value = extendTournamentToEndTime(backup.tournament);
             tournamentRef.current = value;
@@ -2647,7 +2766,6 @@ export default function FootballApp() {
       tournamentRef.current = null;
       gameIdRef.current = '';
       setGameId('');
-      const backup = readLocalBackup();
       setRecoverableDraft(
         backup.tournament && !backup.gameId ? backup.tournament : null,
       );
@@ -2665,7 +2783,7 @@ export default function FootballApp() {
     tournamentRef.current = tournament;
     if (!hydrated) return;
     if (tournament) {
-      writeLocalBackup(tournament, gameId);
+      writeLocalBackup(tournament, gameId, dirtyRef.current);
       if (!gameId) return;
       const serialized = JSON.stringify(tournament);
       if (serialized === lastRemoteStateRef.current) return;
@@ -2770,6 +2888,7 @@ export default function FootballApp() {
           annotations: { readOnlyHint: false, untrustedContentHint: false },
           execute: () => {
             const demo = createDemoTournament();
+            cancelScheduledRetry();
             tournamentRef.current = demo;
             lastRemoteStateRef.current = '';
             remoteRevisionRef.current = 0;
@@ -2830,19 +2949,29 @@ export default function FootballApp() {
     return () => lifecycle.abort();
   }, []);
   function applyTournament(value: Tournament) {
+    const targetGameId = gameIdRef.current;
+    const hasUnsavedRemoteState = Boolean(
+      targetGameId && JSON.stringify(value) !== lastRemoteStateRef.current,
+    );
     tournamentRef.current = value;
+    if (hasUnsavedRemoteState) {
+      queuedStateRef.current = value;
+      dirtyRef.current = true;
+    }
+    writeLocalBackup(value, targetGameId, hasUnsavedRemoteState);
     setSyncStatus(
-      conflictRemote
+      conflictRemoteRef.current
         ? 'conflict'
-        : gameId && JSON.stringify(value) !== lastRemoteStateRef.current
+        : hasUnsavedRemoteState
           ? 'saving'
-          : gameId
+          : targetGameId
             ? 'saved'
             : 'local',
     );
     setTournament(value);
   }
   async function publishTournament(value: Tournament, message: string) {
+    cancelScheduledRetry();
     tournamentRef.current = value;
     lastRemoteStateRef.current = '';
     remoteRevisionRef.current = 0;
@@ -2866,6 +2995,7 @@ export default function FootballApp() {
       setGameId(game.id);
       setTournament(storedValue);
       tournamentRef.current = storedValue;
+      writeLocalBackup(storedValue, game.id, false);
       setSyncStatus('saved');
       window.history.pushState({}, '', gamePath(game.id));
       setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
@@ -2876,6 +3006,7 @@ export default function FootballApp() {
   }
   function loadDemo() {
     const demo = createDemoTournament();
+    cancelScheduledRetry();
     tournamentRef.current = demo;
     gameIdRef.current = '';
     remoteRevisionRef.current = 0;
@@ -2930,6 +3061,7 @@ export default function FootballApp() {
         return;
       }
       const value = extendTournamentToEndTime(game.state);
+      cancelScheduledRetry();
       lastRemoteStateRef.current = JSON.stringify(value);
       remoteRevisionRef.current = game.revision;
       gameIdRef.current = game.id;
@@ -2940,6 +3072,7 @@ export default function FootballApp() {
       setGameId(game.id);
       setTournament(value);
       tournamentRef.current = value;
+      writeLocalBackup(value, game.id, false);
       setSyncStatus('saved');
       setSelectedTeamId(value.teams[0]?.id ?? '');
       setSelectedMatchId('');
@@ -2951,6 +3084,8 @@ export default function FootballApp() {
   }
   function handleDeletedGame(deletedGameId: string) {
     if (deletedGameId !== gameId) return;
+    cancelScheduledRetry();
+    clearLocalBackup();
     setTournament(null);
     tournamentRef.current = null;
     gameIdRef.current = '';
@@ -2977,6 +3112,7 @@ export default function FootballApp() {
   }
   function useLatestConflictData() {
     if (!conflictRemote) return;
+    cancelScheduledRetry();
     const value = extendTournamentToEndTime(conflictRemote.state);
     remoteRevisionRef.current = conflictRemote.revision;
     lastRemoteStateRef.current = JSON.stringify(value);
@@ -2984,6 +3120,7 @@ export default function FootballApp() {
     dirtyRef.current = false;
     tournamentRef.current = value;
     setTournament(value);
+    writeLocalBackup(value, gameIdRef.current, false);
     conflictRemoteRef.current = null;
     setConflictRemote(null);
     setSyncStatus('saved');
@@ -2991,12 +3128,14 @@ export default function FootballApp() {
   }
   function overwriteConflictWithLocal() {
     if (!conflictRemote || !tournamentRef.current) return;
+    cancelScheduledRetry();
     remoteRevisionRef.current = conflictRemote.revision;
     queuedStateRef.current = tournamentRef.current;
     dirtyRef.current = true;
     conflictRemoteRef.current = null;
     setConflictRemote(null);
     setSyncStatus('saving');
+    writeLocalBackup(tournamentRef.current, gameIdRef.current, true);
     window.setTimeout(() => void flushSharedState(), 0);
   }
   /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- browser history selects the game encoded in the URL. */
@@ -3007,6 +3146,7 @@ export default function FootballApp() {
         void openSharedGame(pathGameId, false);
         return;
       }
+      cancelScheduledRetry();
       tournamentRef.current = null;
       gameIdRef.current = '';
       remoteRevisionRef.current = 0;
@@ -3173,6 +3313,7 @@ export default function FootballApp() {
               onGames={() => setView('games')}
               onTeams={() => setView('teams')}
               onReset={() => {
+                cancelScheduledRetry();
                 clearLocalBackup();
                 setTournament(null);
                 tournamentRef.current = null;
@@ -3197,8 +3338,8 @@ export default function FootballApp() {
             view,
           ) && <BottomNavigation active={mainView} onChange={setView} />}
         {notice && (
-          <output className="fixed bottom-24 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-sm font-black whitespace-nowrap text-white shadow-xl">
-            <CircleCheck className="h-4 w-4 text-emerald-400" />
+          <output className="fixed bottom-24 left-1/2 z-50 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm leading-5 font-black break-words whitespace-normal text-white shadow-xl">
+            <CircleCheck className="h-4 w-4 shrink-0 text-emerald-400" />
             {notice}
           </output>
         )}

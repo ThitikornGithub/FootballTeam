@@ -9,10 +9,16 @@ import {
   reopenFinishedMatch,
   scheduleMetrics,
   scheduleWindowMetrics,
+  setMatchScore,
   setMatchStatus,
   skipGoalkeeper,
 } from '../lib/football-engine';
 import { parseTournament } from '../lib/football-schema';
+import {
+  MAX_SYNC_RETRY_MS,
+  newestPendingState,
+  syncRetryDelayMs,
+} from '../lib/football-sync';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -133,9 +139,18 @@ assert(
   'Skipping GK must advance the queue',
 );
 
+const liveScoreDraft = setMatchScore(afterSkip, afterSkip.matches[0].id, 2, 1);
+assert(
+  liveScoreDraft.matches[0].status === 'current' &&
+    liveScoreDraft.matches[0].teamAScore === 2 &&
+    liveScoreDraft.matches[0].teamBScore === 1 &&
+    calculateStandings(liveScoreDraft).every((row) => row.played === 0),
+  'A live score draft must persist without affecting standings before the match finishes',
+);
+
 const afterFinish = finishMatchWithScore(
-  afterSkip,
-  afterSkip.matches[0].id,
+  liveScoreDraft,
+  liveScoreDraft.matches[0].id,
   3,
   1,
 );
@@ -257,6 +272,22 @@ assert(
   'Runtime validation must reject tactic paths outside the pitch',
 );
 
+assert(
+  syncRetryDelayMs(0) === 3500 &&
+    syncRetryDelayMs(1) === 7000 &&
+    syncRetryDelayMs(8) === MAX_SYNC_RETRY_MS,
+  'Sync retries must back off and stop increasing after the maximum delay',
+);
+const inFlightState = { score: 0 };
+const currentState = { score: 2 };
+const queuedState = { score: 3 };
+assert(
+  newestPendingState(inFlightState, queuedState, currentState) ===
+    queuedState &&
+    newestPendingState(inFlightState, null, currentState) === currentState,
+  'A failed save must keep the newest queued or current state instead of restoring the stale in-flight state',
+);
+
 console.log(
-  'Engine checks passed: defaults, repeats, scores, standings, overtime, GK fairness, progress, switching, and enhanced persisted-state validation.',
+  'Engine checks passed: defaults, repeats, live-score drafts, standings, overtime, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
 );
