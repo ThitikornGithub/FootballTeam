@@ -670,8 +670,11 @@ export function playerFor(team: Team | undefined, playerId?: string) {
   return team?.players.find((player) => player.id === playerId);
 }
 
-export function createPlayer(name: string): Player {
-  return { id: makeId('player'), name, absentToday: false };
+export function createPlayer(
+  name: string,
+  positions: Player['positions'] = [],
+): Player {
+  return { id: makeId('player'), name, absentToday: false, positions };
 }
 
 export function reorder<T>(items: T[], from: number, to: number) {

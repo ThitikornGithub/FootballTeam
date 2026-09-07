@@ -4,7 +4,12 @@ import {
   makeId,
   shuffle,
 } from './football-engine';
-import type { Team, TeamColor, Tournament } from './football-types';
+import type {
+  PlayerPosition,
+  Team,
+  TeamColor,
+  Tournament,
+} from './football-types';
 
 const rosters = [
   ['Bank', 'Jack', 'Tom', 'Tum', 'Game', 'First', 'Ball'],
@@ -25,12 +30,24 @@ const colors: TeamColor[] = [
   'black',
 ];
 
+const demoPositions: PlayerPosition[][] = [
+  ['goalkeeper'],
+  ['defender'],
+  ['defender', 'midfielder'],
+  ['defender'],
+  ['midfielder'],
+  ['midfielder', 'forward'],
+  ['forward'],
+];
+
 export function makeTeam(
   name: string,
   color: TeamColor,
   playerNames: string[] = [],
 ): Team {
-  const players = playerNames.map(createPlayer);
+  const players = playerNames.map((playerName, index) =>
+    createPlayer(playerName, demoPositions[index] ?? []),
+  );
   const rotation = shuffle(players.map((player) => player.id));
   return {
     id: makeId('team'),

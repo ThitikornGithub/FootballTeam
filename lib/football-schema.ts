@@ -1,4 +1,5 @@
 import {
+  PLAYER_POSITIONS,
   TEAM_COLORS,
   type Match,
   type TacticMarker,
@@ -10,6 +11,7 @@ import {
 } from './football-types';
 
 const TEAM_COLOR_SET = new Set<string>(TEAM_COLORS);
+const PLAYER_POSITION_SET = new Set<string>(PLAYER_POSITIONS);
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,6 +58,15 @@ function parseTeam(value: unknown): Team | null {
       !player.id ||
       !isString(player.name) ||
       typeof player.absentToday !== 'boolean'
+    )
+      return null;
+    if (
+      player.positions !== undefined &&
+      (!Array.isArray(player.positions) ||
+        !player.positions.every(
+          (position) => isString(position) && PLAYER_POSITION_SET.has(position),
+        ) ||
+        !uniqueStrings(player.positions))
     )
       return null;
     playerIds.push(player.id);

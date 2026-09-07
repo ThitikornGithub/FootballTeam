@@ -13,8 +13,8 @@ import {
   CloudOff,
   Copy,
   Download,
+  EllipsisVertical,
   FolderOpen,
-  GripVertical,
   LoaderCircle,
   Lock,
   LockOpen,
@@ -43,6 +43,13 @@ import {
 } from './shared';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -83,8 +90,10 @@ import {
   updateTournamentSettings,
 } from '@/lib/football-engine';
 import {
+  PLAYER_POSITIONS,
   TEAM_COLORS,
   type Match,
+  type PlayerPosition,
   type Team,
   type TeamColor,
   type Tournament,
@@ -115,6 +124,31 @@ const STORAGE_PENDING_SYNC_KEY = 'football-match-maker-pending-sync';
 const PAGES_PATH_KEY = 'football-pages-path';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+const PLAYER_POSITION_META: Record<
+  PlayerPosition,
+  { shortLabel: string; fullLabel: string; className: string }
+> = {
+  goalkeeper: {
+    shortLabel: 'GK',
+    fullLabel: 'ผู้รักษาประตู',
+    className: 'border-amber-200 bg-amber-50 text-amber-700',
+  },
+  defender: {
+    shortLabel: 'D',
+    fullLabel: 'กองหลัง',
+    className: 'border-blue-200 bg-blue-50 text-blue-700',
+  },
+  midfielder: {
+    shortLabel: 'M',
+    fullLabel: 'กองกลาง',
+    className: 'border-violet-200 bg-violet-50 text-violet-700',
+  },
+  forward: {
+    shortLabel: 'F',
+    fullLabel: 'กองหน้า',
+    className: 'border-rose-200 bg-rose-50 text-rose-700',
+  },
+};
 type AppView =
   | MainView
   | 'setup'
@@ -1127,7 +1161,7 @@ function TeamsScreen({
     <>
       <PageHeader
         title="ทีมทั้งหมด"
-        eyebrow={`${tournament.teams.length} ทีม · เลือกทีมเพื่อดูคิว GK`}
+        eyebrow={`${tournament.teams.length} ทีม · จัดผู้เล่น ตำแหน่ง และคิว GK`}
       />
       <div className="space-y-3 px-4 py-4">
         {tournament.teams.map((team) => (
@@ -1150,6 +1184,51 @@ function TeamsScreen({
   );
 }
 
+function PlayerPositionPicker({
+  playerName,
+  positions,
+  onChange,
+  compact = false,
+}: {
+  playerName: string;
+  positions: PlayerPosition[];
+  onChange: (positions: PlayerPosition[]) => void;
+  compact?: boolean;
+}) {
+  return (
+    <fieldset
+      className={`flex min-w-0 items-center ${compact ? 'shrink-0 flex-nowrap gap-0.5' : 'flex-wrap gap-1.5'}`}
+    >
+      <legend className="sr-only">ตำแหน่งที่ {playerName || 'ผู้เล่น'} เล่นได้</legend>
+      {PLAYER_POSITIONS.map((position) => {
+        const meta = PLAYER_POSITION_META[position];
+        const selected = positions.includes(position);
+        return (
+          <button
+            key={position}
+            type="button"
+            aria-pressed={selected}
+            aria-label={`${selected ? 'ยกเลิก' : 'เลือก'}${meta.fullLabel}ให้ ${playerName || 'ผู้เล่น'}`}
+            title={meta.fullLabel}
+            onClick={() =>
+              onChange(
+                selected
+                  ? positions.filter((item) => item !== position)
+                  : PLAYER_POSITIONS.filter(
+                      (item) => item === position || positions.includes(item),
+                    ),
+              )
+            }
+            className={`${compact ? 'grid h-8 w-7 shrink-0 place-items-center rounded-lg p-0 text-[10px]' : 'min-h-9 rounded-full px-3 text-xs'} border font-black transition ${selected ? meta.className : 'border-slate-200 bg-white text-slate-400'}`}
+          >
+            {meta.shortLabel}
+          </button>
+        );
+      })}
+    </fieldset>
+  );
+}
+
 function TeamDetailScreen({
   team,
   onBack,
@@ -1160,7 +1239,7 @@ function TeamDetailScreen({
   onUpdate: (team: Team) => void;
 }) {
   const [newName, setNewName] = useState('');
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [newPositions, setNewPositions] = useState<PlayerPosition[]>([]);
   const rotationLocked = Boolean(team.gkRotationLocked);
   const eligiblePlayers = team.players.filter((player) => !player.absentToday);
   const gkOrder = [
@@ -1202,8 +1281,9 @@ function TeamDetailScreen({
   function addPlayer() {
     const name = newName.trim();
     if (!name) return;
-    updatePlayers([...team.players, createPlayer(name)]);
+    updatePlayers([...team.players, createPlayer(name, newPositions)]);
     setNewName('');
+    setNewPositions([]);
   }
   return (
     <>
@@ -1219,7 +1299,7 @@ function TeamDetailScreen({
           <div>
             <p className="text-2xl font-black">{team.name}</p>
             <p className="text-sm font-bold text-slate-500">
-              {team.players.length} Players · พร้อม{' '}
+              {team.players.length} คน · พร้อม{' '}
               {team.players.filter((player) => !player.absentToday).length}
             </p>
           </div>
@@ -1280,46 +1360,53 @@ function TeamDetailScreen({
         <section className="settings-card">
           <div className="mb-3">
             <h2 className="section-title">รายชื่อผู้เล่น</h2>
-            <p className="section-note">ลากหรือใช้ลูกศรเพื่อเรียงรายชื่อ</p>
+            <p className="section-note">
+              ตำแหน่ง: GK ประตู · D หลัง · M กลาง · F หน้า (เลือกได้หลายตำแหน่ง)
+            </p>
           </div>
-          <div className="overflow-hidden rounded-2xl border border-slate-200">
+          <div>
             {team.players.length === 0 ? (
-              <div className="p-8 text-center text-sm font-bold text-slate-400">
+              <div className="rounded-2xl border border-dashed border-slate-200 p-8 text-center text-sm font-bold text-slate-400">
                 ยังไม่มีผู้เล่น
               </div>
             ) : (
-              team.players.map((player, index) => (
-                <div
-                  key={player.id}
-                  draggable
-                  onDragStart={() => setDragIndex(index)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    if (dragIndex !== null)
-                      updatePlayers(reorder(team.players, dragIndex, index));
-                    setDragIndex(null);
-                  }}
-                  className={`grid grid-cols-[28px_32px_minmax(0,1fr)] items-center gap-2 border-b border-slate-100 bg-white p-2 last:border-0 ${player.absentToday ? 'opacity-55' : ''}`}
-                >
-                  <GripVertical className="h-5 w-5 shrink-0 text-slate-300" />
-                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5ea] text-xs font-black text-[#087632]">
-                    {index + 1}
-                  </span>
-                  <input
-                    value={player.name}
-                    onChange={(event) =>
-                      updatePlayers(
-                        team.players.map((item) =>
-                          item.id === player.id
-                            ? { ...item, name: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                    className="h-10 min-w-0 bg-transparent font-bold outline-none"
-                    aria-label={`ชื่อผู้เล่น ${index + 1}`}
-                  />
-                  <div className="col-span-3 flex items-center justify-end gap-2 pl-16">
+              <div className="divide-y divide-slate-200 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                {team.players.map((player, index) => (
+                  <div
+                    key={player.id}
+                    className="flex min-w-0 items-center gap-1.5 px-2 py-2"
+                  >
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#e6f5ea] text-xs font-black text-[#087632]">
+                      {index + 1}
+                    </span>
+                    <input
+                      value={player.name}
+                      onChange={(event) =>
+                        updatePlayers(
+                          team.players.map((item) =>
+                            item.id === player.id
+                              ? { ...item, name: event.target.value }
+                              : item,
+                          ),
+                        )
+                      }
+                      className={`h-9 min-w-[54px] flex-1 rounded-lg bg-slate-50 px-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#9dd2ab] ${player.absentToday ? 'text-slate-400 line-through' : ''}`}
+                      aria-label={`ชื่อผู้เล่น ${index + 1}`}
+                    />
+                    <PlayerPositionPicker
+                      compact
+                      playerName={player.name}
+                      positions={player.positions ?? []}
+                      onChange={(positions) =>
+                        updatePlayers(
+                          team.players.map((item) =>
+                            item.id === player.id
+                              ? { ...item, positions }
+                              : item,
+                          ),
+                        )
+                      }
+                    />
                     <button
                       onClick={() =>
                         updatePlayers(
@@ -1330,63 +1417,100 @@ function TeamDetailScreen({
                           ),
                         )
                       }
-                      className={`min-h-10 rounded-lg px-3 py-2 text-xs font-black ${player.absentToday ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500'}`}
+                      className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg ${player.absentToday ? 'bg-amber-100 text-amber-700' : 'bg-emerald-50 text-[#087632]'}`}
+                      aria-label={`${player.absentToday ? 'เปลี่ยนเป็นมาวันนี้' : 'เปลี่ยนเป็นขาดวันนี้'}: ${player.name}`}
+                      title={player.absentToday ? 'ขาดวันนี้' : 'มาวันนี้'}
                     >
-                      {player.absentToday ? 'ขาดวันนี้' : 'มาวันนี้'}
+                      {player.absentToday ? (
+                        <CircleAlert className="h-4 w-4" />
+                      ) : (
+                        <CircleCheck className="h-4 w-4" />
+                      )}
                     </button>
-                    <div className="flex gap-1">
-                      <button
-                        disabled={index === 0}
-                        onClick={() =>
-                          updatePlayers(reorder(team.players, index, index - 1))
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-slate-100"
+                            aria-label={`จัดการ ${player.name}`}
+                          />
                         }
-                        className="grid h-10 w-10 place-items-center rounded-lg bg-slate-50 disabled:opacity-20"
-                        aria-label="เลื่อนขึ้น"
                       >
-                        <ChevronUp className="h-4 w-4" />
-                      </button>
-                      <button
-                        disabled={index === team.players.length - 1}
-                        onClick={() =>
-                          updatePlayers(reorder(team.players, index, index + 1))
-                        }
-                        className="grid h-10 w-10 place-items-center rounded-lg bg-slate-50 disabled:opacity-20"
-                        aria-label="เลื่อนลง"
-                      >
-                        <ChevronDown className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <button
-                      onClick={() =>
-                        updatePlayers(
-                          team.players.filter((item) => item.id !== player.id),
-                        )
-                      }
-                      className="grid h-10 w-10 place-items-center rounded-lg text-red-500 hover:bg-red-50"
-                      aria-label={`ลบ ${player.name}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                        <EllipsisVertical className="h-4 w-4" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-40">
+                        <DropdownMenuItem
+                          disabled={index === 0}
+                          onClick={() =>
+                            updatePlayers(reorder(team.players, index, index - 1))
+                          }
+                        >
+                          <ChevronUp />
+                          เลื่อนขึ้น
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={index === team.players.length - 1}
+                          onClick={() =>
+                            updatePlayers(reorder(team.players, index, index + 1))
+                          }
+                        >
+                          <ChevronDown />
+                          เลื่อนลง
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="destructive"
+                          onClick={() =>
+                            updatePlayers(
+                              team.players.filter(
+                                (item) => item.id !== player.id,
+                              ),
+                            )
+                          }
+                        >
+                          <Trash2 />
+                          ลบผู้เล่น
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )}
           </div>
-          <div className="mt-3 flex gap-2">
-            <input
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              onKeyDown={(event) => event.key === 'Enter' && addPlayer()}
-              placeholder="ชื่อผู้เล่นใหม่"
-              className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 px-3 font-bold outline-none focus:border-[#35a95f]"
-            />
-            <Button
-              onClick={addPlayer}
-              className="h-12 rounded-xl bg-[#11823b]"
-            >
-              <Plus />
-              เพิ่ม
-            </Button>
+          <div className="mt-3 rounded-2xl bg-slate-50 p-3">
+            <label htmlFor="new-player-name" className="text-sm font-black">
+              เพิ่มผู้เล่น
+            </label>
+            <div className="mt-2 flex gap-2">
+              <input
+                id="new-player-name"
+                value={newName}
+                onChange={(event) => setNewName(event.target.value)}
+                onKeyDown={(event) => event.key === 'Enter' && addPlayer()}
+                placeholder="ชื่อผู้เล่นใหม่"
+                className="h-12 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold outline-none focus:border-[#35a95f]"
+              />
+              <Button
+                onClick={addPlayer}
+                disabled={!newName.trim()}
+                className="h-12 rounded-xl bg-[#11823b]"
+              >
+                <Plus />
+                เพิ่ม
+              </Button>
+            </div>
+            <div className="mt-3">
+              <p className="mb-2 text-xs font-bold text-slate-500">
+                ตำแหน่งที่เล่นได้: GK · D · M · F (เลือกได้หลายตำแหน่ง)
+              </p>
+              <PlayerPositionPicker
+                playerName={newName || 'ผู้เล่นใหม่'}
+                positions={newPositions}
+                onChange={setNewPositions}
+              />
+            </div>
           </div>
         </section>
       </div>

@@ -11,10 +11,20 @@ export const TEAM_COLORS = [
 
 export type TeamColor = (typeof TEAM_COLORS)[number];
 
+export const PLAYER_POSITIONS = [
+  'goalkeeper',
+  'defender',
+  'midfielder',
+  'forward',
+] as const;
+
+export type PlayerPosition = (typeof PLAYER_POSITIONS)[number];
+
 export type Player = {
   id: string;
   name: string;
   absentToday: boolean;
+  positions?: PlayerPosition[];
 };
 
 export type Team = {

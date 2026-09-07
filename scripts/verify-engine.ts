@@ -197,6 +197,37 @@ assert(
   'A generated tournament must pass runtime validation',
 );
 assert(
+  tournament.teams.every((team) =>
+    team.players.every((player) => (player.positions?.length ?? 0) > 0),
+  ),
+  'Demo players must demonstrate one or more playable positions',
+);
+const legacyPlayersWithoutPositions = {
+  ...tournament,
+  teams: tournament.teams.map((team) => ({
+    ...team,
+    players: team.players.map(({ positions: _positions, ...player }) => player),
+  })),
+};
+assert(
+  parseTournament(legacyPlayersWithoutPositions) !== null,
+  'Persisted players created before position tags existed must remain valid',
+);
+assert(
+  parseTournament({
+    ...tournament,
+    teams: tournament.teams.map((team, teamIndex) => ({
+      ...team,
+      players: team.players.map((player, playerIndex) =>
+        teamIndex === 0 && playerIndex === 0
+          ? { ...player, positions: ['goalkeeper', 'goalkeeper'] }
+          : player,
+      ),
+    })),
+  }) === null,
+  'Runtime validation must reject duplicate or malformed player positions',
+);
+assert(
   parseTournament({
     ...tournament,
     matches: [{ ...tournament.matches[0], teamAScore: 100, teamBScore: 0 }],
@@ -289,5 +320,5 @@ assert(
 );
 
 console.log(
-  'Engine checks passed: defaults, repeats, live-score drafts, standings, overtime, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
+  'Engine checks passed: defaults, repeats, player positions, live-score drafts, standings, overtime, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
 );
