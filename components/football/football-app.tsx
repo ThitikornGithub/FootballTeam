@@ -381,13 +381,30 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
   return (
     <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
       <table className="w-full table-fixed text-center text-xs sm:text-sm">
+        <colgroup>
+          <col className="w-[36%]" />
+          <col className="w-[11%]" />
+          <col className="w-[8%]" />
+          <col className="w-[8%]" />
+          <col className="w-[8%]" />
+          <col className="w-[12%]" />
+          <col className="w-[17%]" />
+        </colgroup>
         <thead className="bg-[#e5f5e9] text-[#087632]">
           <tr>
-            <th className="w-[38%] px-2 py-3 text-left">ทีม</th>
-            <th className="w-[12%] px-1 py-3">แข่ง</th>
-            <th className="w-[22%] px-1 py-3">ช-ส-พ</th>
-            <th className="w-[13%] px-1 py-3">+/-</th>
-            <th className="w-[15%] px-2 py-3">แต้ม</th>
+            <th className="px-2 py-3 text-left">ทีม</th>
+            <th className="px-1 py-3">แข่ง</th>
+            <th title="ชนะ" className="border-l border-emerald-100 px-0 py-3">
+              ช
+            </th>
+            <th title="เสมอ" className="border-l border-emerald-100 px-0 py-3">
+              ส
+            </th>
+            <th title="แพ้" className="border-l border-emerald-100 px-0 py-3">
+              พ
+            </th>
+            <th className="px-1 py-3">+/-</th>
+            <th className="px-2 py-3">แต้ม</th>
           </tr>
         </thead>
         <tbody>
@@ -411,8 +428,14 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
                   </div>
                 </th>
                 <td className="px-1 py-3 font-bold">{standing.played}</td>
-                <td className="px-1 py-3 font-bold tabular-nums">
-                  {standing.won}-{standing.drawn}-{standing.lost}
+                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                  {standing.won}
+                </td>
+                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                  {standing.drawn}
+                </td>
+                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                  {standing.lost}
                 </td>
                 <td className="px-1 py-3 font-bold">
                   {standing.goalDifference > 0 ? '+' : ''}
