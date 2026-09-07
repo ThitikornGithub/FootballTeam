@@ -2504,6 +2504,46 @@ function SettingsScreen({
     <>
       <PageHeader title="ตั้งค่า" eyebrow="เกมที่กำลังใช้งาน" />
       <div className="space-y-4 px-4 py-4">
+        <section className="settings-card">
+          <h2 className="section-title">ทางลัด</h2>
+          <p className="section-note mt-1">
+            รายชื่อผู้เล่นและคิว GK แก้ได้จากหน้าทีม โดยไม่กระทบผลแข่ง
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <Button
+              onClick={onTeams}
+              variant="outline"
+              className="h-12 rounded-xl font-black"
+            >
+              <Users />
+              จัดการทีม
+            </Button>
+            <Button
+              onClick={onGames}
+              variant="outline"
+              className="h-12 rounded-xl font-black"
+            >
+              <FolderOpen />
+              เกมทั้งหมด
+            </Button>
+          </div>
+          <Button
+            onClick={onCopySettings}
+            variant="outline"
+            className="mt-2 h-12 w-full rounded-xl font-black"
+          >
+            <Copy />
+            สร้างเกมใหม่จากการตั้งค่านี้
+          </Button>
+          <Button
+            onClick={onCreateNew}
+            variant="outline"
+            className="mt-3 h-12 w-full rounded-xl font-black"
+          >
+            <Plus />
+            สร้างตารางใหม่
+          </Button>
+        </section>
         <section className="settings-card space-y-4">
           <div>
             <label htmlFor="settings-game-name" className="section-title">
@@ -2685,46 +2725,6 @@ function SettingsScreen({
           >
             <Save />
             บันทึกการตั้งค่า
-          </Button>
-        </section>
-        <section className="settings-card">
-          <h2 className="section-title">ทางลัด</h2>
-          <p className="section-note mt-1">
-            รายชื่อผู้เล่นและคิว GK แก้ได้จากหน้าทีม โดยไม่กระทบผลแข่ง
-          </p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <Button
-              onClick={onTeams}
-              variant="outline"
-              className="h-12 rounded-xl font-black"
-            >
-              <Users />
-              จัดการทีม
-            </Button>
-            <Button
-              onClick={onGames}
-              variant="outline"
-              className="h-12 rounded-xl font-black"
-            >
-              <FolderOpen />
-              เกมทั้งหมด
-            </Button>
-          </div>
-          <Button
-            onClick={onCopySettings}
-            variant="outline"
-            className="mt-2 h-12 w-full rounded-xl font-black"
-          >
-            <Copy />
-            สร้างเกมใหม่จากการตั้งค่านี้
-          </Button>
-          <Button
-            onClick={onCreateNew}
-            variant="outline"
-            className="mt-3 h-12 w-full rounded-xl font-black"
-          >
-            <Plus />
-            สร้างตารางใหม่
           </Button>
         </section>
         <Button
@@ -3549,7 +3549,7 @@ export default function FootballApp() {
           )}
         </div>
         {tournament &&
-          !['setup', 'match-detail', 'team-detail', 'share', 'games'].includes(
+          !['setup', 'match-detail', 'share', 'games'].includes(
             view,
           ) && <BottomNavigation active={mainView} onChange={setView} />}
         {notice && (

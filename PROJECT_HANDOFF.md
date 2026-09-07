@@ -19,6 +19,7 @@ FootballTeam เป็น mobile-first web app สำหรับกลุ่ม
 - กระดาน tactic สำหรับสองทีม พร้อมจัดตัวตามตำแหน่ง D/M/W/F ตำแหน่งผู้เล่น ลูกบอล และโน้ต
 - สร้างรูปตารางคะแนน แชร์ผ่าน Web Share API ดาวน์โหลด PNG หรือคัดลอกข้อความ
 - หน้ารวมเกมทั้งหมด เปิดเกมเดิม และลบเกมออกจาก Neon
+- Bottom navigation แสดงในหน้าจัดการผู้เล่นด้วย และทางลัดอยู่บนสุดของหน้าตั้งค่า
 - ลิงก์เกมเป็น path เช่น `/FootballTeam/game20260906-1`
 
 Production URL: <https://thitikorngithub.github.io/FootballTeam/>  
