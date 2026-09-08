@@ -1578,9 +1578,9 @@ function ScheduleScreen({
   const upcoming = tournament.matches.filter(
     (match) => match.status === 'upcoming',
   );
-  const finished = tournament.matches
-    .filter((match) => match.status === 'finished')
-    .reverse();
+  const finished = tournament.matches.filter(
+    (match) => match.status === 'finished',
+  );
   const groups = [
     {
       label: 'กำลังแข่ง',
@@ -1593,7 +1593,7 @@ function ScheduleScreen({
       tone: 'upcoming' as const,
     },
     {
-      label: 'แข่งแล้ว · ล่าสุดก่อน',
+      label: 'แข่งแล้ว · ล่าสุดอยู่ล่างสุด',
       matches: finished,
       tone: 'finished' as const,
     },
@@ -1619,9 +1619,12 @@ function ScheduleScreen({
           <Table>
             <TableHeader className="bg-slate-50">
               <TableRow>
-                <TableHead className="w-[68px] px-2">เวลา</TableHead>
+                <TableHead className="w-[44px] px-1 text-center text-[11px]">
+                  แมตช์
+                </TableHead>
+                <TableHead className="w-[58px] px-1.5">เวลา</TableHead>
                 <TableHead>คู่แข่งขัน</TableHead>
-                <TableHead className="w-[58px] pr-2 text-right">ผล</TableHead>
+                <TableHead className="w-[52px] pr-2 text-right">ผล</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1631,7 +1634,7 @@ function ScheduleScreen({
                   className="border-0 bg-slate-100/80 hover:bg-slate-100/80"
                 >
                   <TableCell
-                    colSpan={3}
+                    colSpan={4}
                     className={`px-3 py-2 text-[11px] font-black uppercase tracking-wide ${
                       group.tone === 'current'
                         ? 'text-[#087632]'
@@ -1662,7 +1665,14 @@ function ScheduleScreen({
                             : ''
                       }
                     >
-                      <TableCell className="px-2 py-3 align-middle text-xs font-black tabular-nums">
+                      <TableCell className="w-[44px] px-1 py-3 text-center align-middle">
+                        <span
+                          className={`inline-flex min-w-8 justify-center rounded-lg px-1.5 py-1 text-xs font-black tabular-nums ${match.status === 'current' ? 'bg-[#11823b] text-white' : 'bg-slate-100 text-slate-600'}`}
+                        >
+                          M{match.matchNumber}
+                        </span>
+                      </TableCell>
+                      <TableCell className="px-1.5 py-3 align-middle text-xs font-black tabular-nums">
                         <span className="block leading-4">
                           {match.startTime}
                         </span>
@@ -2155,10 +2165,10 @@ function GamesScreen({
   const [deletingId, setDeletingId] = useState('');
   const [confirmingId, setConfirmingId] = useState('');
 
-  async function refresh() {
+  async function refresh(force = false) {
     setLoading(true);
     try {
-      setGames(await listSharedGames());
+      setGames(await listSharedGames({ force }));
     } catch {
       onNotice('โหลดรายการเกมไม่สำเร็จ กรุณาลองใหม่');
     } finally {
@@ -2211,7 +2221,7 @@ function GamesScreen({
         action={
           <button
             type="button"
-            onClick={() => void refresh()}
+            onClick={() => void refresh(true)}
             disabled={loading}
             className="grid h-10 w-10 place-items-center rounded-2xl bg-[#e1f4e6] text-[#11823b] disabled:opacity-50"
             aria-label="โหลดรายการเกมใหม่"
@@ -2293,7 +2303,7 @@ function GamesScreen({
         open={Boolean(confirmingGame)}
         onOpenChange={(open) => !open && !deletingId && setConfirmingId('')}
       >
-        <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+        <AlertDialogContent className="rounded-[24px] p-5">
           <AlertDialogHeader className="place-items-start text-left">
             <AlertDialogTitle className="text-lg font-black">
               ลบ “{confirmingGame?.name}”?
@@ -2379,7 +2389,12 @@ function SettingsPairPicker({
             aria-label={`${label} ทีมแรก`}
             className="h-11 w-full min-w-0 rounded-xl border-slate-200 bg-white px-2 text-sm focus-visible:border-[#35a95f] focus-visible:ring-[#35a95f]/15"
           >
-            <SelectValue />
+            <SelectValue>
+              {(value) => {
+                const selected = teams.find((team) => team.id === value);
+                return selected ? renderTeam(selected) : 'เลือกทีม';
+              }}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent align="start">
             {teams.map((team) => (
@@ -2401,7 +2416,12 @@ function SettingsPairPicker({
             aria-label={`${label} ทีมที่สอง`}
             className="h-11 w-full min-w-0 rounded-xl border-slate-200 bg-white px-2 text-sm focus-visible:border-[#35a95f] focus-visible:ring-[#35a95f]/15"
           >
-            <SelectValue />
+            <SelectValue>
+              {(value) => {
+                const selected = teams.find((team) => team.id === value);
+                return selected ? renderTeam(selected) : 'เลือกทีม';
+              }}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent align="end">
             {teams.map((team) => (
@@ -2429,7 +2449,7 @@ function SettingsScreen({
   onSave,
   onGames,
   onTeams,
-  onReset,
+  onDelete,
 }: {
   tournament: Tournament;
   gameId: string;
@@ -2438,9 +2458,10 @@ function SettingsScreen({
   onSave: (value: Tournament) => void;
   onGames: () => void;
   onTeams: () => void;
-  onReset: () => void;
+  onDelete: () => Promise<boolean>;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [name, setName] = useState(tournament.name);
   const [teamColors, setTeamColors] = useState<Record<string, TeamColor>>(() =>
     Object.fromEntries(tournament.teams.map((team) => [team.id, team.color])),
@@ -2538,6 +2559,13 @@ function SettingsScreen({
         ? prioritizeUpcomingMatches(updatedWithColors, preferredPairs)
         : updatedWithColors,
     );
+  }
+
+  async function deleteGame() {
+    if (deleting) return;
+    setDeleting(true);
+    const deleted = await onDelete();
+    if (!deleted) setDeleting(false);
   }
 
   return (
@@ -2778,34 +2806,48 @@ function SettingsScreen({
         <Button
           variant="destructive"
           onClick={() => setConfirming(true)}
+          disabled={deleting}
           className="h-12 w-full rounded-xl font-black"
         >
           <Trash2 />
           {gameId ? 'ลบเกมส์นี้' : 'ลบเกมบนอุปกรณ์นี้'}
         </Button>
       </div>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+      <AlertDialog
+        open={confirming}
+        onOpenChange={(open) => !deleting && setConfirming(open)}
+      >
+        <AlertDialogContent className="rounded-[24px] p-5">
           <AlertDialogHeader className="place-items-start text-left">
             <AlertDialogTitle className="text-lg font-black">
-              ลบการแข่งขันนี้?
+              {gameId
+                ? 'ลบเกมส์นี้ออกจากฐานข้อมูล?'
+                : 'ลบเกมนี้ออกจากอุปกรณ์?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left font-semibold leading-6">
               {gameId
-                ? 'เกมยังอยู่ในลิงก์เดิมและเปิดกลับมาได้ การออกจะล้างเฉพาะเกมที่เปิดอยู่บนอุปกรณ์นี้'
+                ? 'เกม ตารางคะแนน รายชื่อทีม และผลแข่งจะถูกลบถาวร ลิงก์เดิมจะเปิดเกมนี้ไม่ได้อีก'
                 : 'ทีม รายชื่อผู้เล่น ตารางแข่งขัน และประวัติ GK จะถูกลบจากอุปกรณ์นี้'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-2 grid grid-cols-2 bg-white">
-            <AlertDialogCancel className="h-12 rounded-xl font-black">
+            <AlertDialogCancel
+              disabled={deleting}
+              className="h-12 rounded-xl font-black"
+            >
               ยกเลิก
             </AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              onClick={onReset}
+              onClick={() => void deleteGame()}
+              disabled={deleting}
               className="h-12 rounded-xl font-black"
             >
-              ลบทั้งหมด
+              {deleting
+                ? 'กำลังลบ…'
+                : gameId
+                  ? 'ลบเกมส์ถาวร'
+                  : 'ลบทั้งหมด'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3351,6 +3393,52 @@ export default function FootballApp() {
     dirtyRef.current = false;
     window.history.replaceState({}, '', gamePath());
   }
+  async function deleteCurrentGame() {
+    const targetGameId = gameIdRef.current;
+    cancelScheduledRetry();
+    if (targetGameId) {
+      for (
+        let attempt = 0;
+        saveInFlightRef.current && attempt < 100;
+        attempt += 1
+      ) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+      }
+      if (saveInFlightRef.current) {
+        if (dirtyRef.current) scheduleSyncRetry(targetGameId);
+        setNotice('ระบบกำลังบันทึกอยู่ กรุณาลองลบอีกครั้ง');
+        return false;
+      }
+      try {
+        await deleteSharedGame(targetGameId);
+      } catch {
+        if (dirtyRef.current) scheduleSyncRetry(targetGameId);
+        setNotice('ลบเกมไม่สำเร็จ กรุณาลองใหม่');
+        return false;
+      }
+    }
+
+    clearLocalBackup();
+    setTournament(null);
+    tournamentRef.current = null;
+    gameIdRef.current = '';
+    setGameId('');
+    setSyncStatus('local');
+    lastRemoteStateRef.current = '';
+    remoteRevisionRef.current = 0;
+    queuedStateRef.current = null;
+    dirtyRef.current = false;
+    conflictRemoteRef.current = null;
+    setConflictRemote(null);
+    window.history.pushState({}, '', gamePath());
+    setView('home');
+    setNotice(
+      targetGameId
+        ? 'ลบเกมออกจากฐานข้อมูลแล้ว'
+        : 'ลบการแข่งขันออกจากอุปกรณ์แล้ว',
+    );
+    return true;
+  }
   function recoverDraft() {
     if (!recoverableDraft) return;
     tournamentRef.current = recoverableDraft;
@@ -3575,24 +3663,7 @@ export default function FootballApp() {
               }}
               onGames={() => setView('games')}
               onTeams={() => setView('teams')}
-              onReset={() => {
-                cancelScheduledRetry();
-                clearLocalBackup();
-                setTournament(null);
-                tournamentRef.current = null;
-                gameIdRef.current = '';
-                setGameId('');
-                setSyncStatus('local');
-                lastRemoteStateRef.current = '';
-                remoteRevisionRef.current = 0;
-                queuedStateRef.current = null;
-                dirtyRef.current = false;
-                conflictRemoteRef.current = null;
-                setConflictRemote(null);
-                window.history.pushState({}, '', gamePath());
-                setView('home');
-                setNotice(gameId ? 'ออกจากเกมนี้แล้ว' : 'ลบการแข่งขันแล้ว');
-              }}
+              onDelete={deleteCurrentGame}
             />
           )}
         </div>
@@ -3607,7 +3678,7 @@ export default function FootballApp() {
           </output>
         )}
         <AlertDialog open={Boolean(conflictRemote)}>
-          <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+          <AlertDialogContent className="rounded-[24px] p-5">
             <AlertDialogHeader className="place-items-start text-left">
               <AlertDialogTitle className="text-lg font-black">
                 มีการแก้ไขจากอีกเครื่อง

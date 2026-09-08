@@ -5,6 +5,7 @@ const DATA_API_URL =
   'https://ep-falling-night-b3rsao2f.apirest.c-4.ap-southeast-1.aws.neon.tech/neondb/rest/v1';
 const GAME_LIST_CACHE_KEY = 'football-match-maker-game-list-v1';
 const GAME_LIST_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const GAME_LIST_NETWORK_FRESH_MS = 30 * 1000;
 
 // This is intentionally a shared, public app credential. Database permissions
 // restrict it to the FootballTeam RPC functions.
@@ -98,6 +99,7 @@ export async function createSharedGame(
   });
   const game = parseStoredGame(value);
   if (!game) throw new Error('ฐานข้อมูลไม่ได้ส่งเกมที่สร้างกลับมา');
+  markGameListStale();
   return game;
 }
 
@@ -126,11 +128,19 @@ export async function saveSharedGame(
   const game = parseStoredGame(value);
   if (!game) throw new Error('ฐานข้อมูลไม่ได้ส่งข้อมูลเกมกลับมา');
   if (value.conflict) throw new RevisionConflictError(game);
+  markGameListStale();
   return game;
 }
 
-export function listSharedGames() {
+export function listSharedGames({ force = false }: { force?: boolean } = {}) {
   if (gameListRequest) return gameListRequest;
+  const cachedGames = readCachedSharedGames();
+  if (
+    !force &&
+    memoryGameList &&
+    Date.now() - memoryGameList.cachedAt <= GAME_LIST_NETWORK_FRESH_MS
+  )
+    return Promise.resolve(cachedGames);
   gameListRequest = callRpc<unknown>('list_football_games', {})
     .then(parseGameList)
     .then((games) => {
@@ -220,5 +230,21 @@ function cacheGameList(games: FootballGameSummary[]) {
     localStorage.setItem(GAME_LIST_CACHE_KEY, JSON.stringify(cached));
   } catch {
     // The memory cache still makes navigation within this tab instant.
+  }
+}
+
+function markGameListStale() {
+  const games = readCachedSharedGames();
+  if (!memoryGameList) return;
+  const cached = {
+    cachedAt: Date.now() - GAME_LIST_NETWORK_FRESH_MS - 1,
+    games,
+  };
+  memoryGameList = cached;
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(GAME_LIST_CACHE_KEY, JSON.stringify(cached));
+  } catch {
+    // The next list visit will still refresh the stale in-memory cache.
   }
 }

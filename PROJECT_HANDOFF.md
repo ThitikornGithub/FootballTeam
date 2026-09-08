@@ -186,13 +186,15 @@ Automated checks ที่ผ่าน:
 - GitHub Pages production build ด้วย Node 24 ในรอบ audit นี้
 - `npm audit`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.4 และ Wrangler 4.129.0
 - Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
-- Local UI smoke test ที่ 320px: Home, score input, standings table, schedule, tactics marker และ player controls ไม่ล้นขอบ
+- Local UI smoke test ที่ 320px: Home, score input, standings table, schedule, tactics marker, player controls, dialog และ select ไม่ล้นขอบ
 
 ยังไม่มี automated browser/E2E tests และรอบ audit นี้ไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
 
 ## 10. Resolved findings และ known limitations
 
-รายการ P1/P2 ที่ตรวจพบในรอบก่อนถูกแก้แล้ว: revision CAS และ conflict UI, serialized save queue/retry, local draft recovery, safe match transition, tactic roster reconciliation, runtime schema validation, responsive score/table/player controls, score cap ที่ 99, settings copy, `popstate` history, และ `npm test`
+รายการ P1/P2 ที่ตรวจพบในรอบก่อนถูกแก้แล้ว: revision CAS และ conflict UI, serialized save queue/retry, local draft recovery, safe match transition, tactic roster reconciliation, runtime schema validation, responsive score/table/player controls, score cap ที่ 99, settings copy, `popstate` history, dialog/select contrast, การลบเกมจาก Settings ให้ลบ Neon จริง, game-list request deduplication และ `npm test`
+
+ตารางแข่งขันแสดงเลข Match แยกจากเวลา และเรียงรายการที่แข่งแล้วจากเก่าไปใหม่เพื่อให้รายการล่าสุดอยู่ล่างสุด
 
 ข้อจำกัดที่ยังตั้งใจคงไว้:
 

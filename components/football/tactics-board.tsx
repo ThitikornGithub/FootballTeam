@@ -1164,7 +1164,7 @@ export function TacticsScreen({
         )}
       </div>
       <AlertDialog open={confirmingReset} onOpenChange={setConfirmingReset}>
-        <AlertDialogContent className="max-w-[calc(100%-32px)] rounded-[24px] p-5">
+        <AlertDialogContent className="rounded-[24px] p-5">
           <AlertDialogHeader className="place-items-start text-left">
             <AlertDialogTitle className="text-lg font-black">
               {mode === 'position'
