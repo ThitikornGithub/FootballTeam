@@ -155,7 +155,7 @@ function assignPlayersToSlots(players: Player[], slots: FormationSlot[]) {
 }
 
 export function goalkeeperForTeam(team: Team, preferredPlayerId?: string) {
-  const available = team.players.filter((player) => !player.absentToday);
+  const available = playersAvailableForTactics(team);
   const queuedPlayerId = team.gkRotation.find((playerId) =>
     available.some((player) => player.id === playerId),
   );
@@ -164,6 +164,11 @@ export function goalkeeperForTeam(team: Team, preferredPlayerId?: string) {
     available.find((player) => player.id === queuedPlayerId) ??
     available[0]
   );
+}
+
+export function playersAvailableForTactics(team: Team) {
+  const attending = team.players.filter((player) => !player.absentToday);
+  return attending.length > 0 ? attending : team.players;
 }
 
 export function autoPlaceTeamMarkers({
@@ -179,7 +184,7 @@ export function autoPlaceTeamMarkers({
   formation: TacticFormation;
   goalkeeperId?: string;
 }): TacticMarker[] {
-  const available = team.players.filter((player) => !player.absentToday);
+  const available = playersAvailableForTactics(team);
   const goalkeeper = goalkeeperForTeam(team, goalkeeperId);
   if (!goalkeeper) return [];
   const outfieldSlots = formationSlots(formation, playerCount, isTeamA).slice(

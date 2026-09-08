@@ -42,6 +42,7 @@ import {
   autoPlaceTeamMarkers,
   formationsForPlayerCount,
   goalkeeperForTeam,
+  playersAvailableForTactics,
   resolvedFormationLabel,
 } from '@/lib/football-tactics';
 import {
@@ -336,14 +337,16 @@ export function TacticsScreen({
       marker.kind === 'player' && marker.playerId ? [marker.playerId] : [],
     ),
   );
-  const benchA =
-    teamA?.players.filter(
-      (player) => !player.absentToday && !onFieldPlayerIds.has(player.id),
-    ) ?? [];
-  const benchB =
-    teamB?.players.filter(
-      (player) => !player.absentToday && !onFieldPlayerIds.has(player.id),
-    ) ?? [];
+  const benchA = teamA
+    ? playersAvailableForTactics(teamA).filter(
+        (player) => !onFieldPlayerIds.has(player.id),
+      )
+    : [];
+  const benchB = teamB
+    ? playersAvailableForTactics(teamB).filter(
+        (player) => !onFieldPlayerIds.has(player.id),
+      )
+    : [];
 
   useEffect(() => {
     if (!isPlaying) return;

@@ -441,6 +441,22 @@ assert(
   }).length === 7,
   'Changing to seven players must immediately produce seven real player markers',
 );
+const allPlayersMarkedAbsent = {
+  ...tournament.teams[0],
+  players: tournament.teams[0].players.map((player) => ({
+    ...player,
+    absentToday: true,
+  })),
+};
+assert(
+  autoPlaceTeamMarkers({
+    team: allPlayersMarkedAbsent,
+    isTeamA: true,
+    playerCount: 7,
+    formation: '1-4-1-1',
+  }).length === 7,
+  'Tactics must fall back to the full roster instead of hiding an entire team',
+);
 const legacyPlayersWithoutPositions = {
   ...tournament,
   teams: tournament.teams.map((team) => ({

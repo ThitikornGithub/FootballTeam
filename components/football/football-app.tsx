@@ -4066,6 +4066,11 @@ export default function FootballApp() {
               }
             >
               <TacticsScreen
+                key={JSON.stringify({
+                  gameId,
+                  teams: tournament.teams,
+                  tactics: tournament.tactics,
+                })}
                 tournament={tournament}
                 onUpdate={applyTournament}
                 onCopyLink={() => void copyGameLink()}
