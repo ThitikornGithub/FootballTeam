@@ -185,6 +185,28 @@ export function autoPlaceTeamMarkers({
   goalkeeperId?: string;
 }): TacticMarker[] {
   const available = playersAvailableForTactics(team);
+  if (available.length === 0) {
+    return [
+      {
+        id: `tactic-${isTeamA ? 'a' : 'b'}-1`,
+        kind: 'player',
+        teamId: team.id,
+        label: 'P1',
+        x: 50,
+        y: isTeamA ? 91 : 9,
+      },
+      ...formationSlots(formation, playerCount, isTeamA)
+        .slice(0, playerCount - 1)
+        .map((slot, index) => ({
+          id: `tactic-${isTeamA ? 'a' : 'b'}-${index + 2}`,
+          kind: 'player' as const,
+          teamId: team.id,
+          label: `P${index + 2}`,
+          x: slot.x,
+          y: slot.y,
+        })),
+    ];
+  }
   const goalkeeper = goalkeeperForTeam(team, goalkeeperId);
   if (!goalkeeper) return [];
   const outfieldSlots = formationSlots(formation, playerCount, isTeamA).slice(

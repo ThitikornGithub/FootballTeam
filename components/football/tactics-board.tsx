@@ -1147,8 +1147,9 @@ export function TacticsScreen({
               (item) => item.id === marker.playerId,
             );
             const isGoalkeeper =
-              marker.playerId === board.teamAGkPlayerId ||
-              marker.playerId === board.teamBGkPlayerId;
+              Boolean(marker.playerId) &&
+              (marker.playerId === board.teamAGkPlayerId ||
+                marker.playerId === board.teamBGkPlayerId);
             const positionLabel = isGoalkeeper
               ? 'GK'
               : playerPositionLabel(player);

@@ -457,6 +457,20 @@ assert(
   }).length === 7,
   'Tactics must fall back to the full roster instead of hiding an entire team',
 );
+const emptyTeamMarkers = autoPlaceTeamMarkers({
+  team: { ...tournament.teams[0], players: [], gkRotation: [] },
+  isTeamA: false,
+  playerCount: 7,
+  formation: '1-3-3',
+});
+assert(
+  emptyTeamMarkers.length === 7 &&
+    emptyTeamMarkers.every(
+      (marker, index) =>
+        marker.playerId === undefined && marker.label === `P${index + 1}`,
+    ),
+  'A team without a roster must keep seven numbered placeholders on the pitch',
+);
 const legacyPlayersWithoutPositions = {
   ...tournament,
   teams: tournament.teams.map((team) => ({
