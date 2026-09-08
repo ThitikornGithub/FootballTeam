@@ -16,7 +16,7 @@ FootballTeam เป็น mobile-first web app สำหรับกลุ่ม
 - จัดการรายชื่อผู้เล่น ตำแหน่งที่เล่นได้หลายตำแหน่ง สถานะมาวันนี้/ขาดวันนี้ และคิวผู้รักษาประตูแยกตามทีม
 - ใส่สกอร์ จบเกม แก้สกอร์ ยกเลิกผล และเพิ่มเกมเมื่อเล่นต่อ
 - ตารางคะแนน 3/1/0 แต้ม เรียงด้วยแต้ม ผลต่างประตู และประตูได้
-- กระดาน tactic สำหรับสองทีม พร้อมจัดตัวตามตำแหน่ง D/M/W/F ตำแหน่งผู้เล่น ลูกบอล และโน้ต
+- กระดาน tactic สำหรับสองทีม พร้อมจัดตัวตามตำแหน่ง D/M/W/F ตำแหน่งผู้เล่น และลูกบอล โดยแสดงสนามก่อนและพับค่าผู้เล่น/แผนไว้ด้านล่าง
 - สร้างรูปตารางคะแนน แชร์ผ่าน Web Share API ดาวน์โหลด PNG หรือคัดลอกข้อความ
 - หน้ารวมเกมทั้งหมด เปิดเกมเดิม และลบเกมออกจาก Neon
 - Bottom navigation แสดงในหน้าจัดการผู้เล่นด้วย และทางลัดอยู่บนสุดของหน้าตั้งค่า
@@ -56,7 +56,8 @@ Technology:
 | `components/football/football-app.tsx`  | หน้าหลักทั้งหมด, navigation, setup, teams, schedule, score, settings, share, game list และ sync lifecycle |
 | `components/football/tactics-board.tsx` | กระดาน tactic และ pointer/touch interaction                                                               |
 | `components/football/shared.tsx`        | header, bottom navigation, team colors และ shared controls                                                |
-| `lib/football-engine.ts`                | scheduling, match status, score, standings, overtime และ GK assignment                                    |
+| `lib/football-engine.ts`                | scheduling, match status, score, scorers, standings, overtime และ GK assignment                           |
+| `lib/football-tactics.ts`               | formation definitions, GK selection และ Auto placement จากตำแหน่งผู้เล่น                                  |
 | `lib/football-types.ts`                 | domain types ทั้งหมด                                                                                      |
 | `lib/football-data-api.ts`              | Neon Data API endpoint, public credential และ RPC client                                                  |
 | `lib/football-schema.ts`                | Runtime validation ของ state ที่มาจาก DB/local backup                                                     |
@@ -84,8 +85,10 @@ Technology:
   - คู่ทีม เวลา ลำดับและรอบ
   - status: `upcoming | current | finished`
   - score และ GK ของทั้งสองทีม
+  - `scorers[]` เก็บชื่อ snapshot, team/player id และจำนวนประตูของแต่ละคน; นับดาวซัลโวจากแมตช์ที่จบแล้วเท่านั้น
 - `tactics`
   - สองทีมที่เลือก
+  - match ที่อ้างอิง, จำนวนผู้เล่น 5/6/7, formation และ GK ของแต่ละฝั่ง
   - player/ball markers เป็นพิกัดเปอร์เซ็นต์
   - notes
 
@@ -182,7 +185,7 @@ Automated checks ที่ผ่าน:
 
 - Oxlint
 - TypeScript `--noEmit`
-- Engine smoke checks: defaults, round-robin repeats, time window, score, standings, overtime, GK fairness และ reopen match
+- Engine smoke checks: defaults, round-robin repeats, time window, score, scorers/Top 3, standings, overtime, GK fairness, tactics formation และ reopen match
 - GitHub Pages production build ด้วย Node 24 ในรอบ audit นี้
 - `npm audit`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.4 และ Wrangler 4.129.0
 - Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
@@ -195,6 +198,10 @@ Automated checks ที่ผ่าน:
 รายการ P1/P2 ที่ตรวจพบในรอบก่อนถูกแก้แล้ว: revision CAS และ conflict UI, serialized save queue/retry, local draft recovery, safe match transition, tactic roster reconciliation, runtime schema validation, responsive score/table/player controls, score cap ที่ 99, settings copy, `popstate` history, dialog/select contrast, การลบเกมจาก Settings ให้ลบ Neon จริง, game-list request deduplication และ `npm test`
 
 ตารางแข่งขันแสดงเลข Match แยกจากเวลา และเรียงรายการที่แข่งแล้วจากเก่าไปใหม่เพื่อให้รายการล่าสุดอยู่ล่างสุด
+
+กระดานแท็กติกแสดงสนามก่อน และเริ่มต้นที่ 7 คนต่อทีม ส่วนเลือกสองทีม จำนวนผู้เล่น 5/6/7, formation และตัวสำรองพับอยู่ใน dropdown ด้านล่าง การเปลี่ยนจำนวนคนหรือ formation จะจัดผู้เล่นบนสนามใหม่ทันที โดยผู้เล่นหน้าประตูเลือกตามคิวอัตโนมัติและไม่ต้องระบุเอง หน้า UI ไม่แสดงตัวเลือกแมตช์ ช่องเลือก GK หรือช่องโน้ตแล้ว แต่ยังคง field เดิมไว้เพื่อ backward compatibility รูปแชร์สรุปดาวซัลโว Top 3 จาก `scorers[]` ของแมตช์ที่จบแล้ว ส่วนชื่อผู้ยิงเป็นข้อมูล optional เปิดกรอกผ่าน popup จากปุ่มเดียว และซิงก์ไปพร้อม state ของเกม
+
+เมื่อเปิด Animation การสร้าง/เลือก/ตั้งชื่อจังหวะ เครื่องมือวาดเส้น ปุ่มย้อน–Play–ถัดไป แถบสถานะ และตัวเลือกแสดงลูกศรจะรวมอยู่ในการ์ดควบคุมเดียวเหนือสนาม ไม่แยก Playback ไว้ท้ายหน้า
 
 Scheduling หลังเริ่มแข่งใช้จำนวนครั้งที่คู่ทีมพบกันเป็นเกณฑ์หลัก แล้วหลีกเลี่ยงทีมเดิมเล่นสามเกมติดและลดการลงต่อเนื่องเป็นเกณฑ์รอง ปุ่ม “เล่นต่ออีก 1 เกม” นับทั้ง schedule ปัจจุบันก่อนเลือกคู่เพิ่ม ส่วนคู่ที่ผู้ใช้เลือกเองเป็น hard preference; UI จึงแสดงคู่แนะนำและจำนวนครั้งที่พบกันเพื่อเตือนเมื่อเลือกต่างจากแผนสมดุล
 

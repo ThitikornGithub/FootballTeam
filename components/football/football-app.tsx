@@ -66,6 +66,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Table,
   TableBody,
   TableCell,
@@ -78,11 +86,13 @@ import {
   addMinutes,
   assignGoalkeepers,
   calculateStandings,
+  calculateTopScorers,
   createPlayer,
   createTournament,
   extendTournamentByMatches,
   extendTournamentToEndTime,
   finishMatchWithScore,
+  makeId,
   minutesBetween,
   pairMeetingCount,
   recommendUpcomingPairs,
@@ -92,6 +102,7 @@ import {
   scheduleMetrics,
   scheduleWindowMetrics,
   setMatchScore,
+  setMatchScorers,
   setMatchStatus,
   shuffle,
   updateTournamentSettings,
@@ -100,6 +111,7 @@ import {
   PLAYER_POSITIONS,
   TEAM_COLORS,
   type Match,
+  type MatchScorer,
   type PlayerPosition,
   type Team,
   type TeamColor,
@@ -265,6 +277,7 @@ function scheduledEndTime(tournament: Tournament) {
 
 function formatShareText(tournament: Tournament) {
   const standings = calculateStandings(tournament);
+  const topScorers = calculateTopScorers(tournament, 3);
   const finishedCount = tournament.matches.filter(
     (match) => match.status === 'finished',
   ).length;
@@ -280,6 +293,15 @@ function formatShareText(tournament: Tournament) {
       `${index + 1}. ${team.name} — ${standing.points} แต้ม (${standing.played} นัด, +/- ${standing.goalDifference > 0 ? '+' : ''}${standing.goalDifference})`,
     );
   });
+  if (topScorers.length) {
+    lines.push('', '🔥 ดาวซัลโว');
+    topScorers.forEach((scorer, index) => {
+      const team = tournament.teams.find((item) => item.id === scorer.teamId);
+      lines.push(
+        `${index + 1}. ${scorer.playerName}${team ? ` (${team.name})` : ''} — ${scorer.goals} ประตู`,
+      );
+    });
+  }
   lines.push(
     '',
     `เวลาตามตาราง ${tournament.startTime}–${scheduledEndTime(tournament)}`,
@@ -350,6 +372,276 @@ function ScorePicker({
   );
 }
 
+function ScorerEditor({
+  tournament,
+  match,
+  onUpdate,
+  teamAScore = match.teamAScore ?? 0,
+  teamBScore = match.teamBScore ?? 0,
+  compact = false,
+}: {
+  tournament: Tournament;
+  match: Match;
+  onUpdate: (value: Tournament) => void;
+  teamAScore?: number;
+  teamBScore?: number;
+  compact?: boolean;
+}) {
+  const [draftNames, setDraftNames] = useState<Record<string, string>>({});
+  const [open, setOpen] = useState(false);
+  const sides = [
+    {
+      teamId: match.teamAId,
+      score: teamAScore,
+    },
+    {
+      teamId: match.teamBId,
+      score: teamBScore,
+    },
+  ];
+
+  function saveScorers(scorers: MatchScorer[]) {
+    onUpdate(setMatchScorers(tournament, match.id, scorers));
+  }
+
+  function addScorer(teamId: string, score: number) {
+    const name = (draftNames[teamId] ?? '').trim();
+    const team = tournament.teams.find((item) => item.id === teamId);
+    if (!name || !team || score <= 0) return;
+    const teamScorers = (match.scorers ?? []).filter(
+      (scorer) => scorer.teamId === teamId,
+    );
+    if (teamScorers.reduce((total, scorer) => total + scorer.goals, 0) >= score)
+      return;
+    const player = team.players.find(
+      (item) =>
+        item.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase(),
+    );
+    const existing = (match.scorers ?? []).find(
+      (scorer) =>
+        scorer.teamId === teamId &&
+        (player
+          ? scorer.playerId === player.id
+          : !scorer.playerId &&
+            scorer.playerName.toLocaleLowerCase() === name.toLocaleLowerCase()),
+    );
+    const next = existing
+      ? (match.scorers ?? []).map((scorer) =>
+          scorer.id === existing.id
+            ? { ...scorer, goals: scorer.goals + 1 }
+            : scorer,
+        )
+      : [
+          ...(match.scorers ?? []),
+          {
+            id: makeId('scorer'),
+            teamId,
+            playerId: player?.id,
+            playerName: player?.name ?? name,
+            goals: 1,
+          },
+        ];
+    saveScorers(next);
+    setDraftNames((current) => ({ ...current, [teamId]: '' }));
+  }
+
+  function changeGoals(scorerId: string, delta: number, score: number) {
+    const target = (match.scorers ?? []).find(
+      (scorer) => scorer.id === scorerId,
+    );
+    if (!target) return;
+    const attributed = (match.scorers ?? [])
+      .filter((scorer) => scorer.teamId === target.teamId)
+      .reduce((total, scorer) => total + scorer.goals, 0);
+    if (delta > 0 && attributed >= score) return;
+    saveScorers(
+      (match.scorers ?? []).flatMap((scorer) => {
+        if (scorer.id !== scorerId) return [scorer];
+        const goals = scorer.goals + delta;
+        return goals > 0 ? [{ ...scorer, goals }] : [];
+      }),
+    );
+  }
+
+  const attributedGoals = (match.scorers ?? []).reduce(
+    (total, scorer) => total + scorer.goals,
+    0,
+  );
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={`${compact ? 'mt-3' : 'mt-4'} flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left transition-colors hover:bg-slate-50`}
+      >
+        <span className="flex min-w-0 items-center gap-2 text-sm font-black text-slate-800">
+          <span aria-hidden="true">⚽</span>
+          บันทึกผู้ทำประตู
+        </span>
+        <span
+          className={`shrink-0 text-xs font-black ${attributedGoals ? 'text-[#087632]' : 'text-slate-400'}`}
+        >
+          {attributedGoals ? `ระบุแล้ว ${attributedGoals} ประตู` : 'ไม่บังคับ'}
+        </span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[88dvh] overflow-y-auto rounded-[24px] bg-white p-4 sm:max-w-md">
+          <DialogHeader className="pr-8 text-left">
+            <DialogTitle className="text-lg font-black text-slate-950">
+              บันทึกผู้ทำประตู
+            </DialogTitle>
+            <DialogDescription className="font-semibold leading-5 text-slate-500">
+              ไม่บังคับ · เพิ่มเฉพาะเมื่ออยากเก็บอันดับดาวซัลโว
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-1 gap-3">
+            {sides.map((side) => {
+              const team = tournament.teams.find(
+                (item) => item.id === side.teamId,
+              );
+              if (!team) return null;
+              const scorers = (match.scorers ?? []).filter(
+                (scorer) => scorer.teamId === side.teamId,
+              );
+              const attributed = scorers.reduce(
+                (total, scorer) => total + scorer.goals,
+                0,
+              );
+              const listId = `players-${match.id}-${side.teamId}`;
+              return (
+                <div key={side.teamId} className="rounded-2xl bg-slate-50 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <TeamShirtIcon color={team.color} size="xs" />
+                      <span className="truncate text-sm font-black">
+                        {team.name}
+                      </span>
+                    </div>
+                    <span
+                      className={`text-xs font-black ${attributed > side.score ? 'text-red-600' : 'text-slate-400'}`}
+                    >
+                      ระบุ {attributed}/{side.score}
+                    </span>
+                  </div>
+                  <form
+                    className="mt-2 flex gap-1.5"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      addScorer(side.teamId, side.score);
+                    }}
+                  >
+                    <input
+                      list={listId}
+                      value={draftNames[side.teamId] ?? ''}
+                      disabled={side.score <= 0 || attributed >= side.score}
+                      onChange={(event) =>
+                        setDraftNames((current) => ({
+                          ...current,
+                          [side.teamId]: event.target.value.slice(0, 60),
+                        }))
+                      }
+                      placeholder={side.score > 0 ? 'ชื่อคนยิง' : 'เพิ่มสกอร์ก่อน'}
+                      aria-label={`ชื่อผู้ทำประตูทีม ${team.name}`}
+                      className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-[#35a95f] disabled:bg-slate-100"
+                    />
+                    <datalist id={listId}>
+                      {team.players
+                        .filter((player) => !player.absentToday)
+                        .map((player) => (
+                          <option key={player.id} value={player.name}>
+                            {player.name}
+                          </option>
+                        ))}
+                    </datalist>
+                    <button
+                      type="submit"
+                      disabled={
+                        side.score <= 0 ||
+                        attributed >= side.score ||
+                        !(draftNames[side.teamId] ?? '').trim()
+                      }
+                      className="h-10 shrink-0 rounded-xl bg-[#e5f5e9] px-3 text-sm font-black text-[#087632] disabled:opacity-40"
+                    >
+                      เพิ่ม
+                    </button>
+                  </form>
+                  {scorers.length > 0 && (
+                    <div className="mt-2 space-y-1.5">
+                      {scorers.map((scorer) => (
+                        <div
+                          key={scorer.id}
+                          className="flex min-w-0 items-center gap-1 rounded-xl bg-white px-2 py-1.5"
+                        >
+                          <span className="min-w-0 flex-1 truncate text-sm font-black">
+                            {scorer.playerName}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              changeGoals(scorer.id, -1, side.score)
+                            }
+                            aria-label={`ลดประตู ${scorer.playerName}`}
+                            className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 text-slate-600"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="w-5 text-center text-sm font-black tabular-nums">
+                            {scorer.goals}
+                          </span>
+                          <button
+                            type="button"
+                            disabled={attributed >= side.score}
+                            onClick={() =>
+                              changeGoals(scorer.id, 1, side.score)
+                            }
+                            aria-label={`เพิ่มประตู ${scorer.playerName}`}
+                            className="grid h-8 w-8 place-items-center rounded-lg bg-[#e5f5e9] text-[#087632] disabled:opacity-35"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              saveScorers(
+                                (match.scorers ?? []).filter(
+                                  (item) => item.id !== scorer.id,
+                                ),
+                              )
+                            }
+                            aria-label={`ลบผู้ทำประตู ${scorer.playerName}`}
+                            className="grid h-8 w-8 place-items-center text-red-500"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {attributed > side.score && (
+                    <p className="mt-1.5 text-xs font-bold text-red-600">
+                      จำนวนผู้ทำประตูมากกว่าสกอร์ โปรดลดจำนวนก่อนจบเกม
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter className="mx-0 mb-0 rounded-xl border-0 bg-white p-0 pt-1">
+            <Button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="h-11 w-full rounded-xl bg-[#11823b] font-black"
+            >
+              เสร็จแล้ว
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function CurrentMatchControl({
   tournament,
   match,
@@ -369,6 +661,15 @@ function CurrentMatchControl({
   const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
   const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
   const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
+  const hasScorerOverflow = [
+    { teamId: match.teamAId, score: normalizedScoreA },
+    { teamId: match.teamBId, score: normalizedScoreB },
+  ].some(
+    (side) =>
+      (match.scorers ?? [])
+        .filter((scorer) => scorer.teamId === side.teamId)
+        .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
+  );
 
   /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
   useEffect(() => {
@@ -425,6 +726,14 @@ function CurrentMatchControl({
           onChange={(value) => updateDraftScore('b', value)}
         />
       </div>
+      <ScorerEditor
+        tournament={tournament}
+        match={match}
+        onUpdate={onUpdate}
+        teamAScore={normalizedScoreA}
+        teamBScore={normalizedScoreB}
+        compact
+      />
       <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] font-bold text-slate-500">
         <Cloud className="h-3.5 w-3.5 text-[#11823b]" />
         สกอร์ระหว่างแข่งบันทึกอัตโนมัติ กดจบเกมเมื่อแข่งเสร็จ
@@ -432,6 +741,7 @@ function CurrentMatchControl({
       <div className="mt-3">
         <Button
           type="button"
+          disabled={hasScorerOverflow}
           onClick={() =>
             onUpdate(
               finishMatchWithScore(
@@ -447,6 +757,11 @@ function CurrentMatchControl({
           <Check />
           บันทึกผลและจบเกม
         </Button>
+        {hasScorerOverflow && (
+          <p className="mt-1.5 text-center text-xs font-bold text-red-600">
+            ผู้ทำประตูรวมมากกว่าสกอร์ จึงยังจบเกมไม่ได้
+          </p>
+        )}
       </div>
       {next && (
         <div className="mt-3 flex w-full items-center justify-between border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500">
@@ -1311,9 +1626,7 @@ function TeamDetailScreen({
       .elementFromPoint(event.clientX, event.clientY)
       ?.closest<HTMLElement>('[data-player-id]');
     const targetId = target?.dataset.playerId;
-    const fromIndex = players.findIndex(
-      (player) => player.id === playerId,
-    );
+    const fromIndex = players.findIndex((player) => player.id === playerId);
     const toIndex = players.findIndex((player) => player.id === targetId);
     if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return;
     const nextPlayers = reorder(players, fromIndex, toIndex);
@@ -1856,6 +2169,15 @@ function MatchDetailScreen({
   const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
   const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
   const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
+  const hasScorerOverflow = [
+    { teamId: match.teamAId, score: normalizedScoreA },
+    { teamId: match.teamBId, score: normalizedScoreB },
+  ].some(
+    (side) =>
+      (match.scorers ?? [])
+        .filter((scorer) => scorer.teamId === side.teamId)
+        .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
+  );
 
   /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
   useEffect(() => {
@@ -1918,6 +2240,13 @@ function MatchDetailScreen({
               onChange={(value) => updateDraftScore('b', value)}
             />
           </div>
+          <ScorerEditor
+            tournament={tournament}
+            match={match}
+            onUpdate={onUpdate}
+            teamAScore={normalizedScoreA}
+            teamBScore={normalizedScoreB}
+          />
           {match.status !== 'finished' && (
             <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] font-bold text-slate-500">
               <Cloud className="h-3.5 w-3.5 text-[#11823b]" />
@@ -1937,6 +2266,7 @@ function MatchDetailScreen({
         )}
         {match.status === 'current' && (
           <Button
+            disabled={hasScorerOverflow}
             onClick={() =>
               onUpdate(
                 finishMatchWithScore(
@@ -1956,6 +2286,7 @@ function MatchDetailScreen({
         {match.status === 'finished' && (
           <div className="space-y-3">
             <Button
+              disabled={hasScorerOverflow}
               onClick={() =>
                 onUpdate(
                   setMatchScore(
@@ -2373,16 +2704,12 @@ function SettingsPairPicker({
     );
   }
 
-  const recommendationA = teams.find(
-    (team) => team.id === recommendation?.[0],
-  );
-  const recommendationB = teams.find(
-    (team) => team.id === recommendation?.[1],
-  );
+  const recommendationA = teams.find((team) => team.id === recommendation?.[0]);
+  const recommendationB = teams.find((team) => team.id === recommendation?.[1]);
   const selectedIsRecommended = Boolean(
     recommendation &&
-      ((teamAId === recommendation[0] && teamBId === recommendation[1]) ||
-        (teamAId === recommendation[1] && teamBId === recommendation[0])),
+    ((teamAId === recommendation[0] && teamBId === recommendation[1]) ||
+      (teamAId === recommendation[1] && teamBId === recommendation[0])),
   );
 
   return (
@@ -2537,8 +2864,7 @@ function SettingsScreen({
       ? tournament.matches.find((match) => match.status === 'current')
       : undefined;
   const configurableMatches = tournament.matches.filter(
-    (match) =>
-      match.status !== 'finished' && match.id !== lockedCurrent?.id,
+    (match) => match.status !== 'finished' && match.id !== lockedCurrent?.id,
   );
   const firstQueuedMatch = configurableMatches[0];
   const secondQueuedMatch = configurableMatches[1];
@@ -2796,9 +3122,7 @@ function SettingsScreen({
           <div className="space-y-2 border-t border-slate-100 pt-4">
             <div>
               <h2 className="section-title">
-                {finishedCount > 0
-                  ? 'กำหนดเกมถัดไป'
-                  : 'กำหนดคู่เปิดสนาม'}
+                {finishedCount > 0 ? 'กำหนดเกมถัดไป' : 'กำหนดคู่เปิดสนาม'}
               </h2>
               <p className="section-note">
                 {finishedCount > 0
@@ -2824,9 +3148,7 @@ function SettingsScreen({
                 />
                 <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 text-sm font-black text-slate-700">
                   <span>
-                    {finishedCount > 0
-                      ? 'กำหนดเกมถัดไปอีก 1 คู่'
-                      : 'กำหนดคู่ที่ 2 ด้วย'}
+                    {finishedCount > 0 ? 'กำหนดเกมถัดไปอีก 1 คู่' : 'กำหนดคู่ที่ 2 ด้วย'}
                   </span>
                   <input
                     type="checkbox"
@@ -2838,9 +3160,7 @@ function SettingsScreen({
                 </label>
                 {useSecondPair && (
                   <SettingsPairPicker
-                    label={
-                      finishedCount > 0 ? 'เกมถัดไปลำดับที่ 2' : 'คู่ที่ 2'
-                    }
+                    label={finishedCount > 0 ? 'เกมถัดไปลำดับที่ 2' : 'คู่ที่ 2'}
                     teams={selectableTeams}
                     teamAId={secondPairA}
                     teamBId={secondPairB}
@@ -2848,11 +3168,7 @@ function SettingsScreen({
                     onTeamBChange={setSecondPairB}
                     meetingCount={
                       finishedCount > 0
-                        ? pairMeetingCount(
-                            tournament,
-                            secondPairA,
-                            secondPairB,
-                          )
+                        ? pairMeetingCount(tournament, secondPairA, secondPairB)
                         : undefined
                     }
                     recommendation={secondRecommendation}
@@ -2908,9 +3224,7 @@ function SettingsScreen({
         <AlertDialogContent className="rounded-[24px] p-5">
           <AlertDialogHeader className="place-items-start text-left">
             <AlertDialogTitle className="text-lg font-black">
-              {gameId
-                ? 'ลบเกมส์นี้ออกจากฐานข้อมูล?'
-                : 'ลบเกมนี้ออกจากอุปกรณ์?'}
+              {gameId ? 'ลบเกมส์นี้ออกจากฐานข้อมูล?' : 'ลบเกมนี้ออกจากอุปกรณ์?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left font-semibold leading-6">
               {gameId
@@ -2931,11 +3245,7 @@ function SettingsScreen({
               disabled={deleting}
               className="h-12 rounded-xl font-black"
             >
-              {deleting
-                ? 'กำลังลบ…'
-                : gameId
-                  ? 'ลบเกมส์ถาวร'
-                  : 'ลบทั้งหมด'}
+              {deleting ? 'กำลังลบ…' : gameId ? 'ลบเกมส์ถาวร' : 'ลบทั้งหมด'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -3521,9 +3831,7 @@ export default function FootballApp() {
     window.history.pushState({}, '', gamePath());
     setView('home');
     setNotice(
-      targetGameId
-        ? 'ลบเกมออกจากฐานข้อมูลแล้ว'
-        : 'ลบการแข่งขันออกจากอุปกรณ์แล้ว',
+      targetGameId ? 'ลบเกมออกจากฐานข้อมูลแล้ว' : 'ลบการแข่งขันออกจากอุปกรณ์แล้ว',
     );
     return true;
   }
@@ -3756,9 +4064,9 @@ export default function FootballApp() {
           )}
         </div>
         {tournament &&
-          !['setup', 'match-detail', 'share', 'games'].includes(
-            view,
-          ) && <BottomNavigation active={mainView} onChange={setView} />}
+          !['setup', 'match-detail', 'share', 'games'].includes(view) && (
+            <BottomNavigation active={mainView} onChange={setView} />
+          )}
         {notice && (
           <output className="fixed bottom-24 left-1/2 z-50 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm leading-5 font-black break-words whitespace-normal text-white shadow-xl">
             <CircleCheck className="h-4 w-4 shrink-0 text-emerald-400" />

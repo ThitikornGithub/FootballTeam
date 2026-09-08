@@ -39,6 +39,14 @@ export type Team = {
 
 export type MatchStatus = 'upcoming' | 'current' | 'finished';
 
+export type MatchScorer = {
+  id: string;
+  teamId: string;
+  playerId?: string;
+  playerName: string;
+  goals: number;
+};
+
 export type Match = {
   id: string;
   matchNumber: number;
@@ -48,6 +56,7 @@ export type Match = {
   startTime: string;
   teamAScore?: number;
   teamBScore?: number;
+  scorers?: MatchScorer[];
   teamAGkPlayerId?: string;
   teamBGkPlayerId?: string;
   status: MatchStatus;
@@ -80,10 +89,36 @@ export type TacticStep = {
 export type TacticsBoard = {
   teamAId: string;
   teamBId: string;
+  matchId?: string;
+  playerCount?: 5 | 6 | 7;
+  teamAFormation?: TacticFormation;
+  teamBFormation?: TacticFormation;
+  teamAGkPlayerId?: string;
+  teamBGkPlayerId?: string;
   markers: TacticMarker[];
   notes: string;
   animationSteps?: TacticStep[];
 };
+
+export const TACTIC_FORMATIONS = [
+  'auto',
+  '1-2-2',
+  '1-1-2-1',
+  '1-2-1-1',
+  '1-3-2',
+  '1-2-3',
+  '1-2-2-1',
+  '1-1-3-1',
+  '1-3-1-1',
+  '1-3-3',
+  '1-2-4',
+  '1-3-2-1',
+  '1-2-3-1',
+  '1-2-2-2',
+  '1-4-1-1',
+] as const;
+
+export type TacticFormation = (typeof TACTIC_FORMATIONS)[number];
 
 export type Tournament = {
   id: string;

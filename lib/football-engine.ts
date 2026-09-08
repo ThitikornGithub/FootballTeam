@@ -1,5 +1,6 @@
 import type {
   Match,
+  MatchScorer,
   Player,
   ScheduleConfig,
   Team,
@@ -150,11 +151,9 @@ function balancedFuturePairs(
     const previousCount = pairCounts.get(key) ?? 0;
     const useReverse = !orientation && previousCount % 2 === 1;
     const teamAId =
-      orientation?.[0] ??
-      (useReverse ? canonical.teamBId : canonical.teamAId);
+      orientation?.[0] ?? (useReverse ? canonical.teamBId : canonical.teamAId);
     const teamBId =
-      orientation?.[1] ??
-      (useReverse ? canonical.teamAId : canonical.teamBId);
+      orientation?.[1] ?? (useReverse ? canonical.teamAId : canonical.teamBId);
     const pair = {
       teamAId,
       teamBId,
@@ -515,8 +514,7 @@ export function reshuffleUpcomingMatches(
     ? tournament.matches.find((match) => match.status === 'current')
     : undefined;
   const editableMatches = tournament.matches.filter(
-    (match) =>
-      match.status !== 'finished' && match.id !== lockedCurrent?.id,
+    (match) => match.status !== 'finished' && match.id !== lockedCurrent?.id,
   );
   if (!editableMatches.length) return tournament;
 
@@ -636,6 +634,36 @@ export function setMatchScore(
   };
 }
 
+export function setMatchScorers(
+  tournament: Tournament,
+  matchId: string,
+  scorers: MatchScorer[],
+): Tournament {
+  return {
+    ...tournament,
+    matches: tournament.matches.map((match) =>
+      match.id === matchId
+        ? {
+            ...match,
+            scorers: scorers
+              .filter(
+                (scorer) =>
+                  (scorer.teamId === match.teamAId ||
+                    scorer.teamId === match.teamBId) &&
+                  scorer.playerName.trim() &&
+                  scorer.goals > 0,
+              )
+              .map((scorer) => ({
+                ...scorer,
+                playerName: scorer.playerName.trim().slice(0, 60),
+                goals: Math.min(99, Math.max(1, Math.floor(scorer.goals))),
+              })),
+          }
+        : match,
+    ),
+  };
+}
+
 export function finishMatchWithScore(
   tournament: Tournament,
   matchId: string,
@@ -675,6 +703,51 @@ export type TeamStanding = {
   goalDifference: number;
   points: number;
 };
+
+export type TopScorer = {
+  teamId: string;
+  playerId?: string;
+  playerName: string;
+  goals: number;
+};
+
+export function calculateTopScorers(
+  tournament: Tournament,
+  limit = 3,
+): TopScorer[] {
+  const totals = new Map<string, TopScorer & { firstSeen: number }>();
+  let firstSeen = 0;
+  for (const match of tournament.matches) {
+    if (match.status !== 'finished') continue;
+    for (const scorer of match.scorers ?? []) {
+      const normalizedName = scorer.playerName.trim().toLocaleLowerCase();
+      const key = scorer.playerId
+        ? `${scorer.teamId}:id:${scorer.playerId}`
+        : `${scorer.teamId}:name:${normalizedName}`;
+      const existing = totals.get(key);
+      if (existing) existing.goals += scorer.goals;
+      else {
+        totals.set(key, {
+          teamId: scorer.teamId,
+          playerId: scorer.playerId,
+          playerName: scorer.playerName.trim(),
+          goals: scorer.goals,
+          firstSeen,
+        });
+        firstSeen += 1;
+      }
+    }
+  }
+  return [...totals.values()]
+    .sort(
+      (first, second) =>
+        second.goals - first.goals ||
+        first.firstSeen - second.firstSeen ||
+        first.playerName.localeCompare(second.playerName, 'th'),
+    )
+    .slice(0, Math.max(0, limit))
+    .map(({ firstSeen: _firstSeen, ...scorer }) => scorer);
+}
 
 export function calculateStandings(tournament: Tournament): TeamStanding[] {
   const teamOrder = new Map(

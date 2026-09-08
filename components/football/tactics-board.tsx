@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   Footprints,
   Move,
   Pause,
@@ -22,6 +23,11 @@ import {
 
 import { Button } from '@/components/ui/button';
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -32,26 +38,24 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  FORMATION_LABELS,
+  autoPlaceTeamMarkers,
+  formationsForPlayerCount,
+  goalkeeperForTeam,
+  resolvedFormationLabel,
+} from '@/lib/football-tactics';
+import {
+  type Match,
   type TacticMarker,
+  type TacticFormation,
   type TacticPath,
   type TacticStep,
   type TacticsBoard,
   type Player,
   type PlayerPosition,
-  type Team,
   type Tournament,
 } from '@/lib/football-types';
-import { COLOR_HEX, COLOR_LABEL, PageHeader } from './shared';
-
-const TEAM_A_POSITIONS = [
-  [50, 91],
-  [24, 77],
-  [50, 73],
-  [76, 77],
-  [32, 60],
-  [68, 60],
-  [50, 48],
-] as const;
+import { COLOR_HEX, COLOR_LABEL, PageHeader, TeamShirtIcon } from './shared';
 
 const PLAYER_POSITION_SHORT: Record<PlayerPosition, string> = {
   defender: 'D',
@@ -60,65 +64,9 @@ const PLAYER_POSITION_SHORT: Record<PlayerPosition, string> = {
   forward: 'F',
 };
 
-const OUTFIELD_POSITION_SLOTS: Record<
-  PlayerPosition,
-  readonly (readonly [number, number])[]
-> = {
-  defender: [
-    [26, 78],
-    [50, 76],
-    [74, 78],
-    [35, 69],
-    [65, 69],
-    [50, 66],
-  ],
-  midfielder: [
-    [32, 62],
-    [68, 62],
-    [50, 58],
-    [24, 57],
-    [76, 57],
-    [50, 52],
-  ],
-  winger: [
-    [17, 56],
-    [83, 56],
-    [20, 46],
-    [80, 46],
-    [26, 40],
-    [74, 40],
-  ],
-  forward: [
-    [38, 44],
-    [62, 44],
-    [50, 38],
-    [28, 36],
-    [72, 36],
-    [50, 31],
-  ],
-};
-
 const PLAYBACK_MOVE_MS = 1800;
 const PLAYBACK_STEP_MS = 2500;
 const PLAYBACK_START_DELAY_MS = 350;
-
-function formationPosition(
-  index: number,
-  isTeamA: boolean,
-): { x: number; y: number } {
-  const [x, y] = TEAM_A_POSITIONS[index] ?? [50, 48];
-  return {
-    x: index === 6 ? (isTeamA ? 32 : 68) : x,
-    y: isTeamA ? y : 100 - y,
-  };
-}
-
-function orientPosition(
-  position: readonly [number, number],
-  isTeamA: boolean,
-) {
-  return { x: position[0], y: isTeamA ? position[1] : 100 - position[1] };
-}
 
 function markerIdentity(marker: TacticMarker) {
   return marker.kind === 'ball'
@@ -143,7 +91,7 @@ function reconcileBoard(
   tournament: Tournament,
   storedBoard: TacticsBoard,
 ): TacticsBoard {
-  const fresh = makeBoard(tournament, storedBoard.teamAId, storedBoard.teamBId);
+  const fresh = makeBoard(tournament, storedBoard);
   return {
     ...fresh,
     notes: storedBoard.notes,
@@ -160,67 +108,84 @@ function reconcileBoard(
   };
 }
 
-function teamMarkers(team: Team, isTeamA: boolean): TacticMarker[] {
-  const availablePlayers = team.players
-    .filter((player) => !player.absentToday)
-    .slice(0, 7);
-  const goalkeeperId = team.gkRotation.find((id) =>
-    availablePlayers.some((player) => player.id === id),
-  );
-  const goalkeeper =
-    availablePlayers.find((player) => player.id === goalkeeperId) ??
-    availablePlayers[0];
-  const orderedPlayers = goalkeeper
-    ? [
-        goalkeeper,
-        ...availablePlayers.filter((player) => player.id !== goalkeeper.id),
-      ]
-    : [];
-  const usedSlots = new Map<PlayerPosition, number>();
-
-  return Array.from({ length: 7 }, (_, index) => {
-    const player = orderedPlayers[index];
-    const primaryPosition = player?.positions?.[0];
-    let position = formationPosition(index, isTeamA);
-    if (player && index > 0 && primaryPosition) {
-      const slotIndex = usedSlots.get(primaryPosition) ?? 0;
-      const slots = OUTFIELD_POSITION_SLOTS[primaryPosition];
-      position = orientPosition(
-        slots[Math.min(slotIndex, slots.length - 1)],
-        isTeamA,
-      );
-      usedSlots.set(primaryPosition, slotIndex + 1);
-    }
-    return {
-      id: `tactic-${isTeamA ? 'a' : 'b'}-${player?.id ?? index + 1}`,
-      kind: 'player' as const,
-      teamId: team.id,
-      playerId: player?.id,
-      label: player?.name || `P${index + 1}`,
-      ...position,
-    };
-  });
+function goalkeeperFromMatch(match: Match | undefined, teamId: string) {
+  if (!match) return undefined;
+  if (match.teamAId === teamId) return match.teamAGkPlayerId;
+  if (match.teamBId === teamId) return match.teamBGkPlayerId;
+  return undefined;
 }
 
 function playerPositionLabel(player?: Player) {
-  return player?.positions?.map(
-    (position) => PLAYER_POSITION_SHORT[position],
-  ).join('/');
+  return player?.positions
+    ?.map((position) => PLAYER_POSITION_SHORT[position])
+    .join('/');
 }
 
 function makeBoard(
   tournament: Tournament,
-  teamAId = tournament.teams[0]?.id ?? '',
-  teamBId = tournament.teams.find((team) => team.id !== teamAId)?.id ?? '',
+  setup: Partial<TacticsBoard> = {},
 ): TacticsBoard {
+  const defaultMatch =
+    tournament.matches.find((match) => match.status === 'current') ??
+    tournament.matches.find((match) => match.status === 'upcoming') ??
+    tournament.matches[0];
+  const selectedMatch = setup.matchId
+    ? tournament.matches.find((match) => match.id === setup.matchId)
+    : setup.teamAId || setup.teamBId
+      ? undefined
+      : defaultMatch;
+  const teamAId =
+    setup.teamAId ?? selectedMatch?.teamAId ?? tournament.teams[0]?.id ?? '';
+  const teamBId =
+    setup.teamBId ??
+    selectedMatch?.teamBId ??
+    tournament.teams.find((team) => team.id !== teamAId)?.id ??
+    '';
   const teamA = tournament.teams.find((team) => team.id === teamAId);
   const teamB = tournament.teams.find((team) => team.id === teamBId);
+  const playerCount = setup.playerCount ?? 7;
+  const teamAFormation = setup.teamAFormation ?? 'auto';
+  const teamBFormation = setup.teamBFormation ?? 'auto';
+  const teamAGk = teamA
+    ? goalkeeperForTeam(
+        teamA,
+        setup.teamAGkPlayerId ?? goalkeeperFromMatch(selectedMatch, teamAId),
+      )
+    : undefined;
+  const teamBGk = teamB
+    ? goalkeeperForTeam(
+        teamB,
+        setup.teamBGkPlayerId ?? goalkeeperFromMatch(selectedMatch, teamBId),
+      )
+    : undefined;
   return {
     teamAId,
     teamBId,
+    matchId: selectedMatch?.id,
+    playerCount,
+    teamAFormation,
+    teamBFormation,
+    teamAGkPlayerId: teamAGk?.id,
+    teamBGkPlayerId: teamBGk?.id,
     markers: [
-      ...(teamA ? teamMarkers(teamA, true) : []),
-      ...(teamB ? teamMarkers(teamB, false) : []),
+      ...(teamA
+        ? autoPlaceTeamMarkers({
+            team: teamA,
+            isTeamA: true,
+            playerCount,
+            formation: teamAFormation,
+            goalkeeperId: teamAGk?.id,
+          })
+        : []),
+      ...(teamB
+        ? autoPlaceTeamMarkers({
+            team: teamB,
+            isTeamA: false,
+            playerCount,
+            formation: teamBFormation,
+            goalkeeperId: teamBGk?.id,
+          })
+        : []),
       {
         id: 'tactic-ball',
         kind: 'ball',
@@ -345,6 +310,7 @@ export function TacticsScreen({
   const [showPathsDuringPlayback, setShowPathsDuringPlayback] = useState(false);
   const [notice, setNotice] = useState('');
   const [confirmingReset, setConfirmingReset] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers =
     mode === 'position'
@@ -362,6 +328,22 @@ export function TacticsScreen({
         : (currentStep?.paths ?? []);
   const teamA = tournament.teams.find((team) => team.id === board.teamAId);
   const teamB = tournament.teams.find((team) => team.id === board.teamBId);
+  const playerCount = board.playerCount ?? 6;
+  const teamAFormation = board.teamAFormation ?? 'auto';
+  const teamBFormation = board.teamBFormation ?? 'auto';
+  const onFieldPlayerIds = new Set(
+    board.markers.flatMap((marker) =>
+      marker.kind === 'player' && marker.playerId ? [marker.playerId] : [],
+    ),
+  );
+  const benchA =
+    teamA?.players.filter(
+      (player) => !player.absentToday && !onFieldPlayerIds.has(player.id),
+    ) ?? [];
+  const benchB =
+    teamB?.players.filter(
+      (player) => !player.absentToday && !onFieldPlayerIds.has(player.id),
+    ) ?? [];
 
   useEffect(() => {
     if (!isPlaying) return;
@@ -386,9 +368,9 @@ export function TacticsScreen({
     return () => window.clearTimeout(timer);
   }, [notice]);
 
-  function resetBoard(teamAId = board.teamAId, teamBId = board.teamBId) {
+  function resetBoard(setup: Partial<TacticsBoard> = {}) {
     const nextBoard = {
-      ...makeBoard(tournament, teamAId, teamBId),
+      ...makeBoard(tournament, { ...board, ...setup }),
       notes: board.notes,
     };
     setBoard(nextBoard);
@@ -410,12 +392,12 @@ export function TacticsScreen({
   function resetCurrentMode() {
     if (mode === 'position') {
       const nextBoard = {
-        ...makeBoard(tournament, board.teamAId, board.teamBId),
+        ...makeBoard(tournament, board),
         notes: board.notes,
         animationSteps: board.animationSteps,
       };
       setBoard(nextBoard);
-      setNotice('จัดผู้เล่นตามตำแหน่งในทีมแล้ว แผน Animation ยังอยู่');
+      setNotice('จัดผู้เล่นตามแผนและตำแหน่งที่เล่นได้แล้ว');
     } else {
       setSteps([
         {
@@ -506,11 +488,22 @@ export function TacticsScreen({
       board.teamBId === teamAId
         ? (tournament.teams.find((team) => team.id !== teamAId)?.id ?? '')
         : board.teamBId;
-    resetBoard(teamAId, teamBId);
+    resetBoard({
+      matchId: undefined,
+      teamAId,
+      teamBId,
+      teamAGkPlayerId: undefined,
+      teamBGkPlayerId: undefined,
+    });
   }
 
   function changeTeamB(teamBId: string) {
-    resetBoard(board.teamAId, teamBId);
+    resetBoard({
+      matchId: undefined,
+      teamBId,
+      teamAGkPlayerId: undefined,
+      teamBGkPlayerId: undefined,
+    });
   }
 
   function changeMode(nextMode: TacticMode) {
@@ -641,8 +634,8 @@ export function TacticsScreen({
   return (
     <>
       <PageHeader title="กระดานแท็กติก" eyebrow={tournament.name} />
-      <div className="space-y-4 px-4 py-4 pb-8">
-        <section className="settings-card space-y-2">
+      <div className="flex flex-col gap-4 px-4 py-4 pb-8">
+        <section className="settings-card order-1 space-y-2">
           <div>
             <h2 className="section-title">รูปแบบกระดาน</h2>
             <p className="section-note">เลือกตามสิ่งที่ต้องการอธิบายให้เพื่อนดู</p>
@@ -668,62 +661,196 @@ export function TacticsScreen({
             </button>
           </div>
         </section>
-        <section className="settings-card">
-          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-            <select
-              aria-label="ทีมฝั่งล่าง"
-              value={board.teamAId}
-              onChange={(event) => changeTeamA(event.target.value)}
-              className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
-            >
-              {tournament.teams.map((team) => (
-                <option key={team.id} value={team.id}>
-                  {COLOR_LABEL[team.color]} · {team.name}
-                </option>
-              ))}
-            </select>
-            <span className="text-xs font-black text-slate-400">VS</span>
-            <select
-              aria-label="ทีมฝั่งบน"
-              value={board.teamBId}
-              onChange={(event) => changeTeamB(event.target.value)}
-              className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
-            >
-              {tournament.teams.map((team) => (
-                <option
-                  key={team.id}
-                  value={team.id}
-                  disabled={team.id === board.teamAId}
+        <Collapsible
+          open={setupOpen}
+          onOpenChange={setSetupOpen}
+          className={mode === 'animation' ? 'order-4' : 'order-3'}
+        >
+          <CollapsibleTrigger className="settings-card flex w-full items-center justify-between gap-3 text-left">
+            <div className="min-w-0">
+              <h2 className="section-title">ตั้งค่าผู้เล่นและแผน</h2>
+              <p className="mt-0.5 truncate text-xs font-bold text-slate-500">
+                {teamA?.name ?? 'ทีมแรก'} vs {teamB?.name ?? 'ทีมที่สอง'} ·{' '}
+                {playerCount} คน ·{' '}
+                {resolvedFormationLabel(teamAFormation, playerCount)} /{' '}
+                {resolvedFormationLabel(teamBFormation, playerCount)}
+              </p>
+            </div>
+            <ChevronDown
+              className={`h-5 w-5 shrink-0 text-slate-500 transition-transform ${setupOpen ? 'rotate-180' : ''}`}
+            />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-3 space-y-3">
+            <section className="settings-card space-y-4">
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <select
+                  aria-label="ทีมฝั่งล่าง"
+                  value={board.teamAId}
+                  onChange={(event) => changeTeamA(event.target.value)}
+                  className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
                 >
-                  {COLOR_LABEL[team.color]} · {team.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="mt-3 flex items-center justify-between gap-3">
-            <p className="text-xs font-bold text-slate-500">
-              {mode === 'position'
-                ? 'ลากผู้เล่นและลูกบอลเพื่อวางตำแหน่งบนสนาม'
-                : 'สร้างหลายจังหวะ วาดเส้น แล้วกด Play เพื่อดูการเคลื่อนที่'}
-            </p>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setConfirmingReset(true)}
-              className="h-9 shrink-0 rounded-xl px-3 text-xs font-black"
-            >
-              <RotateCcw />
-              {mode === 'position' ? 'จัดตามตำแหน่ง' : 'รีเซ็ต'}
-            </Button>
-          </div>
-        </section>
+                  {tournament.teams.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {COLOR_LABEL[team.color]} · {team.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs font-black text-slate-400">VS</span>
+                <select
+                  aria-label="ทีมฝั่งบน"
+                  value={board.teamBId}
+                  onChange={(event) => changeTeamB(event.target.value)}
+                  className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f]"
+                >
+                  {tournament.teams.map((team) => (
+                    <option
+                      key={team.id}
+                      value={team.id}
+                      disabled={team.id === board.teamAId}
+                    >
+                      {COLOR_LABEL[team.color]} · {team.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <p className="mb-1.5 text-xs font-black text-slate-500">
+                  จำนวนผู้เล่นในสนามต่อทีม
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {([5, 6, 7] as const).map((count) => (
+                    <button
+                      key={count}
+                      type="button"
+                      aria-pressed={playerCount === count}
+                      onClick={() =>
+                        resetBoard({
+                          playerCount: count,
+                          teamAFormation: 'auto',
+                          teamBFormation: 'auto',
+                        })
+                      }
+                      className={`h-10 rounded-xl text-sm font-black ${playerCount === count ? 'bg-[#11823b] text-white' : 'border border-slate-200 bg-white text-slate-600'}`}
+                    >
+                      {count} คน
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 min-[390px]:grid-cols-2">
+                {[
+                  {
+                    team: teamA,
+                    formation: teamAFormation,
+                    formationKey: 'teamAFormation' as const,
+                  },
+                  {
+                    team: teamB,
+                    formation: teamBFormation,
+                    formationKey: 'teamBFormation' as const,
+                  },
+                ].map((side) => (
+                  <div
+                    key={side.team?.id ?? side.formationKey}
+                    className="rounded-2xl bg-slate-50 p-3"
+                  >
+                    <div className="mb-2 flex min-w-0 items-center gap-2">
+                      {side.team && (
+                        <TeamShirtIcon color={side.team.color} size="xs" />
+                      )}
+                      <p className="truncate text-sm font-black">
+                        {side.team?.name ?? 'ยังไม่มีทีม'}
+                      </p>
+                    </div>
+                    <label className="block text-[11px] font-black text-slate-400">
+                      แผนการเล่น
+                      <select
+                        aria-label={`แผนการเล่น ${side.team?.name ?? ''}`}
+                        value={side.formation}
+                        onChange={(event) =>
+                          resetBoard({
+                            [side.formationKey]: event.target
+                              .value as TacticFormation,
+                          })
+                        }
+                        className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-black text-slate-800 outline-none"
+                      >
+                        {formationsForPlayerCount(playerCount).map(
+                          (formation) => (
+                            <option key={formation} value={formation}>
+                              {FORMATION_LABELS[formation]}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl bg-[#eef8f1] px-3 py-2 text-xs font-bold text-[#087632]">
+                เลือกจำนวนคนหรือแผนแล้ว กระดานจะจัดใหม่ทันที ·
+                ผู้เล่นหน้าประตูเลือกตามคิวอัตโนมัติ
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs font-bold text-slate-500">
+                  {mode === 'position'
+                    ? 'หากลากตำแหน่งแล้วอยากเริ่มใหม่ กดจัดตำแหน่งใหม่'
+                    : 'สร้างหลายจังหวะ วาดเส้น แล้วกด Play เพื่อดูการเคลื่อนที่'}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setConfirmingReset(true)}
+                  className="h-9 shrink-0 rounded-xl px-3 text-xs font-black"
+                >
+                  <RotateCcw />
+                  {mode === 'position' ? 'จัดตำแหน่งใหม่' : 'รีเซ็ต'}
+                </Button>
+              </div>
+            </section>
+
+            {(benchA.length > 0 || benchB.length > 0) && (
+              <section className="settings-card space-y-3">
+                <div>
+                  <h2 className="section-title">ตัวสำรอง</h2>
+                  <p className="section-note">ผู้เล่นที่มาวันนี้แต่เกินจำนวนคนในสนาม</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 min-[390px]:grid-cols-2">
+                  {[
+                    { team: teamA, players: benchA },
+                    { team: teamB, players: benchB },
+                  ].map((side, index) => (
+                    <div
+                      key={side.team?.id ?? index}
+                      className="rounded-xl bg-slate-50 px-3 py-2"
+                    >
+                      <div className="flex items-center gap-1.5 text-xs font-black text-slate-600">
+                        {side.team && (
+                          <TeamShirtIcon color={side.team.color} size="xs" />
+                        )}
+                        {side.team?.name}
+                      </div>
+                      <p className="mt-1 text-sm font-bold text-slate-800">
+                        {side.players.length
+                          ? side.players.map((player) => player.name).join(', ')
+                          : 'ไม่มีตัวสำรอง'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+          </CollapsibleContent>
+        </Collapsible>
 
         {mode === 'animation' && (
-          <section className="settings-card space-y-3">
+          <section className="settings-card order-2 space-y-3">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h2 className="section-title">จังหวะการเล่น</h2>
-                <p className="section-note">สร้างได้สูงสุด 8 จังหวะ</p>
+                <p className="section-note">
+                  จังหวะ {activeStepIndex + 1} จาก {steps.length} · สูงสุด 8 จังหวะ
+                </p>
               </div>
               <Button
                 type="button"
@@ -734,6 +861,73 @@ export function TacticsScreen({
                 <Plus />
                 เพิ่มจังหวะ
               </Button>
+            </div>
+            <div className="space-y-2 rounded-2xl bg-[#eef8f1] p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-black text-[#11823b]">
+                    ดูตัวอย่างการเคลื่อนที่
+                  </p>
+                  <p className="truncate text-sm font-black text-slate-800">
+                    {isPlaying ? 'กำลังเล่น…' : currentStep?.title}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={activeStepIndex === 0 || isPlaying}
+                    onClick={() => setActiveStepIndex((index) => index - 1)}
+                    aria-label="จังหวะก่อนหน้า"
+                    className="h-9 w-9 rounded-full bg-white p-0"
+                  >
+                    <ArrowLeft />
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={togglePlayback}
+                    aria-label={isPlaying ? 'หยุดเล่นแผน' : 'เล่นแผน'}
+                    className="h-11 w-11 rounded-full bg-[#11823b] p-0"
+                  >
+                    {isPlaying ? <Pause /> : <Play />}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={activeStepIndex >= steps.length - 1 || isPlaying}
+                    onClick={() => setActiveStepIndex((index) => index + 1)}
+                    aria-label="จังหวะถัดไป"
+                    className="h-9 w-9 rounded-full bg-white p-0"
+                  >
+                    <ArrowRight />
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5">
+                {steps.map((step, index) => (
+                  <button
+                    key={step.id}
+                    type="button"
+                    aria-label={`ไปจังหวะ ${index + 1}`}
+                    onClick={() => {
+                      setActiveStepIndex(index);
+                      setIsPlaying(false);
+                    }}
+                    className={`h-2 flex-1 rounded-full transition-colors ${index <= activeStepIndex ? 'bg-[#11823b]' : 'bg-white'}`}
+                  />
+                ))}
+              </div>
+              <label className="flex min-h-9 items-center justify-between gap-3 rounded-xl bg-white/80 px-3 text-xs font-black text-slate-700">
+                <span>แสดงลูกศรตอนเล่น</span>
+                <input
+                  type="checkbox"
+                  checked={showPathsDuringPlayback}
+                  onChange={(event) =>
+                    setShowPathsDuringPlayback(event.target.checked)
+                  }
+                  className="h-4 w-4 shrink-0 accent-[#11823b]"
+                />
+              </label>
             </div>
             <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-none">
               {steps.map((step, index) => (
@@ -880,7 +1074,7 @@ export function TacticsScreen({
             if (event.currentTarget.hasPointerCapture(event.pointerId))
               event.currentTarget.releasePointerCapture(event.pointerId);
           }}
-          className={`relative h-[540px] overscroll-contain overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none ${tool === 'move' ? 'touch-pan-y' : 'touch-none cursor-crosshair'}`}
+          className={`relative ${mode === 'animation' ? 'order-3' : 'order-2'} h-[540px] overscroll-contain overflow-hidden rounded-[26px] border-4 border-white bg-[linear-gradient(180deg,#198b48_0%,#147b3f_50%,#198b48_100%)] shadow-[0_12px_30px_rgba(15,80,40,.22)] select-none ${tool === 'move' ? 'touch-pan-y' : 'touch-none cursor-crosshair'}`}
         >
           <div className="pointer-events-none absolute inset-3 border-2 border-white/80" />
           <div className="pointer-events-none absolute inset-x-3 top-1/2 border-t-2 border-white/80" />
@@ -949,7 +1143,12 @@ export function TacticsScreen({
             const player = team?.players.find(
               (item) => item.id === marker.playerId,
             );
-            const positionLabel = playerPositionLabel(player);
+            const isGoalkeeper =
+              marker.playerId === board.teamAGkPlayerId ||
+              marker.playerId === board.teamBGkPlayerId;
+            const positionLabel = isGoalkeeper
+              ? 'GK'
+              : playerPositionLabel(player);
             const isBall = marker.kind === 'ball';
             const preview =
               dragPreview?.markerId === marker.id ? dragPreview : marker;
@@ -1044,101 +1243,7 @@ export function TacticsScreen({
           })}
         </section>
 
-        {mode === 'animation' && (
-          <section className="settings-card space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-black text-[#11823b]">PLAYBACK</p>
-                <h2 className="section-title">
-                  จังหวะ {activeStepIndex + 1} จาก {steps.length}
-                </h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={activeStepIndex === 0 || isPlaying}
-                  onClick={() => setActiveStepIndex((index) => index - 1)}
-                  aria-label="จังหวะก่อนหน้า"
-                  className="h-10 w-10 rounded-full p-0"
-                >
-                  <ArrowLeft />
-                </Button>
-                <Button
-                  type="button"
-                  onClick={togglePlayback}
-                  aria-label={isPlaying ? 'หยุดเล่นแผน' : 'เล่นแผน'}
-                  className="h-12 w-12 rounded-full bg-[#11823b] p-0"
-                >
-                  {isPlaying ? <Pause /> : <Play />}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={activeStepIndex >= steps.length - 1 || isPlaying}
-                  onClick={() => setActiveStepIndex((index) => index + 1)}
-                  aria-label="จังหวะถัดไป"
-                  className="h-10 w-10 rounded-full p-0"
-                >
-                  <ArrowRight />
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              {steps.map((step, index) => (
-                <button
-                  key={step.id}
-                  type="button"
-                  aria-label={`ไปจังหวะ ${index + 1}`}
-                  onClick={() => {
-                    setActiveStepIndex(index);
-                    setIsPlaying(false);
-                  }}
-                  className={`h-2.5 flex-1 rounded-full transition-colors ${index <= activeStepIndex ? 'bg-[#11823b]' : 'bg-slate-200'}`}
-                />
-              ))}
-            </div>
-            <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 text-sm font-black text-slate-700">
-              <span>
-                แสดงลูกศรตอนเล่น
-                <span className="ml-1 text-xs font-bold text-slate-400">
-                  (ปิดไว้จะดูไหลลื่นกว่า)
-                </span>
-              </span>
-              <input
-                type="checkbox"
-                checked={showPathsDuringPlayback}
-                onChange={(event) =>
-                  setShowPathsDuringPlayback(event.target.checked)
-                }
-                className="h-5 w-5 shrink-0 accent-[#11823b]"
-              />
-            </label>
-            <p className="text-center text-xs font-bold text-slate-500">
-              {isPlaying ? 'กำลังเล่นแผน…' : currentStep?.title}
-            </p>
-          </section>
-        )}
-
-        <section className="settings-card">
-          <label htmlFor="tactics-notes" className="section-title">
-            โน้ตแผนการเล่น
-          </label>
-          <textarea
-            id="tactics-notes"
-            value={board.notes}
-            onChange={(event) =>
-              setBoard({ ...board, notes: event.target.value.slice(0, 500) })
-            }
-            rows={4}
-            placeholder="เช่น เพรสแดนบน, เปลี่ยนตัวทุก 5 นาที, ลูกเตะมุมให้ใครเปิด…"
-            className="mt-2 w-full resize-none rounded-2xl border border-slate-200 bg-white p-3 text-base font-semibold leading-6 outline-none focus:border-[#35a95f]"
-          />
-          <p className="mt-1 text-right text-xs font-bold text-slate-400">
-            {board.notes.length}/500
-          </p>
-        </section>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="order-5 grid grid-cols-2 gap-2">
           <Button
             type="button"
             onClick={savePlan}
@@ -1158,7 +1263,7 @@ export function TacticsScreen({
           </Button>
         </div>
         {notice && (
-          <div className="sticky bottom-20 z-30 rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white shadow-xl">
+          <div className="sticky bottom-20 z-30 order-6 rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-black text-white shadow-xl">
             {notice}
           </div>
         )}
@@ -1167,14 +1272,12 @@ export function TacticsScreen({
         <AlertDialogContent className="rounded-[24px] p-5">
           <AlertDialogHeader className="place-items-start text-left">
             <AlertDialogTitle className="text-lg font-black">
-              {mode === 'position'
-                ? 'จัดผู้เล่นตามตำแหน่งใหม่?'
-                : 'ล้างแผน Animation?'}
+              {mode === 'position' ? 'จัดผู้เล่นอัตโนมัติใหม่?' : 'ล้างแผน Animation?'}
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left font-semibold leading-6">
               {mode === 'position'
-                ? 'ผู้เล่นที่มาวันนี้จะถูกจัดตามตำแหน่ง D, M, W และ F โดยคนแรกในคิว GK จะอยู่หน้าประตู ส่วน Animation และโน้ตจะยังอยู่'
-                : 'ทุกจังหวะและเส้นใน Animation จะถูกล้าง ส่วนตำแหน่งบนกระดานปกติและโน้ตจะยังอยู่'}
+                ? 'ระบบจะใช้จำนวนคนและแผนที่เลือก จัดผู้เล่นหน้าประตูตามคิว และจัดคนอื่นจากทุกตำแหน่งที่เล่นได้ ส่วน Animation และข้อมูลเดิมส่วนอื่นจะยังอยู่'
+                : 'ทุกจังหวะและเส้นใน Animation จะถูกล้าง ส่วนตำแหน่งบนกระดานปกติจะยังอยู่'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-2 grid grid-cols-2 bg-white">
@@ -1186,7 +1289,7 @@ export function TacticsScreen({
               onClick={resetCurrentMode}
               className="h-12 rounded-xl font-black"
             >
-              รีเซ็ต
+              {mode === 'position' ? 'จัดตำแหน่งใหม่' : 'รีเซ็ต'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

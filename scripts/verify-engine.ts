@@ -2,6 +2,7 @@ import { createDemoTournament, makeTeam } from '../lib/demo-data';
 import {
   assignGoalkeepers,
   calculateStandings,
+  calculateTopScorers,
   createTournament,
   extendTournamentByMatches,
   extendTournamentToEndTime,
@@ -14,10 +15,16 @@ import {
   scheduleMetrics,
   scheduleWindowMetrics,
   setMatchScore,
+  setMatchScorers,
   setMatchStatus,
   skipGoalkeeper,
   updateTournamentSettings,
 } from '../lib/football-engine';
+import {
+  autoPlaceTeamMarkers,
+  formationsForPlayerCount,
+  goalkeeperForTeam,
+} from '../lib/football-tactics';
 import { parseTournament } from '../lib/football-schema';
 import {
   MAX_SYNC_RETRY_MS,
@@ -192,11 +199,39 @@ assert(
   'A live score draft must persist without affecting standings before the match finishes',
 );
 
-const afterFinish = finishMatchWithScore(
+const liveScoreWithScorers = setMatchScorers(
   liveScoreDraft,
   liveScoreDraft.matches[0].id,
+  [
+    {
+      id: 'scorer-1',
+      teamId: liveScoreDraft.matches[0].teamAId,
+      playerId: liveScoreDraft.teams[0].players[1].id,
+      playerName: liveScoreDraft.teams[0].players[1].name,
+      goals: 2,
+    },
+    {
+      id: 'scorer-2',
+      teamId: liveScoreDraft.matches[0].teamBId,
+      playerName: 'Guest scorer',
+      goals: 1,
+    },
+  ],
+);
+assert(
+  calculateTopScorers(liveScoreWithScorers).length === 0,
+  'Live scorer drafts must not enter the top-scorer ranking before the match finishes',
+);
+
+const afterFinish = finishMatchWithScore(
+  liveScoreWithScorers,
+  liveScoreWithScorers.matches[0].id,
   3,
   1,
+);
+assert(
+  calculateTopScorers(afterFinish)[0]?.goals === 2,
+  'Finished scorer records must produce a descending top-scorer ranking',
 );
 assert(
   afterFinish.matches[0].status === 'finished' &&
@@ -300,11 +335,8 @@ for (let index = 0; index < 6; index += 1) {
 const [recommendedPair] = recommendUpcomingPairs(afterOneCycle, 1);
 assert(
   Boolean(recommendedPair) &&
-    pairMeetingCount(
-      afterOneCycle,
-      recommendedPair[0],
-      recommendedPair[1],
-    ) === 1,
+    pairMeetingCount(afterOneCycle, recommendedPair[0], recommendedPair[1]) ===
+      1,
   'The recommendation must prefer a pairing that has played fewer times',
 );
 const reopened = reopenFinishedMatch(afterFinish, afterFinish.matches[0].id);
@@ -373,6 +405,42 @@ assert(
   ),
   'Demo players must include the winger position',
 );
+const tacticMarkers = autoPlaceTeamMarkers({
+  team: tournament.teams[0],
+  isTeamA: true,
+  playerCount: 6,
+  formation: '1-3-2',
+  goalkeeperId: tournament.teams[0].players[2].id,
+});
+assert(
+  goalkeeperForTeam(tournament.teams[0])?.id ===
+    tournament.teams[0].gkRotation[0],
+  'Tactics Auto must use the first available player in the GK queue',
+);
+assert(
+  tacticMarkers.length === 6 &&
+    tacticMarkers[0].playerId === tournament.teams[0].players[2].id &&
+    tacticMarkers[0].x === 50 &&
+    tacticMarkers[0].y === 91 &&
+    tacticMarkers.every((marker) => Boolean(marker.playerId)),
+  'A formation must use the selected GK and only real players on the pitch',
+);
+assert(
+  formationsForPlayerCount(5).length === 4 &&
+    formationsForPlayerCount(6).length === 6 &&
+    formationsForPlayerCount(7).length === 7 &&
+    formationsForPlayerCount(7).includes('1-4-1-1'),
+  'Each player count must expose the expanded formation choices',
+);
+assert(
+  autoPlaceTeamMarkers({
+    team: tournament.teams[0],
+    isTeamA: true,
+    playerCount: 7,
+    formation: '1-4-1-1',
+  }).length === 7,
+  'Changing to seven players must immediately produce seven real player markers',
+);
 const legacyPlayersWithoutPositions = {
   ...tournament,
   teams: tournament.teams.map((team) => ({
@@ -422,9 +490,36 @@ assert(
   }) === null,
   'Runtime validation must reject impossible persisted score values',
 );
+assert(
+  parseTournament({
+    ...tournament,
+    matches: tournament.matches.map((match, index) =>
+      index === 0
+        ? {
+            ...match,
+            scorers: [
+              {
+                id: 'invalid-scorer',
+                teamId: tournament.teams[2].id,
+                playerName: 'Wrong team',
+                goals: 1,
+              },
+            ],
+          }
+        : match,
+    ),
+  }) === null,
+  'Runtime validation must reject scorer records from teams outside the match',
+);
 const persistedTactics = {
   teamAId: tournament.teams[0].id,
   teamBId: tournament.teams[1].id,
+  matchId: tournament.matches[0].id,
+  playerCount: 6 as const,
+  teamAFormation: '1-3-2' as const,
+  teamBFormation: 'auto' as const,
+  teamAGkPlayerId: tournament.matches[0].teamAGkPlayerId,
+  teamBGkPlayerId: tournament.matches[0].teamBGkPlayerId,
   markers: [
     {
       id: 'tactic-ball',
@@ -508,5 +603,5 @@ assert(
 );
 
 console.log(
-  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, live-score drafts, standings, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
+  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
 );

@@ -1,5 +1,6 @@
 import {
   PLAYER_POSITIONS,
+  TACTIC_FORMATIONS,
   TEAM_COLORS,
   type Match,
   type TacticMarker,
@@ -12,6 +13,7 @@ import {
 
 const TEAM_COLOR_SET = new Set<string>(TEAM_COLORS);
 const PLAYER_POSITION_SET = new Set<string>(PLAYER_POSITIONS);
+const TACTIC_FORMATION_SET = new Set<string>(TACTIC_FORMATIONS);
 const PERSISTED_PLAYER_POSITION_SET = new Set<string>([
   ...PLAYER_POSITIONS,
   'goalkeeper',
@@ -132,6 +134,28 @@ function parseMatch(value: unknown, teamIds: Set<string>): Match | null {
   for (const key of ['teamAGkPlayerId', 'teamBGkPlayerId'] as const) {
     if (value[key] !== undefined && !isString(value[key])) return null;
   }
+  if (value.scorers !== undefined) {
+    if (!Array.isArray(value.scorers) || value.scorers.length > 100)
+      return null;
+    const scorerIds: string[] = [];
+    for (const scorer of value.scorers) {
+      if (
+        !isRecord(scorer) ||
+        !isString(scorer.id) ||
+        !scorer.id ||
+        !isString(scorer.teamId) ||
+        (scorer.teamId !== value.teamAId && scorer.teamId !== value.teamBId) ||
+        !isString(scorer.playerName) ||
+        !scorer.playerName.trim() ||
+        scorer.playerName.length > 60 ||
+        !isIntegerBetween(scorer.goals, 1, 99) ||
+        (scorer.playerId !== undefined && !isString(scorer.playerId))
+      )
+        return null;
+      scorerIds.push(scorer.id);
+    }
+    if (!uniqueStrings(scorerIds)) return null;
+  }
   return value as Match;
 }
 
@@ -178,6 +202,21 @@ function parseTactics(
     !Array.isArray(value.markers) ||
     !isString(value.notes) ||
     !value.markers.every((marker) => parseMarker(marker, teamIds))
+  )
+    return null;
+  if (
+    (value.matchId !== undefined &&
+      (!isString(value.matchId) || !value.matchId)) ||
+    (value.playerCount !== undefined &&
+      ![5, 6, 7].includes(Number(value.playerCount))) ||
+    (value.teamAFormation !== undefined &&
+      (!isString(value.teamAFormation) ||
+        !TACTIC_FORMATION_SET.has(value.teamAFormation))) ||
+    (value.teamBFormation !== undefined &&
+      (!isString(value.teamBFormation) ||
+        !TACTIC_FORMATION_SET.has(value.teamBFormation))) ||
+    (value.teamAGkPlayerId !== undefined && !isString(value.teamAGkPlayerId)) ||
+    (value.teamBGkPlayerId !== undefined && !isString(value.teamBGkPlayerId))
   )
     return null;
   if (

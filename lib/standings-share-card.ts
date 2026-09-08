@@ -1,9 +1,13 @@
 import { COLOR_HEX } from '@/components/football/shared';
-import { addMinutes, calculateStandings } from '@/lib/football-engine';
+import {
+  addMinutes,
+  calculateStandings,
+  calculateTopScorers,
+} from '@/lib/football-engine';
 import type { TeamColor, Tournament } from '@/lib/football-types';
 
 const CARD_WIDTH = 1080;
-const CARD_HEIGHT = 1350;
+const CARD_HEIGHT = 1600;
 
 function roundedRect(
   context: CanvasRenderingContext2D,
@@ -124,6 +128,7 @@ export function renderStandingsShareCard(
   canvas.width = CARD_WIDTH;
   canvas.height = CARD_HEIGHT;
   const standings = calculateStandings(tournament);
+  const topScorers = calculateTopScorers(tournament, 3);
   const finishedCount = tournament.matches.filter(
     (match) => match.status === 'finished',
   ).length;
@@ -274,12 +279,58 @@ export function renderStandingsShareCard(
     summaryY + 47,
   );
 
+  const scorersY = summaryY + 122;
+  context.textAlign = 'left';
+  context.textBaseline = 'alphabetic';
+  context.fillStyle = '#071120';
+  context.font = `900 31px ${fontFamily}`;
+  context.fillText('🔥 ดาวซัลโว TOP 3', 66, scorersY + 30);
+  fillRoundedRect(context, 54, scorersY + 52, 972, 214, 28, '#ffffff');
+  if (topScorers.length) {
+    topScorers.forEach((scorer, index) => {
+      const team = tournament.teams.find((item) => item.id === scorer.teamId);
+      const center = scorersY + 88 + index * 62;
+      context.textBaseline = 'middle';
+      context.textAlign = 'center';
+      context.fillStyle = index === 0 ? '#11823b' : '#718096';
+      context.font = `900 26px ${fontFamily}`;
+      context.fillText(String(index + 1), 91, center);
+      if (team) drawTeamShirt(context, 137, center, 34, team.color);
+      context.textAlign = 'left';
+      context.fillStyle = '#071120';
+      context.font = `900 27px ${fontFamily}`;
+      context.fillText(
+        fitText(
+          context,
+          `${scorer.playerName}${team ? ` · ${team.name}` : ''}`,
+          650,
+        ),
+        166,
+        center,
+      );
+      context.textAlign = 'right';
+      context.fillStyle = '#087632';
+      context.font = `900 29px ${fontFamily}`;
+      context.fillText(`${scorer.goals} ประตู`, 985, center);
+    });
+  } else {
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillStyle = '#94a3b8';
+    context.font = `700 25px ${fontFamily}`;
+    context.fillText(
+      'เพิ่มชื่อผู้ทำประตูในแต่ละแมตช์เพื่อจัดอันดับ',
+      CARD_WIDTH / 2,
+      scorersY + 160,
+    );
+  }
+
   context.fillStyle = '#758198';
   context.font = `700 24px ${fontFamily}`;
   context.fillText(
     'ชนะ 3 แต้ม · เสมอ 1 แต้ม · แชร์จาก Football Match Maker',
     CARD_WIDTH / 2,
-    1282,
+    1560,
   );
   context.textAlign = 'left';
   context.textBaseline = 'alphabetic';
