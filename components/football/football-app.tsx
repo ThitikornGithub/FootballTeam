@@ -2565,7 +2565,7 @@ function SettingsScreen({
               {tournament.teams.map((team) => (
                 <div
                   key={team.id}
-                  className="flex min-w-0 flex-wrap items-center gap-2 rounded-xl bg-slate-50 p-2"
+                  className="flex min-w-0 items-center gap-2 rounded-xl bg-slate-50 px-2 py-1.5"
                 >
                   <TeamShirtIcon
                     color={teamColors[team.id] ?? team.color}
@@ -2574,7 +2574,7 @@ function SettingsScreen({
                   <span className="min-w-0 flex-1 truncate text-sm font-black">
                     {team.name}
                   </span>
-                  <div className="flex basis-full justify-end gap-1">
+                  <div className="flex shrink-0 justify-end gap-0.5">
                     {TEAM_COLORS.map((color) => (
                       <button
                         key={color}
@@ -2589,7 +2589,7 @@ function SettingsScreen({
                             [team.id]: color,
                           }))
                         }
-                        className={`h-7 w-7 rounded-full border-2 ${(teamColors[team.id] ?? team.color) === color ? 'ring-2 ring-[#11823b] ring-offset-1' : ''}`}
+                        className={`h-6 w-6 rounded-full border-2 ${(teamColors[team.id] ?? team.color) === color ? 'ring-2 ring-[#11823b] ring-offset-1' : ''}`}
                         style={{
                           background: COLOR_HEX[color],
                           borderColor: color === 'white' ? '#94a3b8' : '#fff',
@@ -2733,7 +2733,7 @@ function SettingsScreen({
           className="h-12 w-full rounded-xl font-black"
         >
           <Trash2 />
-          {gameId ? 'ออกจากเกมนี้' : 'ลบเกมบนอุปกรณ์นี้'}
+          {gameId ? 'ลบเกมส์นี้' : 'ลบเกมบนอุปกรณ์นี้'}
         </Button>
       </div>
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
