@@ -109,73 +109,154 @@ function fairRoundRobin(teamIds: string[]): Pair[] {
   return flattened;
 }
 
-function repeatedRoundRobin(teamIds: string[], matchCount: number): Pair[] {
+function pairKey(teamAId: string, teamBId: string) {
+  return [teamAId, teamBId].sort().join(':');
+}
+
+function includesTeam(pair: Pick<Pair, 'teamAId' | 'teamBId'>, teamId: string) {
+  return pair.teamAId === teamId || pair.teamBId === teamId;
+}
+
+function balancedFuturePairs(
+  teamIds: string[],
+  fixedMatches: Array<Pick<Match, 'teamAId' | 'teamBId'>>,
+  matchCount: number,
+  preferredPairs: Array<[string, string]> = [],
+) {
   if (teamIds.length < 2 || matchCount <= 0) return [];
+  const teamIdSet = new Set(teamIds);
+  const canonicalPairs = fairRoundRobin(teamIds);
+  const pairCounts = new Map(
+    canonicalPairs.map((pair) => [pairKey(pair.teamAId, pair.teamBId), 0]),
+  );
+  const teamCounts = new Map(teamIds.map((teamId) => [teamId, 0]));
+  const sequence: Array<Pick<Pair, 'teamAId' | 'teamBId'>> = [];
   const roundsPerCycle =
     teamIds.length % 2 === 0 ? teamIds.length - 1 : teamIds.length;
-  const pairs: Pair[] = [];
-  let cycle = 0;
 
-  while (pairs.length < matchCount) {
-    const orders = teamIds.flatMap((_, offset) => {
-      const rotated = [...teamIds.slice(offset), ...teamIds.slice(0, offset)];
-      return [rotated, [...rotated].reverse()];
-    });
-    const previous = pairs.at(-1);
-    const candidates = orders.map((order) => fairRoundRobin(order));
-    const cyclePairs =
-      cycle === 0
-        ? candidates[0]
-        : (candidates.find((candidate) => {
-            const first = candidate[0];
-            return (
-              !previous ||
-              ![previous.teamAId, previous.teamBId].some(
-                (id) => id === first.teamAId || id === first.teamBId,
-              )
-            );
-          }) ?? candidates[cycle % candidates.length]);
-
-    pairs.push(
-      ...cyclePairs.map((pair) => ({
-        ...pair,
-        roundNumber: pair.roundNumber + cycle * roundsPerCycle,
-      })),
-    );
-    cycle += 1;
+  function record(pair: Pick<Pair, 'teamAId' | 'teamBId'>) {
+    const key = pairKey(pair.teamAId, pair.teamBId);
+    if (!pairCounts.has(key)) return;
+    pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
+    teamCounts.set(pair.teamAId, (teamCounts.get(pair.teamAId) ?? 0) + 1);
+    teamCounts.set(pair.teamBId, (teamCounts.get(pair.teamBId) ?? 0) + 1);
+    sequence.push(pair);
   }
 
-  return pairs.slice(0, matchCount);
-}
+  fixedMatches.forEach(record);
+  const generated: Pair[] = [];
+  function appendPair(canonical: Pair, orientation?: [string, string]) {
+    const key = pairKey(canonical.teamAId, canonical.teamBId);
+    const previousCount = pairCounts.get(key) ?? 0;
+    const useReverse = !orientation && previousCount % 2 === 1;
+    const teamAId =
+      orientation?.[0] ??
+      (useReverse ? canonical.teamBId : canonical.teamAId);
+    const teamBId =
+      orientation?.[1] ??
+      (useReverse ? canonical.teamAId : canonical.teamBId);
+    const pair = {
+      teamAId,
+      teamBId,
+      roundNumber: canonical.roundNumber + previousCount * roundsPerCycle,
+    };
+    generated.push(pair);
+    record(pair);
+  }
 
-function preferredPairFirst(
-  pairs: Pair[],
-  preferredTeamIds?: [string, string],
-) {
-  return preferredPairsFirst(pairs, preferredTeamIds ? [preferredTeamIds] : []);
-}
-
-function preferredPairsFirst(
-  pairs: Pair[],
-  preferredPairs: Array<[string, string]>,
-) {
-  if (!preferredPairs.length) return pairs;
-  const remaining = [...pairs];
-  const prioritized: Pair[] = [];
+  const usedPreferred = new Set<string>();
   for (const [teamAId, teamBId] of preferredPairs) {
-    const preferredIndex = remaining.findIndex(
-      (pair) =>
-        (pair.teamAId === teamAId && pair.teamBId === teamBId) ||
-        (pair.teamAId === teamBId && pair.teamBId === teamAId),
+    if (
+      generated.length >= matchCount ||
+      teamAId === teamBId ||
+      !teamIdSet.has(teamAId) ||
+      !teamIdSet.has(teamBId)
+    )
+      continue;
+    const key = pairKey(teamAId, teamBId);
+    if (usedPreferred.has(key)) continue;
+    const canonical = canonicalPairs.find(
+      (pair) => pairKey(pair.teamAId, pair.teamBId) === key,
     );
-    const [preferred] = remaining.splice(
-      preferredIndex >= 0 ? preferredIndex : 0,
-      1,
-    );
-    if (!preferred) continue;
-    prioritized.push({ ...preferred, teamAId, teamBId });
+    if (!canonical) continue;
+    usedPreferred.add(key);
+    appendPair(canonical, [teamAId, teamBId]);
   }
-  return [...prioritized, ...remaining];
+
+  while (generated.length < matchCount) {
+    const last = sequence.at(-1);
+    const previous = sequence.at(-2);
+    const ranked = canonicalPairs
+      .map((pair, canonicalIndex) => {
+        const teams = [pair.teamAId, pair.teamBId];
+        const threeInARow = teams.filter(
+          (teamId) =>
+            last &&
+            previous &&
+            includesTeam(last, teamId) &&
+            includesTeam(previous, teamId),
+        ).length;
+        const overlapsLast = last
+          ? teams.filter((teamId) => includesTeam(last, teamId)).length
+          : 0;
+        return {
+          pair,
+          canonicalIndex,
+          pairCount: pairCounts.get(pairKey(pair.teamAId, pair.teamBId)) ?? 0,
+          threeInARow,
+          overlapsLast,
+          teamLoad:
+            (teamCounts.get(pair.teamAId) ?? 0) +
+            (teamCounts.get(pair.teamBId) ?? 0),
+        };
+      })
+      .sort(
+        (a, b) =>
+          a.pairCount - b.pairCount ||
+          a.threeInARow - b.threeInARow ||
+          a.overlapsLast - b.overlapsLast ||
+          a.teamLoad - b.teamLoad ||
+          a.canonicalIndex - b.canonicalIndex,
+      );
+    const next = ranked[0]?.pair;
+    if (!next) break;
+    appendPair(next);
+  }
+
+  return generated;
+}
+
+function lockedMatchesForPlanning(tournament: Tournament) {
+  const hasFinished = tournament.matches.some(
+    (match) => match.status === 'finished',
+  );
+  return hasFinished
+    ? tournament.matches.filter((match) => match.status !== 'upcoming')
+    : [];
+}
+
+export function recommendUpcomingPairs(
+  tournament: Tournament,
+  matchCount = 2,
+  preferredPairs: Array<[string, string]> = [],
+): Array<[string, string]> {
+  return balancedFuturePairs(
+    tournament.teams.map((team) => team.id),
+    lockedMatchesForPlanning(tournament),
+    matchCount,
+    preferredPairs,
+  ).map((pair) => [pair.teamAId, pair.teamBId]);
+}
+
+export function pairMeetingCount(
+  tournament: Tournament,
+  teamAId: string,
+  teamBId: string,
+) {
+  const key = pairKey(teamAId, teamBId);
+  return lockedMatchesForPlanning(tournament).filter(
+    (match) => pairKey(match.teamAId, match.teamBId) === key,
+  ).length;
 }
 
 export function scheduleWindowMetrics(
@@ -322,12 +403,11 @@ export function createTournament(config: ScheduleConfig): Tournament {
     config.startTime,
     config.availableTimeMinutes,
   );
-  const pairs = preferredPairFirst(
-    repeatedRoundRobin(
-      config.teams.map((team) => team.id),
-      windowMetrics.matchCount,
-    ),
-    config.firstMatchTeamIds,
+  const pairs = balancedFuturePairs(
+    config.teams.map((team) => team.id),
+    [],
+    windowMetrics.matchCount,
+    config.firstMatchTeamIds ? [config.firstMatchTeamIds] : [],
   );
   const matches: Match[] = pairs.map((pair, index) => ({
     id: makeId('match'),
@@ -382,13 +462,14 @@ export function updateTournamentSettings(
   const targetCount = Math.max(windowMetrics.matchCount, protectedCount);
   const slotMinutes =
     settings.matchDurationMinutes + settings.breakDurationMinutes;
-  const generatedPairs = repeatedRoundRobin(
+  const generatedPairs = balancedFuturePairs(
     tournament.teams.map((team) => team.id),
-    targetCount,
+    tournament.matches,
+    Math.max(0, targetCount - tournament.matches.length),
   );
   const matches: Match[] = Array.from({ length: targetCount }, (_, index) => {
     const existing = tournament.matches[index];
-    const pair = generatedPairs[index];
+    const pair = generatedPairs[index - tournament.matches.length];
     return existing
       ? {
           ...existing,
@@ -439,11 +520,13 @@ export function reshuffleUpcomingMatches(
   );
   if (!editableMatches.length) return tournament;
 
-  const generatedPairs = preferredPairsFirst(
-    repeatedRoundRobin(
-      tournament.teams.map((team) => team.id),
-      editableMatches.length,
-    ),
+  const lockedMatches = tournament.matches.filter(
+    (match) => match.status === 'finished' || match.id === lockedCurrent?.id,
+  );
+  const generatedPairs = balancedFuturePairs(
+    tournament.teams.map((team) => team.id),
+    lockedMatches,
+    editableMatches.length,
     preferredPairs,
   );
   const slotMinutes =
@@ -492,13 +575,17 @@ export function extendTournamentToEndTime(tournament: Tournament): Tournament {
 
   const slotMinutes =
     tournament.matchDurationMinutes + tournament.breakDurationMinutes;
-  const pairs = repeatedRoundRobin(
+  const pairs = balancedFuturePairs(
     tournament.teams.map((team) => team.id),
-    windowMetrics.matchCount,
+    tournament.matches,
+    windowMetrics.matchCount - tournament.matches.length,
+  );
+  const hasCurrent = tournament.matches.some(
+    (match) => match.status === 'current',
   );
   const matches = [
     ...tournament.matches,
-    ...pairs.slice(tournament.matches.length).map((pair, offset) => {
+    ...pairs.map((pair, offset) => {
       const index = tournament.matches.length + offset;
       return {
         id: makeId('match'),
@@ -507,7 +594,10 @@ export function extendTournamentToEndTime(tournament: Tournament): Tournament {
         teamAId: pair.teamAId,
         teamBId: pair.teamBId,
         startTime: addMinutes(tournament.startTime, index * slotMinutes),
-        status: 'upcoming' as const,
+        status:
+          !hasCurrent && offset === 0
+            ? ('current' as const)
+            : ('upcoming' as const),
       };
     }),
   ];

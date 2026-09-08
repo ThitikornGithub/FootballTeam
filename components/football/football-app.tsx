@@ -84,6 +84,8 @@ import {
   extendTournamentToEndTime,
   finishMatchWithScore,
   minutesBetween,
+  pairMeetingCount,
+  recommendUpcomingPairs,
   reshuffleUpcomingMatches,
   reopenFinishedMatch,
   reorder,
@@ -2345,6 +2347,8 @@ function SettingsPairPicker({
   teamBId,
   onTeamAChange,
   onTeamBChange,
+  meetingCount,
+  recommendation,
   disabled = false,
 }: {
   label: string;
@@ -2353,6 +2357,8 @@ function SettingsPairPicker({
   teamBId: string;
   onTeamAChange: (teamId: string) => void;
   onTeamBChange: (teamId: string) => void;
+  meetingCount?: number;
+  recommendation?: [string, string];
   disabled?: boolean;
 }) {
   function renderTeam(team: Team) {
@@ -2366,6 +2372,18 @@ function SettingsPairPicker({
       </span>
     );
   }
+
+  const recommendationA = teams.find(
+    (team) => team.id === recommendation?.[0],
+  );
+  const recommendationB = teams.find(
+    (team) => team.id === recommendation?.[1],
+  );
+  const selectedIsRecommended = Boolean(
+    recommendation &&
+      ((teamAId === recommendation[0] && teamBId === recommendation[1]) ||
+        (teamAId === recommendation[1] && teamBId === recommendation[0])),
+  );
 
   return (
     <fieldset className="rounded-2xl border border-slate-100 bg-slate-50 p-2.5">
@@ -2437,6 +2455,37 @@ function SettingsPairPicker({
           </SelectContent>
         </Select>
       </div>
+      {typeof meetingCount === 'number' && (
+        <div className="mt-2 space-y-1.5">
+          <p className="px-1 text-xs font-bold text-slate-500">
+            คู่นี้เล่นแล้วหรือกำลังเล่น {meetingCount} ครั้ง
+          </p>
+          {selectedIsRecommended ? (
+            <p className="rounded-xl bg-[#e5f4e9] px-2.5 py-2 text-xs font-black text-[#087632]">
+              ✓ ระบบแนะนำคู่นี้เพื่อให้จำนวนการพบกันสมดุล
+            </p>
+          ) : recommendationA && recommendationB ? (
+            <button
+              type="button"
+              onClick={() => {
+                onTeamAChange(recommendationA.id);
+                onTeamBChange(recommendationB.id);
+              }}
+              className="flex min-h-10 w-full items-center justify-between gap-2 rounded-xl bg-[#e5f4e9] px-2.5 py-2 text-left text-xs font-black text-[#087632]"
+            >
+              <span className="min-w-0">คู่แนะนำ</span>
+              <span className="flex min-w-0 items-center gap-1">
+                <TeamShirtIcon color={recommendationA.color} size="xs" />
+                <span className="truncate">{recommendationA.name}</span>
+                <span>vs</span>
+                <TeamShirtIcon color={recommendationB.color} size="xs" />
+                <span className="truncate">{recommendationB.name}</span>
+              </span>
+              <span className="shrink-0">ใช้คู่นี้</span>
+            </button>
+          ) : null}
+        </div>
+      )}
     </fieldset>
   );
 }
@@ -2493,19 +2542,28 @@ function SettingsScreen({
   );
   const firstQueuedMatch = configurableMatches[0];
   const secondQueuedMatch = configurableMatches[1];
+  const initialRecommendations = recommendUpcomingPairs(tournament, 2);
   const fallbackTeamA = tournament.teams[0]?.id ?? '';
   const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
   const [firstPairA, setFirstPairA] = useState(
-    firstQueuedMatch?.teamAId ?? fallbackTeamA,
+    (finishedCount > 0 ? initialRecommendations[0]?.[0] : undefined) ??
+      firstQueuedMatch?.teamAId ??
+      fallbackTeamA,
   );
   const [firstPairB, setFirstPairB] = useState(
-    firstQueuedMatch?.teamBId ?? fallbackTeamB,
+    (finishedCount > 0 ? initialRecommendations[0]?.[1] : undefined) ??
+      firstQueuedMatch?.teamBId ??
+      fallbackTeamB,
   );
   const [secondPairA, setSecondPairA] = useState(
-    secondQueuedMatch?.teamAId ?? fallbackTeamA,
+    (finishedCount > 0 ? initialRecommendations[1]?.[0] : undefined) ??
+      secondQueuedMatch?.teamAId ??
+      fallbackTeamA,
   );
   const [secondPairB, setSecondPairB] = useState(
-    secondQueuedMatch?.teamBId ?? fallbackTeamB,
+    (finishedCount > 0 ? initialRecommendations[1]?.[1] : undefined) ??
+      secondQueuedMatch?.teamBId ??
+      fallbackTeamB,
   );
   const [useSecondPair, setUseSecondPair] = useState(
     Boolean(secondQueuedMatch),
@@ -2543,6 +2601,12 @@ function SettingsScreen({
     availableMinutes > 0 &&
     resultingCount > 0 &&
     pairSelectionValid;
+  const firstRecommendation =
+    finishedCount > 0 ? recommendUpcomingPairs(tournament, 1)[0] : undefined;
+  const secondRecommendation =
+    finishedCount > 0
+      ? recommendUpcomingPairs(tournament, 2, [[firstPairA, firstPairB]])[1]
+      : undefined;
 
   function saveSettings() {
     if (!valid) return;
@@ -2635,7 +2699,7 @@ function SettingsScreen({
           <div className="border-t border-slate-100 pt-4">
             <h2 className="section-title">สีเสื้อทีม</h2>
             <p className="section-note">
-              เปลี่ยนสีหน้างานได้โดยไม่กระทบรายชื่อหรือผลแข่ง
+              เปลี่ยนเฉพาะสีที่แสดง ประวัติการพบกันยังนับเป็นทีมเดิม
             </p>
             <div className="mt-3 space-y-2">
               {tournament.teams.map((team) => (
@@ -2751,6 +2815,12 @@ function SettingsScreen({
                   teamBId={firstPairB}
                   onTeamAChange={setFirstPairA}
                   onTeamBChange={setFirstPairB}
+                  meetingCount={
+                    finishedCount > 0
+                      ? pairMeetingCount(tournament, firstPairA, firstPairB)
+                      : undefined
+                  }
+                  recommendation={firstRecommendation}
                 />
                 <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 text-sm font-black text-slate-700">
                   <span>
@@ -2776,6 +2846,16 @@ function SettingsScreen({
                     teamBId={secondPairB}
                     onTeamAChange={setSecondPairA}
                     onTeamBChange={setSecondPairB}
+                    meetingCount={
+                      finishedCount > 0
+                        ? pairMeetingCount(
+                            tournament,
+                            secondPairA,
+                            secondPairB,
+                          )
+                        : undefined
+                    }
+                    recommendation={secondRecommendation}
                   />
                 )}
                 {useSecondPair && remainingAfterSave < 2 && (

@@ -1,11 +1,14 @@
-import { createDemoTournament } from '../lib/demo-data';
+import { createDemoTournament, makeTeam } from '../lib/demo-data';
 import {
   assignGoalkeepers,
   calculateStandings,
+  createTournament,
   extendTournamentByMatches,
   extendTournamentToEndTime,
   finishMatchWithScore,
   minutesBetween,
+  pairMeetingCount,
+  recommendUpcomingPairs,
   reopenFinishedMatch,
   reshuffleUpcomingMatches,
   scheduleMetrics,
@@ -21,9 +24,19 @@ import {
   newestPendingState,
   syncRetryDelayMs,
 } from '../lib/football-sync';
+import { TEAM_COLORS, type Match } from '../lib/football-types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+function meetingCounts(matches: Match[]) {
+  const counts = new Map<string, number>();
+  for (const match of matches) {
+    const key = [match.teamAId, match.teamBId].sort().join(':');
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return [...counts.values()];
 }
 
 const tournament = createDemoTournament();
@@ -43,6 +56,35 @@ assert(
   new Set(pairKeys.slice(0, 6)).size === 6,
   'Every pair must appear exactly once before the next cycle',
 );
+
+for (let teamCount = 2; teamCount <= 8; teamCount += 1) {
+  const teams = Array.from({ length: teamCount }, (_, index) =>
+    makeTeam(`Team ${index + 1}`, TEAM_COLORS[index]),
+  );
+  const pairCount = (teamCount * (teamCount - 1)) / 2;
+  const generated = createTournament({
+    name: `${teamCount} teams`,
+    teams,
+    firstMatchTeamIds: [teams.at(-1)!.id, teams[0].id],
+    matchDurationMinutes: 7,
+    breakDurationMinutes: 1,
+    startTime: '19:00',
+    availableTimeMinutes: pairCount * 8,
+  });
+  assert(
+    meetingCounts(generated.matches).length === pairCount,
+    `A ${teamCount}-team first cycle must contain every pairing exactly once`,
+  );
+  let extended = generated;
+  for (let index = 0; index < 3; index += 1) {
+    extended = extendTournamentByMatches(extended, 1);
+  }
+  const extendedCounts = meetingCounts(extended.matches);
+  assert(
+    Math.max(...extendedCounts) - Math.min(...extendedCounts) <= 1,
+    `A ${teamCount}-team schedule must stay balanced after repeated extensions`,
+  );
+}
 
 for (const team of tournament.teams) {
   const teamMatches = tournament.matches.filter(
@@ -219,12 +261,13 @@ assert(
     reshuffledAfterStart.matches[3].teamBId === teamFour.id,
   'Preferred pairs must become the first and second matches after the live match',
 );
-const reshuffledFutureCycle = reshuffledAfterStart.matches
-  .slice(2, 8)
-  .map((match) => [match.teamAId, match.teamBId].sort().join(':'));
+const reshuffledMeetingCounts = meetingCounts(reshuffledAfterStart.matches);
 assert(
-  new Set(reshuffledFutureCycle).size === 6,
-  'The reshuffled future cycle must still contain every four-team pairing',
+  reshuffledMeetingCounts.length === 6 &&
+    Math.max(...reshuffledMeetingCounts) -
+      Math.min(...reshuffledMeetingCounts) <=
+      1,
+  'Reshuffling must balance every pairing across the complete schedule',
 );
 const reshuffledOpening = reshuffleUpcomingMatches(tournament, [
   [teamThree.id, teamOne.id],
@@ -246,6 +289,24 @@ assert(
   ).size === 6,
   'Choosing the opening pairs must still keep every pairing in the first cycle',
 );
+let afterOneCycle = tournament;
+for (let index = 0; index < 6; index += 1) {
+  const current = afterOneCycle.matches.find(
+    (match) => match.status === 'current',
+  );
+  assert(current, 'A current match must exist while completing a cycle');
+  afterOneCycle = finishMatchWithScore(afterOneCycle, current.id, 0, 0);
+}
+const [recommendedPair] = recommendUpcomingPairs(afterOneCycle, 1);
+assert(
+  Boolean(recommendedPair) &&
+    pairMeetingCount(
+      afterOneCycle,
+      recommendedPair[0],
+      recommendedPair[1],
+    ) === 1,
+  'The recommendation must prefer a pairing that has played fewer times',
+);
 const reopened = reopenFinishedMatch(afterFinish, afterFinish.matches[0].id);
 assert(
   reopened.matches[0].status === 'current' &&
@@ -259,6 +320,32 @@ assert(
     continuedTournament.availableTimeMinutes === 192 &&
     continuedTournament.matches.at(-1)?.startTime === '22:00',
   'Playing on must add one match and extend the end time by one slot',
+);
+let completedTournament = reshuffledOpening;
+while (true) {
+  const current = completedTournament.matches.find(
+    (match) => match.status === 'current',
+  );
+  if (!current) break;
+  completedTournament = finishMatchWithScore(
+    completedTournament,
+    current.id,
+    0,
+    0,
+  );
+}
+let extendedThreeTimes = completedTournament;
+for (let index = 0; index < 3; index += 1) {
+  extendedThreeTimes = extendTournamentByMatches(extendedThreeTimes, 1);
+}
+const overtimeMeetingCounts = meetingCounts(extendedThreeTimes.matches);
+assert(
+  extendedThreeTimes.matches.length === 18 &&
+    extendedThreeTimes.matches.filter((match) => match.status === 'current')
+      .length === 1 &&
+    overtimeMeetingCounts.length === 6 &&
+    overtimeMeetingCounts.every((count) => count === 3),
+  'Adding three matches after a custom schedule must recommend the missing pairs and restore perfect balance',
 );
 const switchedCurrent = setMatchStatus(
   tournament,
@@ -421,5 +508,5 @@ assert(
 );
 
 console.log(
-  'Engine checks passed: defaults, repeats, opening pairs, future reshuffling, player positions, live-score drafts, standings, overtime, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
+  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, live-score drafts, standings, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
 );
