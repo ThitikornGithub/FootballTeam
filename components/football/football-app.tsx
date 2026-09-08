@@ -84,7 +84,7 @@ import {
   extendTournamentToEndTime,
   finishMatchWithScore,
   minutesBetween,
-  prioritizeUpcomingMatches,
+  reshuffleUpcomingMatches,
   reopenFinishedMatch,
   reorder,
   scheduleMetrics,
@@ -987,9 +987,9 @@ function SetupScreen({
         </section>
         <section className="settings-card">
           <div className="mb-3">
-            <h2 className="section-title">กำหนดคู่แรก</h2>
+            <h2 className="section-title">กำหนดคู่เปิดสนาม</h2>
             <p className="section-note">
-              เลือกทีมที่พร้อมลงสนามก่อน ระหว่างรอทีมอื่นมาให้ครบ
+              เลือกสีเสื้อของสองทีมแรกที่จะแข่ง แล้วระบบจะจัดคู่ที่เหลือให้ครบ
             </p>
           </div>
           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
@@ -2480,11 +2480,19 @@ function SettingsScreen({
   const [endTime, setEndTime] = useState(
     addMinutes(tournament.startTime, tournament.availableTimeMinutes),
   );
-  const editableMatches = tournament.matches.filter(
-    (match) => match.status !== 'finished',
+  const finishedCount = tournament.matches.filter(
+    (match) => match.status === 'finished',
+  ).length;
+  const lockedCurrent =
+    finishedCount > 0
+      ? tournament.matches.find((match) => match.status === 'current')
+      : undefined;
+  const configurableMatches = tournament.matches.filter(
+    (match) =>
+      match.status !== 'finished' && match.id !== lockedCurrent?.id,
   );
-  const firstQueuedMatch = editableMatches[0];
-  const secondQueuedMatch = editableMatches[1];
+  const firstQueuedMatch = configurableMatches[0];
+  const secondQueuedMatch = configurableMatches[1];
   const fallbackTeamA = tournament.teams[0]?.id ?? '';
   const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
   const [firstPairA, setFirstPairA] = useState(
@@ -2515,10 +2523,10 @@ function SettingsScreen({
     0,
   );
   const resultingCount = Math.max(windowMetrics.matchCount, protectedCount);
-  const finishedCount = tournament.matches.filter(
-    (match) => match.status === 'finished',
-  ).length;
-  const remainingAfterSave = Math.max(0, resultingCount - finishedCount);
+  const remainingAfterSave = Math.max(
+    0,
+    resultingCount - finishedCount - (lockedCurrent ? 1 : 0),
+  );
   const samePairTwice =
     useSecondPair &&
     ((firstPairA === secondPairA && firstPairB === secondPairB) ||
@@ -2556,7 +2564,7 @@ function SettingsScreen({
     if (useSecondPair) preferredPairs.push([secondPairA, secondPairB]);
     onSave(
       remainingAfterSave > 0
-        ? prioritizeUpcomingMatches(updatedWithColors, preferredPairs)
+        ? reshuffleUpcomingMatches(updatedWithColors, preferredPairs)
         : updatedWithColors,
     );
   }
@@ -2725,19 +2733,19 @@ function SettingsScreen({
             <div>
               <h2 className="section-title">
                 {finishedCount > 0
-                  ? 'กำหนด 2 คู่ถัดไป'
-                  : 'กำหนดคู่ที่ 1 และคู่ที่ 2'}
+                  ? 'กำหนดเกมถัดไป'
+                  : 'กำหนดคู่เปิดสนาม'}
               </h2>
               <p className="section-note">
                 {finishedCount > 0
-                  ? 'เลือกทีมสำหรับสองแมตช์ถัดไป โดยผลที่จบแล้วจะไม่เปลี่ยน'
-                  : 'เลือกทีมที่จะลงเล่นในแมตช์แรกและแมตช์ที่สอง'}
+                  ? 'เกมที่กำลังแข่งจะไม่เปลี่ยน ระบบจะจัดเกมที่เหลือใหม่ให้ทุกทีมพบกันครบ'
+                  : 'เลือกสีเสื้อของสองทีมแรก แล้วระบบจะจัดเกมที่เหลือให้ทุกทีมพบกันครบ'}
               </p>
             </div>
             {remainingAfterSave > 0 ? (
               <>
                 <SettingsPairPicker
-                  label={finishedCount > 0 ? 'คู่ถัดไป ลำดับที่ 1' : 'คู่ที่ 1'}
+                  label={finishedCount > 0 ? 'เกมถัดไป' : 'คู่เปิดสนาม'}
                   teams={selectableTeams}
                   teamAId={firstPairA}
                   teamBId={firstPairB}
@@ -2747,7 +2755,7 @@ function SettingsScreen({
                 <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 text-sm font-black text-slate-700">
                   <span>
                     {finishedCount > 0
-                      ? 'กำหนดคู่ถัดไป ลำดับที่ 2 ด้วย'
+                      ? 'กำหนดเกมถัดไปอีก 1 คู่'
                       : 'กำหนดคู่ที่ 2 ด้วย'}
                   </span>
                   <input
@@ -2761,7 +2769,7 @@ function SettingsScreen({
                 {useSecondPair && (
                   <SettingsPairPicker
                     label={
-                      finishedCount > 0 ? 'คู่ถัดไป ลำดับที่ 2' : 'คู่ที่ 2'
+                      finishedCount > 0 ? 'เกมถัดไปลำดับที่ 2' : 'คู่ที่ 2'
                     }
                     teams={selectableTeams}
                     teamAId={secondPairA}

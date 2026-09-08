@@ -7,11 +7,13 @@ import {
   finishMatchWithScore,
   minutesBetween,
   reopenFinishedMatch,
+  reshuffleUpcomingMatches,
   scheduleMetrics,
   scheduleWindowMetrics,
   setMatchScore,
   setMatchStatus,
   skipGoalkeeper,
+  updateTournamentSettings,
 } from '../lib/football-engine';
 import { parseTournament } from '../lib/football-schema';
 import {
@@ -167,6 +169,82 @@ assert(
     standings[0].points === 3 &&
     standings[0].goalDifference === 2,
   'A saved result must update the standings',
+);
+const [teamOne, teamTwo, teamThree, teamFour] = afterFinish.teams;
+const updatedDuringPlay = updateTournamentSettings(afterFinish, {
+  name: afterFinish.name,
+  matchDurationMinutes: 8,
+  breakDurationMinutes: 1,
+  startTime: afterFinish.startTime,
+  availableTimeMinutes: afterFinish.availableTimeMinutes,
+});
+assert(
+  updatedDuringPlay.matches[1].teamAId === afterFinish.matches[1].teamAId &&
+    updatedDuringPlay.matches[1].teamBId === afterFinish.matches[1].teamBId &&
+    updatedDuringPlay.matches[1].teamAGkPlayerId ===
+      afterFinish.matches[1].teamAGkPlayerId &&
+    updatedDuringPlay.matches[1].teamBGkPlayerId ===
+      afterFinish.matches[1].teamBGkPlayerId &&
+    updatedDuringPlay.matches[1].status === 'current',
+  'Changing time settings during play must preserve the live pairing and goalkeepers',
+);
+const reshuffledAfterStart = reshuffleUpcomingMatches(updatedDuringPlay, [
+  [teamOne.id, teamTwo.id],
+  [teamThree.id, teamFour.id],
+]);
+assert(
+  reshuffledAfterStart.matches[0].id === afterFinish.matches[0].id &&
+    reshuffledAfterStart.matches[0].status === 'finished' &&
+    reshuffledAfterStart.matches[0].teamAScore === 3 &&
+    reshuffledAfterStart.matches[0].teamBScore === 1,
+  'Reshuffling must preserve every finished match and its score',
+);
+assert(
+  reshuffledAfterStart.matches[1].id === afterFinish.matches[1].id &&
+    reshuffledAfterStart.matches[1].status === 'current' &&
+    reshuffledAfterStart.matches[1].teamAId ===
+      afterFinish.matches[1].teamAId &&
+    reshuffledAfterStart.matches[1].teamBId ===
+      afterFinish.matches[1].teamBId &&
+    reshuffledAfterStart.matches[1].teamAGkPlayerId ===
+      afterFinish.matches[1].teamAGkPlayerId &&
+    reshuffledAfterStart.matches[1].teamBGkPlayerId ===
+      afterFinish.matches[1].teamBGkPlayerId,
+  'Reshuffling during play must preserve the live match and its goalkeepers',
+);
+assert(
+  reshuffledAfterStart.matches[2].teamAId === teamOne.id &&
+    reshuffledAfterStart.matches[2].teamBId === teamTwo.id &&
+    reshuffledAfterStart.matches[3].teamAId === teamThree.id &&
+    reshuffledAfterStart.matches[3].teamBId === teamFour.id,
+  'Preferred pairs must become the first and second matches after the live match',
+);
+const reshuffledFutureCycle = reshuffledAfterStart.matches
+  .slice(2, 8)
+  .map((match) => [match.teamAId, match.teamBId].sort().join(':'));
+assert(
+  new Set(reshuffledFutureCycle).size === 6,
+  'The reshuffled future cycle must still contain every four-team pairing',
+);
+const reshuffledOpening = reshuffleUpcomingMatches(tournament, [
+  [teamThree.id, teamOne.id],
+  [teamTwo.id, teamFour.id],
+]);
+assert(
+  reshuffledOpening.matches[0].status === 'current' &&
+    reshuffledOpening.matches[0].teamAId === teamThree.id &&
+    reshuffledOpening.matches[0].teamBId === teamOne.id &&
+    reshuffledOpening.matches[1].teamAId === teamTwo.id &&
+    reshuffledOpening.matches[1].teamBId === teamFour.id,
+  'Before play starts, the selected opening pair and second pair must lead the reshuffled schedule',
+);
+assert(
+  new Set(
+    reshuffledOpening.matches
+      .slice(0, 6)
+      .map((match) => [match.teamAId, match.teamBId].sort().join(':')),
+  ).size === 6,
+  'Choosing the opening pairs must still keep every pairing in the first cycle',
 );
 const reopened = reopenFinishedMatch(afterFinish, afterFinish.matches[0].id);
 assert(
@@ -343,5 +421,5 @@ assert(
 );
 
 console.log(
-  'Engine checks passed: defaults, repeats, player positions, live-score drafts, standings, overtime, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
+  'Engine checks passed: defaults, repeats, opening pairs, future reshuffling, player positions, live-score drafts, standings, overtime, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
 );
