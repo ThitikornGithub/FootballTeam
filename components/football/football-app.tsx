@@ -176,7 +176,13 @@ type AppView =
   | 'standings'
   | 'share'
   | 'games';
-type SyncStatus = 'local' | 'saving' | 'saved' | 'error' | 'conflict';
+type SyncStatus =
+  | 'local'
+  | 'loading'
+  | 'saving'
+  | 'saved'
+  | 'error'
+  | 'conflict';
 
 function readLocalBackup() {
   try {
@@ -985,7 +991,7 @@ function HomeScreen({
             title={`สถานะข้อมูล: ${syncStatus}`}
             className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 min-[350px]:px-2.5 text-xs font-black ${syncStatus === 'conflict' ? 'bg-orange-50 text-orange-700' : syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
           >
-            {syncStatus === 'saving' ? (
+            {syncStatus === 'saving' || syncStatus === 'loading' ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
             ) : syncStatus === 'error' ||
               syncStatus === 'local' ||
@@ -995,15 +1001,17 @@ function HomeScreen({
               <Cloud className="h-4 w-4" />
             )}
             <span className="hidden min-[350px]:inline">
-              {syncStatus === 'saving'
-                ? 'กำลังบันทึก'
-                : syncStatus === 'saved'
-                  ? 'บันทึกแล้ว'
-                  : syncStatus === 'error'
-                    ? 'ซิงก์ไม่สำเร็จ'
-                    : syncStatus === 'conflict'
-                      ? 'ข้อมูลชนกัน'
-                      : 'เฉพาะเครื่อง'}
+              {syncStatus === 'loading'
+                ? 'กำลังอัปเดต'
+                : syncStatus === 'saving'
+                  ? 'กำลังบันทึก'
+                  : syncStatus === 'saved'
+                    ? 'บันทึกแล้ว'
+                    : syncStatus === 'error'
+                      ? 'ซิงก์ไม่สำเร็จ'
+                      : syncStatus === 'conflict'
+                        ? 'ข้อมูลชนกัน'
+                        : 'เฉพาะเครื่อง'}
             </span>
           </div>
         }
@@ -3278,6 +3286,7 @@ export default function FootballApp() {
   const queuedStateRef = useRef<Tournament | null>(null);
   const saveInFlightRef = useRef(false);
   const dirtyRef = useRef(false);
+  const remoteHydrationInFlightRef = useRef(false);
   const retryTimerRef = useRef<number | null>(null);
   const retryAttemptRef = useRef(0);
 
@@ -3394,6 +3403,19 @@ export default function FootballApp() {
       if (pathGameId) {
         gameIdRef.current = pathGameId;
         setGameId(pathGameId);
+        const backupForGame =
+          backup.gameId === pathGameId ? backup.tournament : null;
+        if (backupForGame) {
+          const cachedValue = extendTournamentToEndTime(backupForGame);
+          tournamentRef.current = cachedValue;
+          lastRemoteStateRef.current = JSON.stringify(cachedValue);
+          queuedStateRef.current = backup.pendingSync ? cachedValue : null;
+          dirtyRef.current = backup.pendingSync;
+          setTournament(cachedValue);
+          setSyncStatus('loading');
+          setHydrated(true);
+        }
+        remoteHydrationInFlightRef.current = true;
         try {
           const game = await loadSharedGame(pathGameId);
           if (cancelled) return;
@@ -3402,12 +3424,11 @@ export default function FootballApp() {
             const remoteSerialized = JSON.stringify(remoteValue);
             lastRemoteStateRef.current = remoteSerialized;
             remoteRevisionRef.current = game.revision;
-            if (
-              backup.pendingSync &&
-              backup.tournament &&
-              backup.gameId === pathGameId
-            ) {
-              const localValue = extendTournamentToEndTime(backup.tournament);
+            const pendingLocalValue =
+              (backup.pendingSync || dirtyRef.current) &&
+              (tournamentRef.current ?? backupForGame);
+            if (pendingLocalValue) {
+              const localValue = extendTournamentToEndTime(pendingLocalValue);
               if (JSON.stringify(localValue) !== remoteSerialized) {
                 const remoteGame = { ...game, state: remoteValue };
                 tournamentRef.current = localValue;
@@ -3419,27 +3440,41 @@ export default function FootballApp() {
                 setSyncStatus('conflict');
                 setNotice('มีข้อมูลในเครื่องที่ยังไม่ได้ซิงก์ กรุณาเลือกข้อมูลที่จะใช้');
               } else {
+                queuedStateRef.current = null;
+                dirtyRef.current = false;
                 tournamentRef.current = remoteValue;
                 setTournament(remoteValue);
                 setSyncStatus('saved');
                 writeLocalBackup(remoteValue, pathGameId, false);
               }
             } else {
+              queuedStateRef.current = null;
+              dirtyRef.current = false;
               tournamentRef.current = remoteValue;
               setTournament(remoteValue);
               setSyncStatus('saved');
               writeLocalBackup(remoteValue, pathGameId, false);
             }
           } else {
+            if (backupForGame) setSyncStatus('error');
             setNotice('ไม่พบเกมจากลิงก์นี้');
           }
         } catch {
           if (cancelled) return;
-          if (backup.tournament && backup.gameId === pathGameId) {
-            const value = extendTournamentToEndTime(backup.tournament);
+          if (backupForGame) {
+            const value = extendTournamentToEndTime(
+              tournamentRef.current ?? backupForGame,
+            );
             tournamentRef.current = value;
-            queuedStateRef.current = value;
-            dirtyRef.current = true;
+            if (backup.pendingSync || dirtyRef.current) {
+              queuedStateRef.current = value;
+              dirtyRef.current = true;
+              writeLocalBackup(value, pathGameId, true);
+            } else {
+              queuedStateRef.current = null;
+              dirtyRef.current = false;
+              writeLocalBackup(value, pathGameId, false);
+            }
             setTournament(value);
             setSyncStatus('error');
             setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
@@ -3447,6 +3482,7 @@ export default function FootballApp() {
             setNotice('เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
           }
         } finally {
+          remoteHydrationInFlightRef.current = false;
           if (!cancelled) setHydrated(true);
         }
         return;
@@ -3483,7 +3519,13 @@ export default function FootballApp() {
       if (serialized === lastRemoteStateRef.current) return;
       queuedStateRef.current = tournament;
       dirtyRef.current = true;
-      setSyncStatus(remoteRevisionRef.current > 0 ? 'saving' : 'error');
+      setSyncStatus(
+        remoteRevisionRef.current > 0
+          ? 'saving'
+          : remoteHydrationInFlightRef.current
+            ? 'loading'
+            : 'error',
+      );
       const timer = window.setTimeout(() => {
         void flushSharedState(gameId);
       }, 450);
@@ -3523,12 +3565,18 @@ export default function FootballApp() {
           const value = extendTournamentToEndTime(game.state);
           const serialized = JSON.stringify(value);
           if (dirtyRef.current && remoteRevisionRef.current === 0) {
-            remoteRevisionRef.current = game.revision;
-            const conflict = { ...game, state: value };
-            conflictRemoteRef.current = conflict;
-            setConflictRemote(conflict);
-            setSyncStatus('conflict');
-            return;
+            const pendingValue =
+              queuedStateRef.current ?? tournamentRef.current;
+            if (pendingValue && JSON.stringify(pendingValue) !== serialized) {
+              remoteRevisionRef.current = game.revision;
+              const conflict = { ...game, state: value };
+              conflictRemoteRef.current = conflict;
+              setConflictRemote(conflict);
+              setSyncStatus('conflict');
+              return;
+            }
+            queuedStateRef.current = null;
+            dirtyRef.current = false;
           }
           if (game.revision > remoteRevisionRef.current) {
             remoteRevisionRef.current = game.revision;
