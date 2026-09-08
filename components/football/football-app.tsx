@@ -49,6 +49,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -2338,48 +2345,77 @@ function SettingsPairPicker({
   onTeamBChange: (teamId: string) => void;
   disabled?: boolean;
 }) {
+  function renderTeam(team: Team) {
+    return (
+      <span className="flex min-w-0 items-center gap-1.5">
+        <TeamShirtIcon color={team.color} size="xs" />
+        <span className="min-w-0 truncate font-black">{team.name}</span>
+        <span className="hidden text-xs font-bold text-slate-400 min-[390px]:inline">
+          {COLOR_LABEL[team.color]}
+        </span>
+      </span>
+    );
+  }
+
   return (
-    <fieldset disabled={disabled} className="rounded-2xl bg-slate-50 p-3">
-      <legend className="px-1 text-sm font-black text-slate-700">
+    <fieldset className="rounded-2xl border border-slate-100 bg-slate-50 p-2.5">
+      <legend className="px-1.5 text-sm font-black text-slate-700">
         {label}
       </legend>
-      <div className="mt-1 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-        <select
-          aria-label={`${label} ทีมแรก`}
+      <div className="mt-0.5 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
+        <Select
           value={teamAId}
-          onChange={(event) => {
-            const nextId = event.target.value;
+          disabled={disabled}
+          onValueChange={(nextId) => {
+            if (!nextId) return;
             onTeamAChange(nextId);
             if (nextId === teamBId) {
               const replacement = teams.find((team) => team.id !== nextId);
               if (replacement) onTeamBChange(replacement.id);
             }
           }}
-          className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f] disabled:opacity-50"
         >
-          {teams.map((team) => (
-            <option key={team.id} value={team.id}>
-              {COLOR_LABEL[team.color]} · {team.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label={`${label} ทีมแรก`}
+            className="h-11 w-full min-w-0 rounded-xl border-slate-200 bg-white px-2 text-sm focus-visible:border-[#35a95f] focus-visible:ring-[#35a95f]/15"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="start">
+            {teams.map((team) => (
+              <SelectItem key={team.id} value={team.id} className="py-2">
+                {renderTeam(team)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <span className="text-xs font-black text-slate-400">VS</span>
-        <select
-          aria-label={`${label} ทีมที่สอง`}
+        <Select
           value={teamBId}
-          onChange={(event) => onTeamBChange(event.target.value)}
-          className="h-11 min-w-0 rounded-xl border border-slate-200 bg-white px-2 text-sm font-black outline-none focus:border-[#35a95f] disabled:opacity-50"
+          disabled={disabled}
+          onValueChange={(nextId) => {
+            if (nextId) onTeamBChange(nextId);
+          }}
         >
-          {teams.map((team) => (
-            <option
-              key={team.id}
-              value={team.id}
-              disabled={team.id === teamAId}
-            >
-              {COLOR_LABEL[team.color]} · {team.name}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger
+            aria-label={`${label} ทีมที่สอง`}
+            className="h-11 w-full min-w-0 rounded-xl border-slate-200 bg-white px-2 text-sm focus-visible:border-[#35a95f] focus-visible:ring-[#35a95f]/15"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            {teams.map((team) => (
+              <SelectItem
+                key={team.id}
+                value={team.id}
+                disabled={team.id === teamAId}
+                className="py-2"
+              >
+                {renderTeam(team)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
     </fieldset>
   );
@@ -2409,6 +2445,10 @@ function SettingsScreen({
   const [teamColors, setTeamColors] = useState<Record<string, TeamColor>>(() =>
     Object.fromEntries(tournament.teams.map((team) => [team.id, team.color])),
   );
+  const selectableTeams = tournament.teams.map((team) => ({
+    ...team,
+    color: teamColors[team.id] ?? team.color,
+  }));
   const [matchMinutes, setMatchMinutes] = useState(
     tournament.matchDurationMinutes,
   );
@@ -2653,29 +2693,35 @@ function SettingsScreen({
               className="h-12 rounded-xl border border-slate-200 bg-white px-3 text-base font-black"
             />
           </div>
-          <div className="space-y-3 border-t border-slate-100 pt-4">
+          <div className="space-y-2 border-t border-slate-100 pt-4">
             <div>
               <h2 className="section-title">
-                {finishedCount > 0 ? 'กำหนดคู่ถัดไป' : 'กำหนดคู่เริ่มต้น'}
+                {finishedCount > 0
+                  ? 'กำหนด 2 คู่ถัดไป'
+                  : 'กำหนดคู่ที่ 1 และคู่ที่ 2'}
               </h2>
               <p className="section-note">
                 {finishedCount > 0
-                  ? 'เรียงเฉพาะเกมที่ยังไม่จบ ผลการแข่งขันเดิมจะไม่ถูกย้าย'
-                  : 'เลือกได้ 1 หรือ 2 คู่ เผื่อบางทีมยังมาไม่ครบ'}
+                  ? 'เลือกทีมสำหรับสองแมตช์ถัดไป โดยผลที่จบแล้วจะไม่เปลี่ยน'
+                  : 'เลือกทีมที่จะลงเล่นในแมตช์แรกและแมตช์ที่สอง'}
               </p>
             </div>
             {remainingAfterSave > 0 ? (
               <>
                 <SettingsPairPicker
-                  label={finishedCount > 0 ? 'คู่ถัดไป' : 'คู่แรก'}
-                  teams={tournament.teams}
+                  label={finishedCount > 0 ? 'คู่ถัดไป ลำดับที่ 1' : 'คู่ที่ 1'}
+                  teams={selectableTeams}
                   teamAId={firstPairA}
                   teamBId={firstPairB}
                   onTeamAChange={setFirstPairA}
                   onTeamBChange={setFirstPairB}
                 />
-                <label className="flex min-h-11 items-center justify-between gap-3 rounded-xl px-1 text-sm font-black">
-                  <span>กำหนดคู่ที่ 2 ด้วย</span>
+                <label className="flex min-h-10 items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 text-sm font-black text-slate-700">
+                  <span>
+                    {finishedCount > 0
+                      ? 'กำหนดคู่ถัดไป ลำดับที่ 2 ด้วย'
+                      : 'กำหนดคู่ที่ 2 ด้วย'}
+                  </span>
                   <input
                     type="checkbox"
                     checked={useSecondPair}
@@ -2686,8 +2732,10 @@ function SettingsScreen({
                 </label>
                 {useSecondPair && (
                   <SettingsPairPicker
-                    label={finishedCount > 0 ? 'คู่ต่อจากนั้น' : 'คู่ที่ 2'}
-                    teams={tournament.teams}
+                    label={
+                      finishedCount > 0 ? 'คู่ถัดไป ลำดับที่ 2' : 'คู่ที่ 2'
+                    }
+                    teams={selectableTeams}
                     teamAId={secondPairA}
                     teamBId={secondPairB}
                     onTeamAChange={setSecondPairA}
