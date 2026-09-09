@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: publicAsset('/og.png'),
+        url: publicAsset('/og.png?v=20260909'),
         width: 1254,
         height: 1254,
         alt: 'Football Match Maker',
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Football Match Maker',
     description: 'จัดทีม • จัดตาราง • หมุนเวียน GK',
-    images: [publicAsset('/og.png')],
+    images: [publicAsset('/og.png?v=20260909')],
   },
 };
 
