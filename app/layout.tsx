@@ -20,10 +20,22 @@ export const metadata: Metadata = {
     type: 'website',
     images: [
       {
-        url: publicAsset('/og.png?v=20260909'),
-        width: 1254,
-        height: 1254,
-        alt: 'Football Match Maker',
+        url: publicAsset('/og.png?v=20260910-multi'),
+        width: 1672,
+        height: 941,
+        alt: 'Football Match Maker tactical board',
+      },
+      {
+        url: publicAsset('/og-classic.png?v=20260910-multi'),
+        width: 1672,
+        height: 941,
+        alt: 'Football Match Maker classic stadium',
+      },
+      {
+        url: publicAsset('/og-dynamic.png?v=20260910-multi'),
+        width: 1672,
+        height: 941,
+        alt: 'Football Match Maker dynamic match',
       },
     ],
   },
@@ -31,7 +43,7 @@ export const metadata: Metadata = {
     card: 'summary_large_image',
     title: 'Football Match Maker',
     description: 'จัดทีม • จัดตาราง • หมุนเวียน GK',
-    images: [publicAsset('/og.png?v=20260909')],
+    images: [publicAsset('/og.png?v=20260910-multi')],
   },
 };
 
