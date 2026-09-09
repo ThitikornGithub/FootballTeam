@@ -76,6 +76,18 @@ function markerIdentity(marker: TacticMarker) {
     : `${marker.teamId ?? ''}:${marker.playerId ?? marker.id}`;
 }
 
+function markersByTeamSlot(markers: TacticMarker[]) {
+  const slots = new Map<string, TacticMarker[]>();
+  for (const marker of markers) {
+    if (marker.kind !== 'player') continue;
+    const teamId = marker.teamId ?? '';
+    const list = slots.get(teamId);
+    if (list) list.push(marker);
+    else slots.set(teamId, [marker]);
+  }
+  return slots;
+}
+
 function reconcileMarkers(
   freshMarkers: TacticMarker[],
   storedMarkers: TacticMarker[],
@@ -83,9 +95,22 @@ function reconcileMarkers(
   const storedByIdentity = new Map(
     storedMarkers.map((marker) => [markerIdentity(marker), marker]),
   );
+  const storedSlots = markersByTeamSlot(storedMarkers);
+  const slotCursor = new Map<string, number>();
   return freshMarkers.map((marker) => {
     const stored = storedByIdentity.get(markerIdentity(marker));
-    return stored ? { ...marker, x: stored.x, y: stored.y } : marker;
+    if (marker.kind !== 'player')
+      return stored ? { ...marker, x: stored.x, y: stored.y } : marker;
+    const teamId = marker.teamId ?? '';
+    const slot = slotCursor.get(teamId) ?? 0;
+    slotCursor.set(teamId, slot + 1);
+    if (stored) return { ...marker, x: stored.x, y: stored.y };
+    // A placeholder and the real player who replaces it share a slot, so keep
+    // the shape arranged while the roster was still empty.
+    const placeholder = storedSlots.get(teamId)?.[slot];
+    return placeholder && !placeholder.playerId
+      ? { ...marker, x: placeholder.x, y: placeholder.y }
+      : marker;
   });
 }
 

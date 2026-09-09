@@ -468,24 +468,33 @@ export function updateTournamentSettings(
     tournament.matches,
     Math.max(0, targetCount - tournament.matches.length),
   );
-  const matches: Match[] = Array.from({ length: targetCount }, (_, index) => {
+  const matches: Match[] = Array.from(
+    { length: targetCount },
+    (_, index) => index,
+  ).flatMap((index) => {
     const existing = tournament.matches[index];
-    const pair = generatedPairs[index - tournament.matches.length];
-    return existing
-      ? {
+    if (existing)
+      return [
+        {
           ...existing,
           matchNumber: index + 1,
           startTime: addMinutes(settings.startTime, index * slotMinutes),
-        }
-      : {
-          id: makeId('match'),
-          matchNumber: index + 1,
-          roundNumber: pair.roundNumber,
-          teamAId: pair.teamAId,
-          teamBId: pair.teamBId,
-          startTime: addMinutes(settings.startTime, index * slotMinutes),
-          status: 'upcoming' as const,
-        };
+        },
+      ];
+    const pair = generatedPairs[index - tournament.matches.length];
+    // Fewer than two teams produces no pairings, so there is no match to add.
+    if (!pair) return [];
+    return [
+      {
+        id: makeId('match'),
+        matchNumber: index + 1,
+        roundNumber: pair.roundNumber,
+        teamAId: pair.teamAId,
+        teamBId: pair.teamBId,
+        startTime: addMinutes(settings.startTime, index * slotMinutes),
+        status: 'upcoming' as const,
+      },
+    ];
   });
 
   if (matches.length && !matches.some((match) => match.status === 'current')) {
@@ -829,21 +838,24 @@ export function setMatchStatus(
     (match) => match.id === matchId,
   );
   if (targetIndex < 0) return tournament;
-  const matches = tournament.matches.map((match) => {
-    if (status === 'current') {
-      if (match.id === matchId) return { ...match, status: 'current' as const };
-      if (match.status === 'current')
-        return { ...match, status: 'upcoming' as const };
-    }
-    if (match.id === matchId) return { ...match, status };
+  // Finishing a match that was not the live one must leave the live match
+  // alone rather than promoting a second current match.
+  const liveElsewhere = tournament.matches.some(
+    (match, index) => index !== targetIndex && match.status === 'current',
+  );
+  const promoteIndex =
+    status === 'finished' && !liveElsewhere
+      ? tournament.matches.findIndex(
+          (match, index) => index > targetIndex && match.status === 'upcoming',
+        )
+      : -1;
+  const matches = tournament.matches.map((match, index) => {
+    if (index === targetIndex) return { ...match, status };
+    if (status === 'current' && match.status === 'current')
+      return { ...match, status: 'upcoming' as const };
+    if (index === promoteIndex) return { ...match, status: 'current' as const };
     return match;
   });
-  if (status === 'finished') {
-    const next = matches.find(
-      (match, index) => index > targetIndex && match.status === 'upcoming',
-    );
-    if (next) next.status = 'current';
-  }
   return assignGoalkeepers({ ...tournament, matches });
 }
 

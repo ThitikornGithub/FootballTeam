@@ -184,58 +184,62 @@ export function autoPlaceTeamMarkers({
   formation: TacticFormation;
   goalkeeperId?: string;
 }): TacticMarker[] {
+  const prefix = isTeamA ? 'a' : 'b';
   const available = playersAvailableForTactics(team);
-  if (available.length === 0) {
-    return [
-      {
-        id: `tactic-${isTeamA ? 'a' : 'b'}-1`,
-        kind: 'player',
-        teamId: team.id,
-        label: 'P1',
-        x: 50,
-        y: isTeamA ? 91 : 9,
-      },
-      ...formationSlots(formation, playerCount, isTeamA)
-        .slice(0, playerCount - 1)
-        .map((slot, index) => ({
-          id: `tactic-${isTeamA ? 'a' : 'b'}-${index + 2}`,
-          kind: 'player' as const,
-          teamId: team.id,
-          label: `P${index + 2}`,
-          x: slot.x,
-          y: slot.y,
-        })),
-    ];
-  }
-  const goalkeeper = goalkeeperForTeam(team, goalkeeperId);
-  if (!goalkeeper) return [];
+  const goalkeeper = available.length
+    ? goalkeeperForTeam(team, goalkeeperId)
+    : undefined;
   const outfieldSlots = formationSlots(formation, playerCount, isTeamA).slice(
     0,
-    Math.max(0, Math.min(playerCount - 1, available.length - 1)),
+    playerCount - 1,
   );
-  const outfield = available.filter((player) => player.id !== goalkeeper.id);
+  const outfield = available.filter((player) => player.id !== goalkeeper?.id);
   const assigned = assignPlayersToSlots(outfield, outfieldSlots);
+  // A short roster keeps the full formation on the pitch and fills the slots it
+  // cannot staff with numbered placeholders, so the board does not jump between
+  // a lone marker and a complete shape as players come and go.
   const markers: TacticMarker[] = [
-    {
-      id: `tactic-${isTeamA ? 'a' : 'b'}-${goalkeeper.id}`,
-      kind: 'player',
-      teamId: team.id,
-      playerId: goalkeeper.id,
-      label: goalkeeper.name,
-      x: 50,
-      y: isTeamA ? 91 : 9,
-    },
+    goalkeeper
+      ? {
+          id: `tactic-${prefix}-${goalkeeper.id}`,
+          kind: 'player',
+          teamId: team.id,
+          playerId: goalkeeper.id,
+          label: goalkeeper.name,
+          x: 50,
+          y: isTeamA ? 91 : 9,
+        }
+      : {
+          id: `tactic-${prefix}-1`,
+          kind: 'player',
+          teamId: team.id,
+          label: 'P1',
+          x: 50,
+          y: isTeamA ? 91 : 9,
+        },
   ];
-  assigned.forEach((player, index) => {
-    markers.push({
-      id: `tactic-${isTeamA ? 'a' : 'b'}-${player.id}`,
-      kind: 'player',
-      teamId: team.id,
-      playerId: player.id,
-      label: player.name,
-      x: outfieldSlots[index].x,
-      y: outfieldSlots[index].y,
-    });
+  outfieldSlots.forEach((slot, index) => {
+    const player = assigned[index];
+    markers.push(
+      player
+        ? {
+            id: `tactic-${prefix}-${player.id}`,
+            kind: 'player',
+            teamId: team.id,
+            playerId: player.id,
+            label: player.name,
+            x: slot.x,
+            y: slot.y,
+          }
+        : {
+            id: `tactic-${prefix}-${index + 2}`,
+            kind: 'player',
+            teamId: team.id,
+            label: `P${index + 2}`,
+            x: slot.x,
+            y: slot.y,
+          },
+    );
   });
   return markers;
 }

@@ -399,11 +399,13 @@ function ScorePicker({
   color,
   score,
   onChange,
+  onEditingChange,
 }: {
   label: string;
   color: TeamColor;
   score: string;
   onChange: (score: string) => void;
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const numericScore = Number.parseInt(score, 10) || 0;
   return (
@@ -430,8 +432,14 @@ function ScorePicker({
           onChange={(event) => {
             onChange(event.target.value.replace(/\D/g, '').slice(0, 2));
           }}
-          onFocus={(event) => event.currentTarget.select()}
-          onBlur={() => !score && onChange('0')}
+          onFocus={(event) => {
+            event.currentTarget.select();
+            onEditingChange?.(true);
+          }}
+          onBlur={() => {
+            if (!score) onChange('0');
+            onEditingChange?.(false);
+          }}
           aria-label={`สกอร์ทีม ${label}`}
           className="h-11 w-14 shrink-0 rounded-xl border border-slate-200 bg-white text-center text-xl font-black tabular-nums outline-none focus:border-[#35a95f]"
         />
@@ -748,11 +756,15 @@ function CurrentMatchControl({
         .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
   );
 
+  const [editingScore, setEditingScore] = useState(false);
   /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
   useEffect(() => {
+    // Adopting a remote score mid-keystroke would wipe the digits being typed,
+    // so wait until the field is left before following the shared game again.
+    if (editingScore) return;
     setScoreA(String(match.teamAScore ?? 0));
     setScoreB(String(match.teamBScore ?? 0));
-  }, [match.id, match.teamAScore, match.teamBScore]);
+  }, [editingScore, match.id, match.teamAScore, match.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -795,12 +807,14 @@ function CurrentMatchControl({
           color={teamA.color}
           score={scoreA}
           onChange={(value) => updateDraftScore('a', value)}
+          onEditingChange={setEditingScore}
         />
         <ScorePicker
           label={teamB.name}
           color={teamB.color}
           score={scoreB}
           onChange={(value) => updateDraftScore('b', value)}
+          onEditingChange={setEditingScore}
         />
       </div>
       <ScorerEditor
@@ -2271,11 +2285,15 @@ function MatchDetailScreen({
         .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
   );
 
+  const [editingScore, setEditingScore] = useState(false);
   /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
   useEffect(() => {
+    // Adopting a remote score mid-keystroke would wipe the digits being typed,
+    // so wait until the field is left before following the shared game again.
+    if (editingScore) return;
     setScoreA(String(match.teamAScore ?? 0));
     setScoreB(String(match.teamBScore ?? 0));
-  }, [match.id, match.teamAScore, match.teamBScore]);
+  }, [editingScore, match.id, match.teamAScore, match.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -2324,12 +2342,14 @@ function MatchDetailScreen({
               color={teamA.color}
               score={scoreA}
               onChange={(value) => updateDraftScore('a', value)}
+              onEditingChange={setEditingScore}
             />
             <ScorePicker
               label={teamB.name}
               color={teamB.color}
               score={scoreB}
               onChange={(value) => updateDraftScore('b', value)}
+              onEditingChange={setEditingScore}
             />
           </div>
           <ScorerEditor

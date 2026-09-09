@@ -473,6 +473,70 @@ assert(
     ),
   'A team without a roster must keep seven numbered placeholders on the pitch',
 );
+const soloRosterMarkers = autoPlaceTeamMarkers({
+  team: {
+    ...tournament.teams[0],
+    players: tournament.teams[0].players.slice(0, 1),
+    gkRotation: [tournament.teams[0].players[0].id],
+  },
+  isTeamA: true,
+  playerCount: 7,
+  formation: '1-3-3',
+});
+assert(
+  soloRosterMarkers.length === 7 &&
+    soloRosterMarkers[0].playerId === tournament.teams[0].players[0].id &&
+    soloRosterMarkers
+      .slice(1)
+      .every(
+        (marker, index) =>
+          marker.playerId === undefined && marker.label === `P${index + 2}`,
+      ),
+  'A short roster must keep the full formation and fill the rest with placeholders',
+);
+const statusesBeforeFinish = tournament.matches.map((match) => match.status);
+const finishedFirst = finishMatchWithScore(
+  tournament,
+  tournament.matches[0].id,
+  1,
+  0,
+);
+assert(
+  tournament.matches.map((match) => match.status).join() ===
+    statusesBeforeFinish.join() &&
+    finishedFirst.matches.filter((match) => match.status === 'current')
+      .length === 1,
+  'Finishing a match must not write back into the tournament it was given',
+);
+const finishedOffCurrent = setMatchStatus(
+  tournament,
+  tournament.matches[4].id,
+  'finished',
+);
+assert(
+  finishedOffCurrent.matches.filter((match) => match.status === 'current')
+    .length === 1 && finishedOffCurrent.matches[0].status === 'current',
+  'Finishing a match that was not live must leave exactly one current match',
+);
+const twoTeamSettings = updateTournamentSettings(
+  {
+    ...tournament,
+    teams: tournament.teams.slice(0, 1),
+    matches: tournament.matches.slice(0, 1),
+  },
+  {
+    name: tournament.name,
+    matchDurationMinutes: tournament.matchDurationMinutes,
+    breakDurationMinutes: tournament.breakDurationMinutes,
+    startTime: tournament.startTime,
+    availableTimeMinutes: tournament.availableTimeMinutes,
+  },
+);
+assert(
+  twoTeamSettings.matches.length === 1,
+  'A roster too small to pair must keep its existing matches instead of crashing',
+);
+
 const legacyPlayersWithoutPositions = {
   ...tournament,
   teams: tournament.teams.map((team) => ({
