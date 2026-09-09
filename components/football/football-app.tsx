@@ -148,6 +148,9 @@ const PAGES_PATH_KEY = 'football-pages-path';
 const ALL_GAMES_PATH_SEGMENT = 'allgames';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+const GAME_SHARE_ORIGIN =
+  process.env.NEXT_PUBLIC_SHARE_SITE_URL ??
+  'https://football-match-maker.b-thitikorn.chatgpt.site';
 const PLAYER_POSITION_META: Record<
   PlayerPosition,
   { shortLabel: string; fullLabel: string; className: string }
@@ -4063,7 +4066,7 @@ export default function FootballApp() {
       setNotice('เกมนี้ยังไม่มีลิงก์ เพราะยังไม่ได้บันทึกขึ้นฐานข้อมูล');
       return;
     }
-    const url = `${window.location.origin}${gamePath(gameId)}`;
+    const url = `${GAME_SHARE_ORIGIN}/${encodeURIComponent(gameId)}`;
     try {
       await navigator.clipboard.writeText(url);
       setNotice('คัดลอกลิงก์เกมแล้ว ส่งให้เพื่อนได้เลย');

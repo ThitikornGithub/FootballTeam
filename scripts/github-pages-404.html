@@ -5,13 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Football Match Maker</title>
     <script>
-      try {
-        sessionStorage.setItem(
-          'football-pages-path',
-          location.pathname + location.search + location.hash,
+      const gameId = location.pathname
+        .replace(/^\/FootballTeam\//, '')
+        .split('/')[0];
+      if (/^game\d{8}-[1-9]\d*$/.test(gameId)) {
+        location.replace(
+          'https://football-match-maker.b-thitikorn.chatgpt.site/' +
+            gameId +
+            location.search +
+            location.hash,
         );
-      } catch {}
-      location.replace('/FootballTeam/');
+      } else {
+        try {
+          sessionStorage.setItem(
+            'football-pages-path',
+            location.pathname + location.search + location.hash,
+          );
+        } catch {}
+        location.replace('/FootballTeam/');
+      }
     </script>
   </head>
   <body></body>
