@@ -26,10 +26,23 @@ function gameNameSize(name: string) {
 }
 
 async function fetchAsset(request: Request, pathname: string) {
-  const response = await fetch(new URL(pathname, request.url));
+  const headers = new Headers();
+  for (const name of ['OAI-Sites-Authorization', 'cookie']) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  const response = await fetch(new URL(pathname, request.url), { headers });
   if (!response.ok)
     throw new Error(`Unable to load game share asset: ${pathname}`);
   return response.arrayBuffer();
+}
+
+function pngDataUrl(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000)
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  return `data:image/png;base64,${btoa(binary)}`;
 }
 
 export async function GET(request: Request, context: GameImageRouteContext) {
@@ -41,14 +54,12 @@ export async function GET(request: Request, context: GameImageRouteContext) {
       headers: { 'content-type': 'text/plain; charset=utf-8' },
     });
 
-  const [regularFont, boldFont] = await Promise.all([
+  const [regularFont, boldFont, background] = await Promise.all([
     fetchAsset(request, '/fonts/NotoSansThai-Regular.ttf'),
     fetchAsset(request, '/fonts/NotoSansThai-Bold.ttf'),
+    fetchAsset(request, '/game-og-stadium-bg.png'),
   ]);
-  const backgroundUrl = new URL(
-    '/game-og-stadium-bg.png',
-    request.url,
-  ).toString();
+  const backgroundUrl = pngDataUrl(background);
   const tournament = game.state;
   const teamCount = tournament.teams.length;
   const matchCount = tournament.matches.length;
