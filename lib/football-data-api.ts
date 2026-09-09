@@ -6,6 +6,8 @@ const DATA_API_URL =
 const GAME_LIST_CACHE_KEY = 'football-match-maker-game-list-v1';
 const GAME_LIST_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const GAME_LIST_NETWORK_FRESH_MS = 30 * 1000;
+const DATA_API_TIMEOUT_MS = 20 * 1000;
+const MAX_KEEPALIVE_BODY_BYTES = 60 * 1024;
 
 // This is intentionally a shared, public app credential. Database permissions
 // restrict it to the FootballTeam RPC functions.
@@ -71,15 +73,31 @@ async function callRpc<T>(
   body: Record<string, unknown>,
   options: { keepalive?: boolean } = {},
 ) {
-  const response = await fetch(`${DATA_API_URL}/rpc/${name}`, {
-    method: 'POST',
-    keepalive: options.keepalive,
-    headers: {
-      Authorization: `Bearer ${DATA_API_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const payload = JSON.stringify(body);
+  const keepalive = Boolean(
+    options.keepalive &&
+    new TextEncoder().encode(payload).byteLength <= MAX_KEEPALIVE_BODY_BYTES,
+  );
+  const controller = new AbortController();
+  const timeout = globalThis.setTimeout(
+    () => controller.abort(),
+    DATA_API_TIMEOUT_MS,
+  );
+  let response: Response;
+  try {
+    response = await fetch(`${DATA_API_URL}/rpc/${name}`, {
+      method: 'POST',
+      keepalive,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${DATA_API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: payload,
+    });
+  } finally {
+    globalThis.clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const message = await response.text();

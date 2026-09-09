@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -221,6 +222,31 @@ function copyMarkers(markers: TacticMarker[]) {
   return markers.map((marker) => ({ ...marker }));
 }
 
+function copySteps(steps: TacticStep[]) {
+  return steps.map((step) => ({
+    ...step,
+    markers: copyMarkers(step.markers),
+    paths: step.paths.map((path) => ({
+      ...path,
+      from: { ...path.from },
+      to: { ...path.to },
+    })),
+  }));
+}
+
+function initialStepsForBoard(board: TacticsBoard) {
+  return board.animationSteps?.length
+    ? copySteps(board.animationSteps)
+    : [
+        {
+          id: prototypeId('step'),
+          title: 'ตำแหน่งเริ่มต้น',
+          markers: copyMarkers(board.markers),
+          paths: [],
+        },
+      ];
+}
+
 function markersAtPathDestinations(step: TacticStep) {
   const nextMarkers = copyMarkers(step.markers);
   for (const path of step.paths) {
@@ -277,24 +303,7 @@ export function TacticsScreen({
   const initialBoard = reconcileBoard(tournament, candidateBoard);
   const [board, setBoard] = useState(initialBoard);
   const [steps, setSteps] = useState<TacticStep[]>(() =>
-    initialBoard.animationSteps?.length
-      ? initialBoard.animationSteps.map((step) => ({
-          ...step,
-          markers: copyMarkers(step.markers),
-          paths: step.paths.map((path) => ({
-            ...path,
-            from: { ...path.from },
-            to: { ...path.to },
-          })),
-        }))
-      : [
-          {
-            id: prototypeId('step'),
-            title: 'ตำแหน่งเริ่มต้น',
-            markers: copyMarkers(initialBoard.markers),
-            paths: [],
-          },
-        ],
+    initialStepsForBoard(initialBoard),
   );
   const [activeStepIndex, setActiveStepIndex] = useState(0);
   const [mode, setMode] = useState<TacticMode>('position');
@@ -312,6 +321,29 @@ export function TacticsScreen({
   const [notice, setNotice] = useState('');
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
+  const latestTournamentRef = useRef(tournament);
+  const onUpdateRef = useRef(onUpdate);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const pendingPlanRef = useRef<TacticsBoard | null>(null);
+  const sourceTacticsSignature = JSON.stringify(tournament.tactics ?? null);
+  const sourceRosterSignature = JSON.stringify(tournament.teams);
+  const lastPublishedSignatureRef = useRef(sourceTacticsSignature);
+  const lastRosterSignatureRef = useRef(sourceRosterSignature);
+  const initialPersistedBoard = {
+    ...initialBoard,
+    animationSteps: initialBoard.animationSteps?.length ? steps : undefined,
+  };
+  const lastLocalSignatureRef = useRef(
+    JSON.stringify(initialPersistedBoard),
+  );
+  const persistedBoard = useMemo(
+    () => ({
+      ...board,
+      animationSteps: animationHasContent ? steps : undefined,
+    }),
+    [animationHasContent, board, steps],
+  );
+  const localPlanSignature = JSON.stringify(persistedBoard);
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers =
     mode === 'position'
@@ -349,6 +381,11 @@ export function TacticsScreen({
     : [];
 
   useEffect(() => {
+    latestTournamentRef.current = tournament;
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate, tournament]);
+
+  useEffect(() => {
     if (!isPlaying) return;
     const reachedLastStep = activeStepIndex >= steps.length - 1;
     const timer = window.setTimeout(
@@ -370,6 +407,81 @@ export function TacticsScreen({
     const timer = window.setTimeout(() => setNotice(''), 2400);
     return () => window.clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (
+      sourceTacticsSignature === lastPublishedSignatureRef.current &&
+      sourceRosterSignature === lastRosterSignatureRef.current
+    )
+      return;
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    pendingPlanRef.current = null;
+    const stored = tournament.tactics;
+    const validStoredTeams =
+      stored &&
+      tournament.teams.some((team) => team.id === stored.teamAId) &&
+      tournament.teams.some((team) => team.id === stored.teamBId) &&
+      stored.teamAId !== stored.teamBId;
+    const nextBoard = reconcileBoard(
+      tournament,
+      validStoredTeams ? stored : makeBoard(tournament),
+    );
+    const nextSteps = initialStepsForBoard(nextBoard);
+    const hasAnimation = Boolean(nextBoard.animationSteps?.length);
+    lastPublishedSignatureRef.current = sourceTacticsSignature;
+    lastRosterSignatureRef.current = sourceRosterSignature;
+    lastLocalSignatureRef.current = JSON.stringify({
+      ...nextBoard,
+      animationSteps: hasAnimation ? nextSteps : undefined,
+    });
+    setBoard(nextBoard);
+    setSteps(nextSteps);
+    setAnimationHasContent(hasAnimation);
+    setActiveStepIndex(0);
+    setIsPlaying(false);
+    setPathPreview(null);
+    setTool('move');
+  }, [sourceRosterSignature, sourceTacticsSignature, tournament]);
+
+  useEffect(() => {
+    if (localPlanSignature === lastLocalSignatureRef.current) return;
+    pendingPlanRef.current = persistedBoard;
+    if (autosaveTimerRef.current !== null)
+      window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosaveTimerRef.current = null;
+      const plan = pendingPlanRef.current;
+      if (!plan) return;
+      pendingPlanRef.current = null;
+      const signature = JSON.stringify(plan);
+      lastLocalSignatureRef.current = signature;
+      lastPublishedSignatureRef.current = signature;
+      onUpdateRef.current({
+        ...latestTournamentRef.current,
+        tactics: plan,
+      });
+    }, 700);
+  }, [localPlanSignature, persistedBoard]);
+
+  useEffect(
+    () => () => {
+      if (autosaveTimerRef.current !== null)
+        window.clearTimeout(autosaveTimerRef.current);
+      const plan = pendingPlanRef.current;
+      if (!plan) return;
+      const signature = JSON.stringify(plan);
+      lastLocalSignatureRef.current = signature;
+      lastPublishedSignatureRef.current = signature;
+      onUpdateRef.current({
+        ...latestTournamentRef.current,
+        tactics: plan,
+      });
+    },
+    [],
+  );
 
   function resetBoard(setup: Partial<TacticsBoard> = {}) {
     const nextBoard = {
@@ -614,12 +726,16 @@ export function TacticsScreen({
   }
 
   function savePlan() {
-    onUpdate({
-      ...tournament,
-      tactics: {
-        ...board,
-        animationSteps: animationHasContent ? steps : undefined,
-      },
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    pendingPlanRef.current = null;
+    lastLocalSignatureRef.current = localPlanSignature;
+    lastPublishedSignatureRef.current = localPlanSignature;
+    onUpdateRef.current({
+      ...latestTournamentRef.current,
+      tactics: persistedBoard,
     });
     setNotice('บันทึกกระดานแท็กติกเข้าเกมแล้ว');
   }

@@ -1,8 +1,8 @@
 # FootballTeam — Project Handoff
 
-อัปเดตล่าสุด: 8 กันยายน 2026
+อัปเดตล่าสุด: 9 กันยายน 2026
 ขอบเขตการตรวจ: source code, scheduling engine, Neon persistence, GitHub Pages deployment, dependency audit และข้อมูลที่อยู่ใน Neon ณ วันที่ตรวจ  
-สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ performance วันที่ 8 กันยายน 2026
+สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ reliability และ UI วันที่ 9 กันยายน 2026
 
 ## 1. ภาพรวมโปรเจกต์
 
@@ -80,7 +80,7 @@ Technology:
   - team id, name, shirt color
   - `players[]`, `absentToday` และ `positions[]` (`defender`, `midfielder`, `winger`, `forward`); คิวผู้รักษาประตูจัดการแยกต่างหาก
   - `gkRotation[]`, `gkCycleOrders[][]`
-- เวลาเริ่ม ระยะเวลาแข่ง เวลาพัก และเวลาที่มีทั้งหมด
+- เวลาเริ่ม ระยะเวลาแข่ง เวลาพัก และเวลาที่มีทั้งหมด (รองรับเวลาจบข้ามเที่ยงคืน)
 - `matches[]`
   - คู่ทีม เวลา ลำดับและรอบ
   - status: `upcoming | current | finished`
@@ -102,7 +102,6 @@ RPC ที่ browser เรียกได้:
 
 - `create_football_game`
 - `get_football_game`
-- `save_football_game` (legacy compatibility)
 - `save_football_game_v2` (optimistic revision check)
 - `list_football_games`
 - `delete_football_game`
@@ -110,7 +109,7 @@ RPC ที่ browser เรียกได้:
 พฤติกรรมปัจจุบัน:
 
 1. เมื่อเปิด deep link แอปโหลด state จาก Neon
-2. เมื่อแก้ state แอปเขียน local backup ทันที เก็บ save queue และ debounce 450 ms
+2. เมื่อแก้ state แอปเขียน local backup แยกตาม Game ID ทันที เก็บ save queue และ debounce 450 ms เพื่อไม่ให้เกมหนึ่งทับ backup ของอีกเกม
 3. การบันทึกใช้ `save_football_game_v2(p_expected_revision)` เพื่อป้องกันการเขียนทับข้ามเครื่อง
 4. เมื่อ page ถูกซ่อนหรือปิด มี keepalive flush เพื่อพยายามส่ง state ล่าสุด
 5. แอป poll Neon ทุก 15 วินาทีเฉพาะตอนหน้า visible และไม่ apply remote ขณะมี local dirty state
@@ -118,12 +117,15 @@ RPC ที่ browser เรียกได้:
 7. สถานะบนหน้า Home คือ `กำลังบันทึก`, `บันทึกแล้ว`, `ซิงก์ไม่สำเร็จ`, `ข้อมูลชนกัน` หรือ `เฉพาะเครื่อง`
 8. รายการเกมใช้ stale-while-revalidate: แสดง cache อายุไม่เกิน 24 ชั่วโมงทันที แล้วอัปเดตจาก Neon เบื้องหลัง โดยหน้าเริ่มต้นจะ prefetch รายการไว้ล่วงหน้า
 9. Neon free compute อาจใช้เวลาหลายวินาทีเมื่อปลุกจากสถานะ idle; หลังตื่นแล้ว RPC ปกติอยู่ระดับหลักสิบถึงหลักร้อยมิลลิวินาที จึงไม่ควรตีความ cold start ว่าเป็นปัญหาจากจำนวนแถวหรือ React render
+10. ทุก RPC มี timeout 20 วินาที และ `keepalive` จะใช้เฉพาะ payload ไม่เกิน 60 KiB; หากใหญ่กว่านั้นจะกลับมาซิงก์แบบปกติเมื่อหน้า visible
+11. sync session แยกตามเกม คำตอบจาก request เก่าจึงไม่สามารถเปลี่ยน revision, queue หรือสถานะของเกมที่เปิดใหม่ได้
 
-Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql`; ต้อง apply migration นี้ก่อน deploy frontend ที่เรียก v2
+Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql` และ `db/migrations/20260909_remove_legacy_save.sql`; migration ล่าสุดลบ RPC `save_football_game` ตัวเก่าที่ไม่มี revision check ออกจาก production แล้ว
 
 ## 6. URL และ routing
 
 - Root `/FootballTeam/` เปิดหน้าเริ่มต้น 3 ปุ่มเสมอ
+- หน้ารวมเกมใช้ `/FootballTeam/allgames` และเปิดตรง/เก็บ bookmark ได้
 - Game URL ใช้ `/FootballTeam/gameYYYYMMDD-N`
 - GitHub Pages ไม่มี SPA rewrite จริง จึงใช้ `404.html` เก็บ path ใน `sessionStorage`, redirect ไป root แล้ว React คืน path ก่อนอ่าน Game ID
 - มี `popstate` listener แล้ว ดังนั้น Back/Forward จะโหลด game หรือกลับ Home ให้ตรงกับ URL
@@ -169,9 +171,9 @@ Schema ของ Neon ไม่ได้ apply โดย GitHub Actions หา�
 
 ## 9. Audit result — current data
 
-ผลตรวจแบบ read-only วันที่ 6 กันยายน 2026:
+ผลตรวจแบบ read-only วันที่ 9 กันยายน 2026:
 
-- ตรวจ 1 เกมที่อยู่ใน Neon
+- ตรวจ 2 เกมที่อยู่ใน Neon
 - Game ID และ `state.id` ตรงกัน
 - ไม่พบ duplicate team, player หรือ match IDs
 - ไม่พบ self-match หรือ match ที่อ้างทีมที่หายไป
@@ -190,8 +192,11 @@ Automated checks ที่ผ่าน:
 - `npm audit`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.4 และ Wrangler 4.129.0
 - Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
 - Local UI smoke test ที่ 320px: Home, score input, standings table, schedule, tactics marker, player controls, dialog และ select ไม่ล้นขอบ
+- Local browser smoke วันที่ 9 กันยายน: scorer popup, share card, tactics 5/7 คน, formation, animation, standings ที่ 320px และ tactics autosave หลังสลับหน้าผ่านทั้งหมด
+- Mocked sync race วันที่ 9 กันยายน: ขณะ save เกม A ค้าง สามารถสร้างและแก้เกม B ได้โดยแต่ละ request และ local backup ยังชี้ Game ID ถูกต้อง
+- Neon production ยืนยันว่า legacy `save_football_game(text,jsonb)` ถูกลบแล้ว และเกมทั้ง 2 รายการยังโหลดผ่าน runtime schema
 
-ยังไม่มี automated browser/E2E tests และรอบ audit นี้ไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
+ยังไม่มี browser/E2E suite ที่ commit อยู่ใน repository; smoke scripts รอบ audit เป็น ad-hoc และไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
 
 ## 10. Resolved findings และ known limitations
 
@@ -201,11 +206,13 @@ Automated checks ที่ผ่าน:
 
 กระดานแท็กติกแสดงสนามก่อน และเริ่มต้นที่ 7 คนต่อทีม ส่วนเลือกสองทีม จำนวนผู้เล่น 5/6/7, formation และตัวสำรองพับอยู่ใน dropdown ด้านล่าง การเปลี่ยนจำนวนคนหรือ formation จะจัดผู้เล่นบนสนามใหม่ทันที โดยวางผู้เล่นหนึ่งคนไว้บริเวณหน้าประตูอัตโนมัติแต่ไม่ติดป้าย GK บนกระดาน หน้า UI ไม่แสดงตัวเลือกแมตช์ ช่องเลือก GK หรือช่องโน้ตแล้ว แต่ยังคง field เดิมไว้เพื่อ backward compatibility รูปแชร์สรุปดาวซัลโว Top 3 จาก `scorers[]` ของแมตช์ที่จบแล้ว ส่วนชื่อผู้ยิงเป็นข้อมูล optional เปิดกรอกผ่าน popup จากปุ่มเดียว และซิงก์ไปพร้อม state ของเกม
 
-หากทีมหนึ่งถูกระบุว่า `absentToday` ครบทุกคน กระดานแท็กติกจะ fallback มาใช้รายชื่อทั้งทีม และหากทีมนั้นยังไม่มีรายชื่อจะใช้ marker `P1`–`P7` ตามจำนวนคนที่เลือก เพื่อไม่ให้ผู้เล่นฝั่งนั้นหายทั้งชุด หน้ากระดานจะ remount เมื่อ roster หรือ tactics ล่าสุดจาก Neon เปลี่ยน เพื่อไม่ค้างอยู่กับ snapshot จาก cache
+หากทีมหนึ่งถูกระบุว่า `absentToday` ครบทุกคน กระดานแท็กติกจะ fallback มาใช้รายชื่อทั้งทีม และหากทีมนั้นยังไม่มีรายชื่อจะใช้ marker `P1`–`P7` ตามจำนวนคนที่เลือก เพื่อไม่ให้ผู้เล่นฝั่งนั้นหายทั้งชุด กระดาน reconcile เมื่อ roster หรือ tactics ล่าสุดจาก Neon เปลี่ยน และ autosave หลังแก้ประมาณ 700 ms; ปุ่มบันทึกแผนยังใช้บันทึกทันทีได้
 
 เมื่อเปิด Animation การสร้าง/เลือก/ตั้งชื่อจังหวะ เครื่องมือวาดเส้น ปุ่มย้อน–Play–ถัดไป แถบสถานะ และตัวเลือกแสดงลูกศรจะรวมอยู่ในการ์ดควบคุมเดียวเหนือสนาม ไม่แยก Playback ไว้ท้ายหน้า
 
 การเปิด game path ที่เคยเข้าแล้วใช้ stale-while-revalidate: แสดง local backup ทันทีพร้อมสถานะ `กำลังอัปเดต` แล้วโหลด revision ล่าสุดจาก Neon เบื้องหลัง หากมี local pending/edit ระหว่างโหลดจะเทียบกับ remote ก่อนและเปิด conflict dialog แทนการเขียนทับ ส่วนการเข้าเกมครั้งแรกบนอุปกรณ์ยังต้องรอ Neon เพราะยังไม่มีข้อมูลสำรอง
+
+Runtime parser ตรวจ marker ID/ลูกบอล/ทีมของผู้เล่นในกระดาน และซ่อม reference ของผู้เล่นหรือแมตช์ที่ถูกลบโดยเก็บชื่อผู้ยิงในประวัติไว้ ทำให้ reference เก่าไม่ทำให้ทั้งเกมโหลดไม่ได้
 
 Scheduling หลังเริ่มแข่งใช้จำนวนครั้งที่คู่ทีมพบกันเป็นเกณฑ์หลัก แล้วหลีกเลี่ยงทีมเดิมเล่นสามเกมติดและลดการลงต่อเนื่องเป็นเกณฑ์รอง ปุ่ม “เล่นต่ออีก 1 เกม” นับทั้ง schedule ปัจจุบันก่อนเลือกคู่เพิ่ม ส่วนคู่ที่ผู้ใช้เลือกเองเป็น hard preference; UI จึงแสดงคู่แนะนำและจำนวนครั้งที่พบกันเพื่อเตือนเมื่อเลือกต่างจากแผนสมดุล
 

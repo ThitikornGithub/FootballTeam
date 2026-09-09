@@ -140,7 +140,9 @@ const TacticsScreen = lazy(() =>
 const STORAGE_KEY = 'football-match-maker-v1';
 const STORAGE_GAME_ID_KEY = 'football-match-maker-game-id';
 const STORAGE_PENDING_SYNC_KEY = 'football-match-maker-pending-sync';
+const STORAGE_GAME_BACKUP_PREFIX = 'football-match-maker-game-backup-v2:';
 const PAGES_PATH_KEY = 'football-pages-path';
+const ALL_GAMES_PATH_SEGMENT = 'allgames';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const PLAYER_POSITION_META: Record<
@@ -184,13 +186,36 @@ type SyncStatus =
   | 'error'
   | 'conflict';
 
-function readLocalBackup() {
+function gameBackupKey(gameId: string) {
+  return `${STORAGE_GAME_BACKUP_PREFIX}${gameId}`;
+}
+
+function readLocalBackup(gameId = '') {
   try {
+    if (gameId) {
+      const storedGame = localStorage.getItem(gameBackupKey(gameId));
+      if (storedGame) {
+        const backup = JSON.parse(storedGame) as {
+          tournament?: unknown;
+          pendingSync?: unknown;
+        };
+        return {
+          tournament: parseTournament(backup.tournament),
+          gameId,
+          pendingSync: backup.pendingSync === true,
+        };
+      }
+    }
     const stored = localStorage.getItem(STORAGE_KEY);
     const tournament = stored ? parseTournament(JSON.parse(stored)) : null;
+    const legacyGameId = localStorage.getItem(STORAGE_GAME_ID_KEY);
+    if (gameId && legacyGameId !== gameId)
+      return { tournament: null, gameId, pendingSync: false };
+    if (!gameId && legacyGameId)
+      return { tournament: null, gameId: null, pendingSync: false };
     return {
       tournament,
-      gameId: localStorage.getItem(STORAGE_GAME_ID_KEY),
+      gameId: legacyGameId,
       pendingSync: localStorage.getItem(STORAGE_PENDING_SYNC_KEY) === '1',
     };
   } catch {
@@ -204,25 +229,50 @@ function writeLocalBackup(
   pendingSync = false,
 ) {
   try {
+    if (gameId) {
+      localStorage.setItem(
+        gameBackupKey(gameId),
+        JSON.stringify({ tournament, pendingSync }),
+      );
+      if (localStorage.getItem(STORAGE_GAME_ID_KEY) === gameId) {
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(STORAGE_GAME_ID_KEY);
+        localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
+      }
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
-    if (gameId) localStorage.setItem(STORAGE_GAME_ID_KEY, gameId);
-    else localStorage.removeItem(STORAGE_GAME_ID_KEY);
-    if (gameId && pendingSync)
-      localStorage.setItem(STORAGE_PENDING_SYNC_KEY, '1');
-    else localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
+    localStorage.removeItem(STORAGE_GAME_ID_KEY);
+    localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
   } catch {
     // Neon remains the source of truth when browser storage is unavailable.
   }
 }
 
-function clearLocalBackup() {
+function clearLocalBackup(gameId = '') {
   try {
+    if (gameId) {
+      localStorage.removeItem(gameBackupKey(gameId));
+      if (localStorage.getItem(STORAGE_GAME_ID_KEY) !== gameId) return;
+    }
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(STORAGE_GAME_ID_KEY);
     localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
   } catch {
     // Browser storage is only a best-effort offline backup.
   }
+}
+
+function markLocalBackupSyncedIfUnchanged(
+  gameId: string,
+  saved: Tournament,
+) {
+  const backup = readLocalBackup(gameId);
+  if (
+    backup.tournament &&
+    JSON.stringify(backup.tournament) === JSON.stringify(saved)
+  )
+    writeLocalBackup(saved, gameId, false);
 }
 
 function restoreGitHubPagesPath() {
@@ -236,19 +286,31 @@ function restoreGitHubPagesPath() {
   }
 }
 
-function gameIdFromPath() {
+function routeSegmentFromPath() {
   const path = window.location.pathname;
   const relativePath =
     BASE_PATH && path.startsWith(BASE_PATH)
       ? path.slice(BASE_PATH.length)
       : path;
-  const candidate = relativePath.split('/').filter(Boolean)[0] ?? '';
+  return relativePath.split('/').filter(Boolean)[0] ?? '';
+}
+
+function gameIdFromPath() {
+  const candidate = routeSegmentFromPath();
   return GAME_ID_PATTERN.test(candidate) ? candidate : '';
+}
+
+function allGamesFromPath() {
+  return routeSegmentFromPath() === ALL_GAMES_PATH_SEGMENT;
 }
 
 function gamePath(gameId?: string) {
   const root = `${BASE_PATH || ''}/`.replace(/\/+/g, '/');
   return gameId ? `${root}${gameId}` : root;
+}
+
+function allGamesPath() {
+  return `${gamePath()}${ALL_GAMES_PATH_SEGMENT}`;
 }
 
 function bangkokDateCode() {
@@ -788,13 +850,13 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
     <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
       <table className="w-full table-fixed text-center text-xs sm:text-sm">
         <colgroup>
-          <col className="w-[36%]" />
+          <col className="w-[42%]" />
+          <col className="w-[10%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
           <col className="w-[11%]" />
-          <col className="w-[8%]" />
-          <col className="w-[8%]" />
-          <col className="w-[8%]" />
-          <col className="w-[12%]" />
-          <col className="w-[17%]" />
+          <col className="w-[16%]" />
         </colgroup>
         <thead className="bg-[#e5f5e9] text-[#087632]">
           <tr>
@@ -1177,6 +1239,7 @@ function SetupScreen({
     availableMinutes,
   );
   const hasValidTimeRange = availableMinutes > 0;
+  const endsNextDay = endTime < startTime;
   const enough =
     hasValidTimeRange && availableMinutes >= metrics.requiredMinutes;
   function changeTeamCount(next: number) {
@@ -1414,7 +1477,9 @@ function SetupScreen({
           <label className="setting-row">
             <div>
               <h2 className="section-title">เวลาจบ</h2>
-              <p className="section-note">เลือกเวลาที่ต้องการเลิกสนาม</p>
+              <p className="section-note">
+                เลือกเวลาที่ต้องการเลิกสนาม{endsNextDay ? ' · วันถัดไป' : ''}
+              </p>
             </div>
             <input
               aria-label="เวลาจบ"
@@ -2903,6 +2968,7 @@ function SettingsScreen({
     Boolean(secondQueuedMatch),
   );
   const availableMinutes = minutesBetween(startTime, endTime);
+  const endsNextDay = endTime < startTime;
   const windowMetrics = scheduleWindowMetrics(
     matchMinutes,
     breakMinutes,
@@ -3117,7 +3183,9 @@ function SettingsScreen({
           <div className="setting-row">
             <div>
               <h2 className="section-title">เวลาจบ</h2>
-              <p className="section-note">เพิ่มหรือลดเกมที่ยังไม่เริ่ม</p>
+              <p className="section-note">
+                เพิ่มหรือลดเกมที่ยังไม่เริ่ม{endsNextDay ? ' · วันถัดไป' : ''}
+              </p>
             </div>
             <input
               aria-label="เวลาจบ"
@@ -3289,6 +3357,8 @@ export default function FootballApp() {
   const remoteHydrationInFlightRef = useRef(false);
   const retryTimerRef = useRef<number | null>(null);
   const retryAttemptRef = useRef(0);
+  const syncSessionRef = useRef(0);
+  const openRequestRef = useRef(0);
 
   function cancelScheduledRetry(resetAttempt = true) {
     if (retryTimerRef.current !== null) {
@@ -3322,6 +3392,10 @@ export default function FootballApp() {
       return;
     const value = queuedStateRef.current ?? tournamentRef.current;
     if (!value) return;
+    const requestSession = syncSessionRef.current;
+    const requestStillActive = () =>
+      requestSession === syncSessionRef.current &&
+      gameIdRef.current === targetGameId;
     const serialized = JSON.stringify(value);
     if (serialized === lastRemoteStateRef.current) {
       queuedStateRef.current = null;
@@ -3343,9 +3417,13 @@ export default function FootballApp() {
         remoteRevisionRef.current,
         options,
       );
+      saveSucceeded = true;
+      if (!requestStillActive()) {
+        markLocalBackupSyncedIfUnchanged(targetGameId, value);
+        return;
+      }
       remoteRevisionRef.current = game.revision;
       lastRemoteStateRef.current = JSON.stringify(game.state);
-      saveSucceeded = true;
       cancelScheduledRetry();
       const latestSerialized = JSON.stringify(tournamentRef.current);
       if (latestSerialized !== serialized) {
@@ -3359,6 +3437,7 @@ export default function FootballApp() {
         writeLocalBackup(value, targetGameId, false);
       }
     } catch (error) {
+      if (!requestStillActive()) return;
       const latestPending = newestPendingState(
         value,
         queuedStateRef.current,
@@ -3381,7 +3460,16 @@ export default function FootballApp() {
       }
     } finally {
       saveInFlightRef.current = false;
-      if (
+      if (!requestStillActive()) {
+        const activeGameId = gameIdRef.current;
+        if (
+          activeGameId &&
+          queuedStateRef.current &&
+          !conflictRemoteRef.current &&
+          !options.keepalive
+        )
+          window.setTimeout(() => void flushSharedState(activeGameId), 0);
+      } else if (
         saveSucceeded &&
         queuedStateRef.current &&
         !conflictDetected &&
@@ -3398,8 +3486,9 @@ export default function FootballApp() {
     let cancelled = false;
     async function hydrate() {
       restoreGitHubPagesPath();
-      const backup = readLocalBackup();
       const pathGameId = gameIdFromPath();
+      const pathShowsAllGames = allGamesFromPath();
+      const backup = readLocalBackup(pathGameId);
       if (pathGameId) {
         gameIdRef.current = pathGameId;
         setGameId(pathGameId);
@@ -3496,7 +3585,7 @@ export default function FootballApp() {
         backup.tournament && !backup.gameId ? backup.tournament : null,
       );
       setSyncStatus('local');
-      setView('home');
+      setView(pathShowsAllGames ? 'games' : 'home');
       if (!cancelled) setHydrated(true);
     }
     void hydrate();
@@ -3541,6 +3630,7 @@ export default function FootballApp() {
     };
     const flushWhenHidden = () => {
       if (document.visibilityState === 'hidden') flushLatestState();
+      else if (dirtyRef.current) void flushSharedState(gameId);
     };
     window.addEventListener('pagehide', flushLatestState);
     document.addEventListener('visibilitychange', flushWhenHidden);
@@ -3630,6 +3720,7 @@ export default function FootballApp() {
           annotations: { readOnlyHint: false, untrustedContentHint: false },
           execute: () => {
             const demo = createDemoTournament();
+            syncSessionRef.current += 1;
             cancelScheduledRetry();
             tournamentRef.current = demo;
             lastRemoteStateRef.current = '';
@@ -3713,6 +3804,8 @@ export default function FootballApp() {
     setTournament(value);
   }
   async function publishTournament(value: Tournament, message: string) {
+    syncSessionRef.current += 1;
+    const publishSession = syncSessionRef.current;
     cancelScheduledRetry();
     tournamentRef.current = value;
     lastRemoteStateRef.current = '';
@@ -3730,6 +3823,7 @@ export default function FootballApp() {
     window.history.replaceState({}, '', gamePath());
     try {
       const game = await createSharedGame(value, bangkokDateCode());
+      if (publishSession !== syncSessionRef.current) return;
       const storedValue = extendTournamentToEndTime(game.state);
       lastRemoteStateRef.current = JSON.stringify(storedValue);
       remoteRevisionRef.current = game.revision;
@@ -3742,12 +3836,14 @@ export default function FootballApp() {
       window.history.pushState({}, '', gamePath(game.id));
       setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
     } catch {
+      if (publishSession !== syncSessionRef.current) return;
       setSyncStatus('local');
       setNotice(`${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`);
     }
   }
   function loadDemo() {
     const demo = createDemoTournament();
+    syncSessionRef.current += 1;
     cancelScheduledRetry();
     tournamentRef.current = demo;
     gameIdRef.current = '';
@@ -3781,6 +3877,17 @@ export default function FootballApp() {
     setSetupCopyMode(false);
     setView('setup');
   }
+  function openAllGames() {
+    window.history.pushState({}, '', allGamesPath());
+    setView('games');
+  }
+  function closeAllGames() {
+    const targetPath = gameIdRef.current
+      ? gamePath(gameIdRef.current)
+      : gamePath();
+    window.history.pushState({}, '', targetPath);
+    setView('home');
+  }
   function openCopySetup() {
     if (!tournament) return;
     setSetupSource(tournament);
@@ -3796,13 +3903,20 @@ export default function FootballApp() {
     setView('match-detail');
   }
   async function openSharedGame(gameIdToOpen: string, updateHistory = true) {
+    const openRequest = ++openRequestRef.current;
+    const startingSession = syncSessionRef.current;
+    const requestStillRelevant = () =>
+      openRequest === openRequestRef.current &&
+      startingSession === syncSessionRef.current;
     try {
       const game = await loadSharedGame(gameIdToOpen);
+      if (!requestStillRelevant()) return;
       if (!game) {
         setNotice('ไม่พบเกมนี้ในฐานข้อมูล');
         return;
       }
       const value = extendTournamentToEndTime(game.state);
+      syncSessionRef.current += 1;
       cancelScheduledRetry();
       lastRemoteStateRef.current = JSON.stringify(value);
       remoteRevisionRef.current = game.revision;
@@ -3821,13 +3935,15 @@ export default function FootballApp() {
       if (updateHistory) window.history.pushState({}, '', gamePath(game.id));
       setView('home');
     } catch {
+      if (!requestStillRelevant()) return;
       setNotice('เปิดเกมไม่สำเร็จ กรุณาลองใหม่');
     }
   }
   function handleDeletedGame(deletedGameId: string) {
     if (deletedGameId !== gameId) return;
+    syncSessionRef.current += 1;
     cancelScheduledRetry();
-    clearLocalBackup();
+    clearLocalBackup(deletedGameId);
     setTournament(null);
     tournamentRef.current = null;
     gameIdRef.current = '';
@@ -3864,7 +3980,8 @@ export default function FootballApp() {
       }
     }
 
-    clearLocalBackup();
+    clearLocalBackup(targetGameId);
+    syncSessionRef.current += 1;
     setTournament(null);
     tournamentRef.current = null;
     gameIdRef.current = '';
@@ -3932,7 +4049,12 @@ export default function FootballApp() {
         void openSharedGame(pathGameId, false);
         return;
       }
+      if (allGamesFromPath()) {
+        setView('games');
+        return;
+      }
       cancelScheduledRetry();
+      syncSessionRef.current += 1;
       tournamentRef.current = null;
       gameIdRef.current = '';
       remoteRevisionRef.current = 0;
@@ -3990,7 +4112,7 @@ export default function FootballApp() {
               <EmptyHome
                 onSetup={openNewSetup}
                 onDemo={loadDemo}
-                onGames={() => setView('games')}
+                onGames={openAllGames}
                 recoverableDraft={recoverableDraft}
                 onRecover={recoverDraft}
                 onDiscardDraft={discardDraft}
@@ -3999,7 +4121,7 @@ export default function FootballApp() {
           )}
           {view === 'games' && (
             <GamesScreen
-              onBack={() => setView('home')}
+              onBack={closeAllGames}
               onOpen={(id) => openSharedGame(id)}
               onDeleted={handleDeletedGame}
               onNotice={setNotice}
@@ -4066,11 +4188,6 @@ export default function FootballApp() {
               }
             >
               <TacticsScreen
-                key={JSON.stringify({
-                  gameId,
-                  teams: tournament.teams,
-                  tactics: tournament.tactics,
-                })}
                 tournament={tournament}
                 onUpdate={applyTournament}
                 onCopyLink={() => void copyGameLink()}
@@ -4110,7 +4227,7 @@ export default function FootballApp() {
                 applyTournament(value);
                 setNotice('บันทึกการตั้งค่าแล้ว');
               }}
-              onGames={() => setView('games')}
+              onGames={openAllGames}
               onTeams={() => setView('teams')}
               onDelete={deleteCurrentGame}
             />

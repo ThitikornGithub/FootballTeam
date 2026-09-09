@@ -184,8 +184,19 @@ function parseMarker(
     (!isString(value.teamId) || !teamIds.has(value.teamId))
   )
     return null;
+  if (value.kind === 'player' && value.teamId === undefined) return null;
   if (value.playerId !== undefined && !isString(value.playerId)) return null;
   return value as TacticMarker;
+}
+
+function markerCollectionIsValid(value: unknown[], teamIds: Set<string>) {
+  const markers = value.map((marker) => parseMarker(marker, teamIds));
+  if (markers.some((marker) => !marker)) return false;
+  const markerIds = markers.map((marker) => marker!.id);
+  return (
+    uniqueStrings(markerIds) &&
+    markers.filter((marker) => marker!.kind === 'ball').length === 1
+  );
 }
 
 function parseTactics(
@@ -200,10 +211,11 @@ function parseTactics(
     !teamIds.has(value.teamAId) ||
     !teamIds.has(value.teamBId) ||
     !Array.isArray(value.markers) ||
-    !isString(value.notes) ||
-    !value.markers.every((marker) => parseMarker(marker, teamIds))
+    !isString(value.notes)
   )
     return null;
+  const boardTeamIds = new Set([value.teamAId, value.teamBId]);
+  if (!markerCollectionIsValid(value.markers, boardTeamIds)) return null;
   if (
     (value.matchId !== undefined &&
       (!isString(value.matchId) || !value.matchId)) ||
@@ -224,7 +236,7 @@ function parseTactics(
     (!Array.isArray(value.animationSteps) ||
       value.animationSteps.length < 1 ||
       value.animationSteps.length > 8 ||
-      !value.animationSteps.every((step) => parseTacticStep(step, teamIds)))
+      !value.animationSteps.every((step) => parseTacticStep(step, boardTeamIds)))
   )
     return null;
   return value as TacticsBoard;
@@ -266,7 +278,7 @@ function parseTacticStep(
     isString(value.title) &&
     value.title.length <= 40 &&
     Array.isArray(value.markers) &&
-    value.markers.every((marker) => parseMarker(marker, teamIds)) &&
+    markerCollectionIsValid(value.markers, teamIds) &&
     Array.isArray(value.paths) &&
     value.paths.every(parseTacticPath)
   );
@@ -302,5 +314,74 @@ export function parseTournament(value: unknown): Tournament | null {
   if (!uniqueStrings(matchIds)) return null;
   if (value.tactics !== undefined && !parseTactics(value.tactics, teamIdSet))
     return null;
-  return { ...value, teams: teams as Team[] } as Tournament;
+  const parsedTeams = teams as Team[];
+  const playerIdsByTeam = new Map(
+    parsedTeams.map((team) => [
+      team.id,
+      new Set(team.players.map((player) => player.id)),
+    ]),
+  );
+  const hasPlayer = (teamId: string | undefined, playerId: string | undefined) =>
+    Boolean(
+      teamId && playerId && playerIdsByTeam.get(teamId)?.has(playerId),
+    );
+  const parsedMatches = (matches as Match[]).map((match) => ({
+    ...match,
+    teamAGkPlayerId:
+      match.status === 'finished' ||
+      hasPlayer(match.teamAId, match.teamAGkPlayerId)
+        ? match.teamAGkPlayerId
+        : undefined,
+    teamBGkPlayerId:
+      match.status === 'finished' ||
+      hasPlayer(match.teamBId, match.teamBGkPlayerId)
+        ? match.teamBGkPlayerId
+        : undefined,
+    scorers: match.scorers?.map((scorer) => ({
+      ...scorer,
+      playerId: hasPlayer(scorer.teamId, scorer.playerId)
+        ? scorer.playerId
+        : undefined,
+    })),
+  }));
+  const parsedTactics = value.tactics as TacticsBoard | undefined;
+  const sanitizeMarker = (marker: TacticMarker): TacticMarker => ({
+    ...marker,
+    playerId:
+      marker.kind === 'player' &&
+      hasPlayer(marker.teamId, marker.playerId)
+        ? marker.playerId
+        : undefined,
+  });
+  const tactics = parsedTactics
+    ? {
+        ...parsedTactics,
+        matchId: matchIds.includes(parsedTactics.matchId ?? '')
+          ? parsedTactics.matchId
+          : undefined,
+        teamAGkPlayerId: hasPlayer(
+          parsedTactics.teamAId,
+          parsedTactics.teamAGkPlayerId,
+        )
+          ? parsedTactics.teamAGkPlayerId
+          : undefined,
+        teamBGkPlayerId: hasPlayer(
+          parsedTactics.teamBId,
+          parsedTactics.teamBGkPlayerId,
+        )
+          ? parsedTactics.teamBGkPlayerId
+          : undefined,
+        markers: parsedTactics.markers.map(sanitizeMarker),
+        animationSteps: parsedTactics.animationSteps?.map((step) => ({
+          ...step,
+          markers: step.markers.map(sanitizeMarker),
+        })),
+      }
+    : undefined;
+  return {
+    ...value,
+    teams: parsedTeams,
+    matches: parsedMatches,
+    tactics,
+  } as Tournament;
 }

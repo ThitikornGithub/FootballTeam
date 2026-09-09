@@ -46,7 +46,9 @@ export function minutesBetween(startTime: string, endTime: string) {
   const [endHour, endMinute] = endTime.split(':').map(Number);
   const startTotal = startHour * 60 + startMinute;
   const endTotal = endHour * 60 + endMinute;
-  return Math.max(0, endTotal - startTotal);
+  const difference = endTotal - startTotal;
+  if (difference === 0) return 0;
+  return difference > 0 ? difference : difference + 24 * 60;
 }
 
 export function scheduleMetrics(

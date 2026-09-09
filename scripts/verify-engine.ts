@@ -133,8 +133,9 @@ assert(
 );
 assert(
   minutesBetween('18:00', '22:00') === 240 &&
-    minutesBetween('22:00', '18:00') === 0,
-  'End-time selection must calculate the available same-day window',
+    minutesBetween('23:00', '01:00') === 120 &&
+    minutesBetween('22:00', '22:00') === 0,
+  'End-time selection must calculate same-day and overnight windows',
 );
 const windowMetrics = scheduleWindowMetrics(10, 2, '19:00', 180);
 assert(
@@ -594,6 +595,65 @@ assert(
     tactics: persistedTactics,
   }) !== null,
   'Runtime validation must accept the GK lock and animated tactics state',
+);
+const tacticsWithMissingPlayer = parseTournament({
+  ...tournament,
+  matches: tournament.matches.map((match, index) =>
+    index === 0
+      ? {
+          ...match,
+          status: 'current',
+          teamAGkPlayerId: 'missing-player',
+          scorers: [
+            {
+              id: 'legacy-scorer',
+              teamId: match.teamAId,
+              playerId: 'missing-player',
+              playerName: 'อดีตผู้เล่น',
+              goals: 1,
+            },
+          ],
+        }
+      : match,
+  ),
+  tactics: {
+    ...persistedTactics,
+    matchId: 'missing-match',
+    markers: [
+      ...persistedTactics.markers,
+      {
+        id: 'legacy-player-marker',
+        kind: 'player' as const,
+        teamId: tournament.teams[0].id,
+        playerId: 'missing-player',
+        label: 'อดีตผู้เล่น',
+        x: 40,
+        y: 70,
+      },
+    ],
+  },
+});
+assert(
+  tacticsWithMissingPlayer?.matches[0].teamAGkPlayerId === undefined &&
+    tacticsWithMissingPlayer?.matches[0].scorers?.[0].playerId === undefined &&
+    tacticsWithMissingPlayer?.matches[0].scorers?.[0].playerName ===
+      'อดีตผู้เล่น' &&
+    tacticsWithMissingPlayer?.tactics?.matchId === undefined &&
+    tacticsWithMissingPlayer?.tactics?.markers[1].playerId === undefined,
+  'Runtime validation must repair stale player references without losing historical names',
+);
+assert(
+  parseTournament({
+    ...tournament,
+    tactics: {
+      ...persistedTactics,
+      markers: [
+        persistedTactics.markers[0],
+        { ...persistedTactics.markers[0] },
+      ],
+    },
+  }) === null,
+  'Runtime validation must reject duplicate tactic markers and multiple balls',
 );
 assert(
   parseTournament({
