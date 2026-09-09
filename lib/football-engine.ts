@@ -618,14 +618,18 @@ export function extendTournamentByMatches(
   });
 }
 
+function normalizeScore(value: number) {
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
 export function setMatchScore(
   tournament: Tournament,
   matchId: string,
   teamAScore: number,
   teamBScore: number,
 ): Tournament {
-  const normalizedA = Math.max(0, Math.floor(teamAScore));
-  const normalizedB = Math.max(0, Math.floor(teamBScore));
+  const normalizedA = normalizeScore(teamAScore);
+  const normalizedB = normalizeScore(teamBScore);
   return {
     ...tournament,
     matches: tournament.matches.map((match) =>
@@ -883,6 +887,15 @@ export function createPlayer(
 
 export function reorder<T>(items: T[], from: number, to: number) {
   const result = [...items];
+  if (
+    !Number.isInteger(from) ||
+    !Number.isInteger(to) ||
+    from < 0 ||
+    from >= items.length ||
+    to < 0 ||
+    to >= items.length
+  )
+    return result;
   const [item] = result.splice(from, 1);
   result.splice(to, 0, item);
   return result;

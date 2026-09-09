@@ -11,6 +11,7 @@ import {
   pairMeetingCount,
   recommendUpcomingPairs,
   reopenFinishedMatch,
+  reorder,
   reshuffleUpcomingMatches,
   scheduleMetrics,
   scheduleWindowMetrics,
@@ -674,6 +675,24 @@ assert(
     },
   }) === null,
   'Runtime validation must reject tactic paths outside the pitch',
+);
+
+const unusableScore = setMatchScore(
+  afterSkip,
+  afterSkip.matches[0].id,
+  Number.NaN,
+  -4,
+);
+assert(
+  unusableScore.matches[0].teamAScore === 0 &&
+    unusableScore.matches[0].teamBScore === 0,
+  'An unusable score must normalise to zero instead of corrupting standings',
+);
+assert(
+  reorder(['a', 'b', 'c'], 0, 2).join('') === 'bca' &&
+    reorder(['a', 'b', 'c'], 4, 0).join('') === 'abc' &&
+    reorder(['a', 'b', 'c'], 0, -1).join('') === 'abc',
+  'Reordering must ignore positions outside the list instead of inserting a hole',
 );
 
 assert(

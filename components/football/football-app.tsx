@@ -118,6 +118,8 @@ import {
   type Tournament,
 } from '@/lib/football-types';
 import {
+  ClientOutdatedError,
+  CorruptGameStateError,
   createSharedGame,
   deleteSharedGame,
   type FootballGameSummary,
@@ -188,6 +190,16 @@ type SyncStatus =
 
 function gameBackupKey(gameId: string) {
   return `${STORAGE_GAME_BACKUP_PREFIX}${gameId}`;
+}
+
+// Returns the message for a failure that retrying cannot fix, and an empty
+// string for ordinary errors that should keep retrying.
+function blockingSyncNotice(error: unknown) {
+  if (error instanceof ClientOutdatedError)
+    return 'แอปเวอร์ชันนี้เก่ากว่าฐานข้อมูล กรุณารีเฟรชหน้าเพื่อซิงก์ต่อ';
+  if (error instanceof CorruptGameStateError)
+    return 'ข้อมูลเกมนี้เสียหาย จึงซิงก์ต่อไม่ได้';
+  return '';
 }
 
 function readLocalBackup(gameId = '') {
@@ -263,10 +275,7 @@ function clearLocalBackup(gameId = '') {
   }
 }
 
-function markLocalBackupSyncedIfUnchanged(
-  gameId: string,
-  saved: Tournament,
-) {
+function markLocalBackupSyncedIfUnchanged(gameId: string, saved: Tournament) {
   const backup = readLocalBackup(gameId);
   if (
     backup.tournament &&
@@ -1624,6 +1633,10 @@ function PlayerPositionPicker({
   );
 }
 
+function rosterSignature(players: Team['players']) {
+  return players.map((player) => player.id).join(',');
+}
+
 function TeamDetailScreen({
   team,
   onBack,
@@ -1639,6 +1652,7 @@ function TeamDetailScreen({
   const [draggingPlayerId, setDraggingPlayerId] = useState<string | null>(null);
   const dragPlayersRef = useRef<Team['players'] | null>(null);
   const draggingPlayerIdRef = useRef<string | null>(null);
+  const dragBaselineRef = useRef('');
   const rotationLocked = Boolean(team.gkRotationLocked);
   const eligiblePlayers = team.players.filter((player) => !player.absentToday);
   const gkOrder = [
@@ -1685,6 +1699,7 @@ function TeamDetailScreen({
     event.preventDefault();
     const players = [...team.players];
     dragPlayersRef.current = players;
+    dragBaselineRef.current = rosterSignature(team.players);
     draggingPlayerIdRef.current = playerId;
     setDragPlayers(players);
     setDraggingPlayerId(playerId);
@@ -1713,12 +1728,16 @@ function TeamDetailScreen({
     if (!draggingPlayerIdRef.current) return;
     event.preventDefault();
     const nextPlayers = dragPlayersRef.current;
+    const baseline = dragBaselineRef.current;
     dragPlayersRef.current = null;
     draggingPlayerIdRef.current = null;
     setDragPlayers(null);
     setDraggingPlayerId(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId))
       event.currentTarget.releasePointerCapture(event.pointerId);
+    // A sync from another device can rewrite the roster mid-drag; committing
+    // the snapshot taken at drag start would silently undo it.
+    if (baseline !== rosterSignature(team.players)) return;
     if (saveOrder && nextPlayers) updatePlayers(nextPlayers);
   }
   function addPlayer() {
@@ -2570,15 +2589,23 @@ function GamesScreen({
   const [openingId, setOpeningId] = useState('');
   const [deletingId, setDeletingId] = useState('');
   const [confirmingId, setConfirmingId] = useState('');
+  const refreshTokenRef = useRef(0);
 
   async function refresh(force = false) {
+    // A manual reload can resolve before the load this screen starts on mount,
+    // so only the newest request is allowed to publish its result.
+    const token = refreshTokenRef.current + 1;
+    refreshTokenRef.current = token;
     setLoading(true);
     try {
-      setGames(await listSharedGames({ force }));
+      const list = await listSharedGames({ force });
+      if (refreshTokenRef.current !== token) return;
+      setGames(list);
     } catch {
+      if (refreshTokenRef.current !== token) return;
       onNotice('โหลดรายการเกมไม่สำเร็จ กรุณาลองใหม่');
     } finally {
-      setLoading(false);
+      if (refreshTokenRef.current === token) setLoading(false);
     }
   }
 
@@ -2890,6 +2917,69 @@ function SettingsPairPicker({
   );
 }
 
+function settingsDraftFrom(tournament: Tournament) {
+  const finishedCount = tournament.matches.filter(
+    (match) => match.status === 'finished',
+  ).length;
+  const lockedCurrent =
+    finishedCount > 0
+      ? tournament.matches.find((match) => match.status === 'current')
+      : undefined;
+  const [firstQueuedMatch, secondQueuedMatch] = tournament.matches.filter(
+    (match) => match.status !== 'finished' && match.id !== lockedCurrent?.id,
+  );
+  const recommendations = recommendUpcomingPairs(tournament, 2);
+  const fallbackTeamA = tournament.teams[0]?.id ?? '';
+  const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
+  return {
+    name: tournament.name,
+    teamColors: Object.fromEntries(
+      tournament.teams.map((team) => [team.id, team.color]),
+    ) as Record<string, TeamColor>,
+    matchMinutes: tournament.matchDurationMinutes,
+    breakMinutes: tournament.breakDurationMinutes,
+    startTime: tournament.startTime,
+    endTime: addMinutes(tournament.startTime, tournament.availableTimeMinutes),
+    firstPairA:
+      (finishedCount > 0 ? recommendations[0]?.[0] : undefined) ??
+      firstQueuedMatch?.teamAId ??
+      fallbackTeamA,
+    firstPairB:
+      (finishedCount > 0 ? recommendations[0]?.[1] : undefined) ??
+      firstQueuedMatch?.teamBId ??
+      fallbackTeamB,
+    secondPairA:
+      (finishedCount > 0 ? recommendations[1]?.[0] : undefined) ??
+      secondQueuedMatch?.teamAId ??
+      fallbackTeamA,
+    secondPairB:
+      (finishedCount > 0 ? recommendations[1]?.[1] : undefined) ??
+      secondQueuedMatch?.teamBId ??
+      fallbackTeamB,
+    useSecondPair: Boolean(secondQueuedMatch),
+  };
+}
+
+// Everything the draft above is derived from. This screen stays mounted while
+// a background poll applies an update from another device, so the form has to
+// notice when the game it was seeded from is no longer the current one.
+function settingsSourceSignature(tournament: Tournament) {
+  return JSON.stringify([
+    tournament.name,
+    tournament.matchDurationMinutes,
+    tournament.breakDurationMinutes,
+    tournament.startTime,
+    tournament.availableTimeMinutes,
+    tournament.teams.map((team) => [team.id, team.color]),
+    tournament.matches.map((match) => [
+      match.id,
+      match.status,
+      match.teamAId,
+      match.teamBId,
+    ]),
+  ]);
+}
+
 function SettingsScreen({
   tournament,
   gameId,
@@ -2911,24 +3001,42 @@ function SettingsScreen({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [name, setName] = useState(tournament.name);
-  const [teamColors, setTeamColors] = useState<Record<string, TeamColor>>(() =>
-    Object.fromEntries(tournament.teams.map((team) => [team.id, team.color])),
-  );
+  const [initialDraft] = useState(() => settingsDraftFrom(tournament));
+  const [name, setName] = useState(initialDraft.name);
+  const [teamColors, setTeamColors] = useState(initialDraft.teamColors);
   const selectableTeams = tournament.teams.map((team) => ({
     ...team,
     color: teamColors[team.id] ?? team.color,
   }));
-  const [matchMinutes, setMatchMinutes] = useState(
-    tournament.matchDurationMinutes,
+  const [matchMinutes, setMatchMinutes] = useState(initialDraft.matchMinutes);
+  const [breakMinutes, setBreakMinutes] = useState(initialDraft.breakMinutes);
+  const [startTime, setStartTime] = useState(initialDraft.startTime);
+  const [endTime, setEndTime] = useState(initialDraft.endTime);
+  const [firstPairA, setFirstPairA] = useState(initialDraft.firstPairA);
+  const [firstPairB, setFirstPairB] = useState(initialDraft.firstPairB);
+  const [secondPairA, setSecondPairA] = useState(initialDraft.secondPairA);
+  const [secondPairB, setSecondPairB] = useState(initialDraft.secondPairB);
+  const [useSecondPair, setUseSecondPair] = useState(
+    initialDraft.useSecondPair,
   );
-  const [breakMinutes, setBreakMinutes] = useState(
-    tournament.breakDurationMinutes,
-  );
-  const [startTime, setStartTime] = useState(tournament.startTime);
-  const [endTime, setEndTime] = useState(
-    addMinutes(tournament.startTime, tournament.availableTimeMinutes),
-  );
+  const sourceSignature = settingsSourceSignature(tournament);
+  const seededSignatureRef = useRef(sourceSignature);
+  useEffect(() => {
+    if (seededSignatureRef.current === sourceSignature) return;
+    seededSignatureRef.current = sourceSignature;
+    const draft = settingsDraftFrom(tournament);
+    setName(draft.name);
+    setTeamColors(draft.teamColors);
+    setMatchMinutes(draft.matchMinutes);
+    setBreakMinutes(draft.breakMinutes);
+    setStartTime(draft.startTime);
+    setEndTime(draft.endTime);
+    setFirstPairA(draft.firstPairA);
+    setFirstPairB(draft.firstPairB);
+    setSecondPairA(draft.secondPairA);
+    setSecondPairB(draft.secondPairB);
+    setUseSecondPair(draft.useSecondPair);
+  }, [sourceSignature, tournament]);
   const finishedCount = tournament.matches.filter(
     (match) => match.status === 'finished',
   ).length;
@@ -2936,37 +3044,6 @@ function SettingsScreen({
     finishedCount > 0
       ? tournament.matches.find((match) => match.status === 'current')
       : undefined;
-  const configurableMatches = tournament.matches.filter(
-    (match) => match.status !== 'finished' && match.id !== lockedCurrent?.id,
-  );
-  const firstQueuedMatch = configurableMatches[0];
-  const secondQueuedMatch = configurableMatches[1];
-  const initialRecommendations = recommendUpcomingPairs(tournament, 2);
-  const fallbackTeamA = tournament.teams[0]?.id ?? '';
-  const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
-  const [firstPairA, setFirstPairA] = useState(
-    (finishedCount > 0 ? initialRecommendations[0]?.[0] : undefined) ??
-      firstQueuedMatch?.teamAId ??
-      fallbackTeamA,
-  );
-  const [firstPairB, setFirstPairB] = useState(
-    (finishedCount > 0 ? initialRecommendations[0]?.[1] : undefined) ??
-      firstQueuedMatch?.teamBId ??
-      fallbackTeamB,
-  );
-  const [secondPairA, setSecondPairA] = useState(
-    (finishedCount > 0 ? initialRecommendations[1]?.[0] : undefined) ??
-      secondQueuedMatch?.teamAId ??
-      fallbackTeamA,
-  );
-  const [secondPairB, setSecondPairB] = useState(
-    (finishedCount > 0 ? initialRecommendations[1]?.[1] : undefined) ??
-      secondQueuedMatch?.teamBId ??
-      fallbackTeamB,
-  );
-  const [useSecondPair, setUseSecondPair] = useState(
-    Boolean(secondQueuedMatch),
-  );
   const availableMinutes = minutesBetween(startTime, endTime);
   const endsNextDay = endTime < startTime;
   const windowMetrics = scheduleWindowMetrics(
@@ -3359,6 +3436,8 @@ export default function FootballApp() {
   const retryAttemptRef = useRef(0);
   const syncSessionRef = useRef(0);
   const openRequestRef = useRef(0);
+  const pollFailureCountRef = useRef(0);
+  const pollFailedRef = useRef(false);
 
   function cancelScheduledRetry(resetAttempt = true) {
     if (retryTimerRef.current !== null) {
@@ -3454,9 +3533,11 @@ export default function FootballApp() {
         setConflictRemote(error.latest);
         setSyncStatus('conflict');
       } else {
+        const blockingNotice = blockingSyncNotice(error);
         setSyncStatus('error');
-        setNotice('ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
-        if (!options.keepalive) scheduleSyncRetry(targetGameId);
+        setNotice(blockingNotice || 'ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
+        if (!blockingNotice && !options.keepalive)
+          scheduleSyncRetry(targetGameId);
       }
     } finally {
       saveInFlightRef.current = false;
@@ -3548,8 +3629,9 @@ export default function FootballApp() {
             if (backupForGame) setSyncStatus('error');
             setNotice('ไม่พบเกมจากลิงก์นี้');
           }
-        } catch {
+        } catch (error) {
           if (cancelled) return;
+          const blockingNotice = blockingSyncNotice(error);
           if (backupForGame) {
             const value = extendTournamentToEndTime(
               tournamentRef.current ?? backupForGame,
@@ -3566,9 +3648,9 @@ export default function FootballApp() {
             }
             setTournament(value);
             setSyncStatus('error');
-            setNotice('เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
+            setNotice(blockingNotice || 'เชื่อมต่อเกมไม่ได้ กำลังใช้ข้อมูลสำรองของเกมนี้');
           } else {
-            setNotice('เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
+            setNotice(blockingNotice || 'เชื่อมต่อเกมจากลิงก์นี้ไม่ได้ กรุณาลองใหม่');
           }
         } finally {
           remoteHydrationInFlightRef.current = false;
@@ -3651,6 +3733,11 @@ export default function FootballApp() {
         return;
       void loadSharedGame(gameId)
         .then((game) => {
+          const recovered = pollFailedRef.current;
+          pollFailureCountRef.current = 0;
+          pollFailedRef.current = false;
+          if (recovered && !dirtyRef.current && !conflictRemoteRef.current)
+            setSyncStatus('saved');
           if (!game) return;
           const value = extendTournamentToEndTime(game.state);
           const serialized = JSON.stringify(value);
@@ -3676,7 +3763,17 @@ export default function FootballApp() {
             setSyncStatus('saved');
           }
         })
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          // Silently swallowing these let the poll fail forever while the
+          // header still claimed the game was in sync.
+          const blockingNotice = blockingSyncNotice(error);
+          pollFailureCountRef.current += 1;
+          if (!blockingNotice && pollFailureCountRef.current < 3) return;
+          if (pollFailedRef.current) return;
+          pollFailedRef.current = true;
+          setSyncStatus('error');
+          setNotice(blockingNotice || 'ยังดึงข้อมูลล่าสุดไม่ได้ กำลังลองใหม่');
+        });
     }, 15000);
     return () => window.clearInterval(poll);
   }, [hydrated, gameId, conflictRemote]);
@@ -3934,9 +4031,9 @@ export default function FootballApp() {
       setSelectedMatchId('');
       if (updateHistory) window.history.pushState({}, '', gamePath(game.id));
       setView('home');
-    } catch {
+    } catch (error) {
       if (!requestStillRelevant()) return;
-      setNotice('เปิดเกมไม่สำเร็จ กรุณาลองใหม่');
+      setNotice(blockingSyncNotice(error) || 'เปิดเกมไม่สำเร็จ กรุณาลองใหม่');
     }
   }
   function handleDeletedGame(deletedGameId: string) {

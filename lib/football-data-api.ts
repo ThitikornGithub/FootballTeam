@@ -48,6 +48,22 @@ export class RevisionConflictError extends Error {
   }
 }
 
+// Retrying cannot fix either of these, so the UI tells the user what to do
+// instead of looping on the generic "sync failed" path.
+export class CorruptGameStateError extends Error {
+  constructor() {
+    super('ข้อมูลเกมจากฐานข้อมูลมีรูปแบบไม่ถูกต้อง');
+    this.name = 'CorruptGameStateError';
+  }
+}
+
+export class ClientOutdatedError extends Error {
+  constructor() {
+    super('เวอร์ชันแอปในหน้านี้เก่ากว่าฐานข้อมูล');
+    this.name = 'ClientOutdatedError';
+  }
+}
+
 function parseStoredGame(value: unknown): StoredFootballGame | null {
   if (!value || typeof value !== 'object') return null;
   const game = value as Record<string, unknown>;
@@ -59,7 +75,7 @@ function parseStoredGame(value: unknown): StoredFootballGame | null {
     Number(game.revision) < 1 ||
     typeof game.updatedAt !== 'string'
   )
-    throw new Error('ข้อมูลเกมจากฐานข้อมูลมีรูปแบบไม่ถูกต้อง');
+    throw new CorruptGameStateError();
   return {
     id: game.id,
     state,
@@ -101,6 +117,10 @@ async function callRpc<T>(
 
   if (!response.ok) {
     const message = await response.text();
+    // PGRST202 means the RPC no longer exists, so this tab is running a bundle
+    // older than the database. A 404 without it is a normal "not found" raise.
+    if (response.status === 404 && message.includes('PGRST202'))
+      throw new ClientOutdatedError();
     throw new Error(`Data API ${response.status}: ${message}`);
   }
 

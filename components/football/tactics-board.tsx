@@ -123,6 +123,15 @@ function playerPositionLabel(player?: Player) {
     .join('/');
 }
 
+// autoPlaceTeamMarkers puts each keeper on its own goal spot: y 91 for team A
+// and y 9 for team B.
+function isInGoalZone(position: { x: number; y: number }, isTeamA: boolean) {
+  return (
+    Math.abs(position.x - 50) <= 12 &&
+    Math.abs(position.y - (isTeamA ? 91 : 9)) <= 7
+  );
+}
+
 function makeBoard(
   tournament: Tournament,
   setup: Partial<TacticsBoard> = {},
@@ -333,9 +342,7 @@ export function TacticsScreen({
     ...initialBoard,
     animationSteps: initialBoard.animationSteps?.length ? steps : undefined,
   };
-  const lastLocalSignatureRef = useRef(
-    JSON.stringify(initialPersistedBoard),
-  );
+  const lastLocalSignatureRef = useRef(JSON.stringify(initialPersistedBoard));
   const persistedBoard = useMemo(
     () => ({
       ...board,
@@ -533,17 +540,30 @@ export function TacticsScreen({
   }
 
   function moveMarker(markerId: string, x: number, y: number) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     const position = {
       x: Math.min(95, Math.max(5, x)),
       y: Math.min(97, Math.max(3, y)),
     };
     if (mode === 'position') {
-      setBoard((current) => ({
-        ...current,
-        markers: current.markers.map((marker) =>
-          marker.id === markerId ? { ...marker, ...position } : marker,
-        ),
-      }));
+      setBoard((current) => {
+        const moved = current.markers.find((marker) => marker.id === markerId);
+        const next = {
+          ...current,
+          markers: current.markers.map((marker) =>
+            marker.id === markerId ? { ...marker, ...position } : marker,
+          ),
+        };
+        if (moved?.kind !== 'player' || !moved.playerId) return next;
+        const isTeamA = moved.teamId === current.teamAId;
+        if (!isTeamA && moved.teamId !== current.teamBId) return next;
+        if (!isInGoalZone(position, isTeamA)) return next;
+        // Keep the stored keeper in step with whoever now stands in goal, so
+        // rebuilding the board does not drag the previous keeper back.
+        return isTeamA
+          ? { ...next, teamAGkPlayerId: moved.playerId }
+          : { ...next, teamBGkPlayerId: moved.playerId };
+      });
       return;
     }
     setAnimationHasContent(true);
@@ -570,6 +590,9 @@ export function TacticsScreen({
     const pitch = pitchRef.current;
     if (!pitch) return null;
     const bounds = pitch.getBoundingClientRect();
+    // A pointer event can arrive before the pitch has been laid out, and
+    // dividing by a zero-sized box would store NaN coordinates.
+    if (bounds.width <= 0 || bounds.height <= 0) return null;
     return {
       x: Math.min(
         95,

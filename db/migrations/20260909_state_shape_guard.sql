@@ -1,5 +1,9 @@
 begin;
 
+-- The client refuses to open a game whose state fails parseTournament, so a
+-- single malformed write used to make a game permanently unopenable on every
+-- device. These checks reject that write at the database instead.
+
 create or replace function public.football_jsonb_int_in_range(
   p_value jsonb,
   p_min numeric,
@@ -14,11 +18,8 @@ as $$
     and (p_value #>> '{}')::numeric between p_min and p_max;
 $$;
 
--- The client refuses to open a game whose state fails parseTournament, so an
--- unchecked malformed write would make a game permanently unopenable on every
--- device. Deliberately a subset of parseTournament in lib/football-schema.ts:
--- only the rules that parser always requires, so a valid write is never
--- rejected.
+-- Deliberately a subset of parseTournament in lib/football-schema.ts: only the
+-- rules that parser always requires, so a valid client write is never rejected.
 create or replace function public.football_state_is_valid(p_state jsonb)
 returns boolean
 language sql
@@ -68,25 +69,21 @@ as $$
     );
 $$;
 
-create table if not exists public.football_games (
-  id text primary key,
-  state jsonb not null,
-  revision bigint not null default 1,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint football_games_id_format
-    check (id ~ '^game[0-9]{8}-[1-9][0-9]*$'),
-  constraint football_games_state_object
-    check (jsonb_typeof(state) = 'object'),
-  constraint football_games_state_shape
-    check (public.football_state_is_valid(state))
-);
-
-revoke all on table public.football_games from public;
-revoke all on table public.football_games from anonymous;
-revoke all on table public.football_games from authenticated;
-
-drop function if exists public.save_football_game(text, jsonb);
+-- NOT VALID so an already-stored row is left alone; every future write is
+-- checked. Validate it separately once the existing rows are known to pass.
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conname = 'football_games_state_shape'
+      and conrelid = 'public.football_games'::regclass
+  ) then
+    alter table public.football_games
+      add constraint football_games_state_shape
+      check (public.football_state_is_valid(state)) not valid;
+  end if;
+end $$;
 
 create or replace function public.create_football_game(
   p_state jsonb,
@@ -138,26 +135,6 @@ begin
 end;
 $$;
 
-create or replace function public.get_football_game(p_game_id text)
-returns jsonb
-language sql
-stable
-security definer
-set search_path = pg_catalog, public
-as $$
-  select jsonb_build_object(
-    'id', id,
-    'state', state,
-    'revision', revision,
-    'updatedAt', updated_at
-  )
-  from public.football_games
-  where id = p_game_id
-    and p_game_id ~ '^game[0-9]{8}-[1-9][0-9]*$';
-$$;
-
--- Optimistic-locking version used by the web app. A stale browser receives the
--- latest row instead of silently overwriting changes made on another device.
 create or replace function public.save_football_game_v2(
   p_game_id text,
   p_state jsonb,
@@ -176,11 +153,9 @@ begin
   if p_game_id !~ '^game[0-9]{8}-[1-9][0-9]*$' then
     raise exception 'invalid game id' using errcode = '22023';
   end if;
-
   if jsonb_typeof(p_state) is distinct from 'object' then
     raise exception 'state must be a JSON object' using errcode = '22023';
   end if;
-
   if p_expected_revision is null or p_expected_revision < 1 then
     raise exception 'expected revision must be positive' using errcode = '22023';
   end if;
@@ -200,9 +175,7 @@ begin
   returning * into v_row;
 
   if not found then
-    select * into v_row
-      from public.football_games
-     where id = p_game_id;
+    select * into v_row from public.football_games where id = p_game_id;
     if not found then
       raise exception 'game not found' using errcode = 'P0002';
     end if;
@@ -219,69 +192,9 @@ begin
 end;
 $$;
 
-create or replace function public.list_football_games()
-returns jsonb
-language sql
-stable
-security definer
-set search_path = pg_catalog, public
-as $$
-  select coalesce(
-    jsonb_agg(
-      jsonb_build_object(
-        'id', id,
-        'name', coalesce(state ->> 'name', id),
-        'teamCount', coalesce(jsonb_array_length(state -> 'teams'), 0),
-        'matchCount', coalesce(jsonb_array_length(state -> 'matches'), 0),
-        'finishedCount', coalesce(
-          (
-            select count(*)
-            from jsonb_array_elements(coalesce(state -> 'matches', '[]'::jsonb)) match
-            where match ->> 'status' = 'finished'
-          ),
-          0
-        ),
-        'startTime', coalesce(state ->> 'startTime', ''),
-        'createdAt', created_at,
-        'updatedAt', updated_at
-      )
-      order by updated_at desc
-    ),
-    '[]'::jsonb
-  )
-  from public.football_games;
-$$;
-
-create or replace function public.delete_football_game(p_game_id text)
-returns boolean
-language plpgsql
-security definer
-set search_path = pg_catalog, public
-as $$
-declare
-  v_deleted boolean;
-begin
-  if p_game_id !~ '^game[0-9]{8}-[1-9][0-9]*$' then
-    raise exception 'invalid game id' using errcode = '22023';
-  end if;
-
-  delete from public.football_games where id = p_game_id;
-  v_deleted := found;
-  return v_deleted;
-end;
-$$;
-
 revoke all on function public.create_football_game(jsonb, text) from public;
-revoke all on function public.get_football_game(text) from public;
 revoke all on function public.save_football_game_v2(text, jsonb, bigint) from public;
-revoke all on function public.list_football_games() from public;
-revoke all on function public.delete_football_game(text) from public;
-
-grant usage on schema public to anonymous;
 grant execute on function public.create_football_game(jsonb, text) to anonymous;
-grant execute on function public.get_football_game(text) to anonymous;
 grant execute on function public.save_football_game_v2(text, jsonb, bigint) to anonymous;
-grant execute on function public.list_football_games() to anonymous;
-grant execute on function public.delete_football_game(text) to anonymous;
 
 commit;
