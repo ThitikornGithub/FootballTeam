@@ -792,7 +792,7 @@ export function TacticsScreen({
               </div>
               <div className="rounded-xl bg-[#eef8f1] px-3 py-2 text-xs font-bold text-[#087632]">
                 เลือกจำนวนคนหรือแผนแล้ว กระดานจะจัดใหม่ทันที ·
-                ผู้เล่นหน้าประตูเลือกตามคิวอัตโนมัติ
+                ระบบจะวางผู้เล่นหนึ่งคนไว้บริเวณหน้าประตูอัตโนมัติ
               </div>
               <div className="flex items-center justify-between gap-3">
                 <p className="text-xs font-bold text-slate-500">
@@ -1146,13 +1146,7 @@ export function TacticsScreen({
             const player = team?.players.find(
               (item) => item.id === marker.playerId,
             );
-            const isGoalkeeper =
-              Boolean(marker.playerId) &&
-              (marker.playerId === board.teamAGkPlayerId ||
-                marker.playerId === board.teamBGkPlayerId);
-            const positionLabel = isGoalkeeper
-              ? 'GK'
-              : playerPositionLabel(player);
+            const positionLabel = playerPositionLabel(player);
             const isBall = marker.kind === 'ball';
             const preview =
               dragPreview?.markerId === marker.id ? dragPreview : marker;
@@ -1280,7 +1274,7 @@ export function TacticsScreen({
             </AlertDialogTitle>
             <AlertDialogDescription className="text-left font-semibold leading-6">
               {mode === 'position'
-                ? 'ระบบจะใช้จำนวนคนและแผนที่เลือก จัดผู้เล่นหน้าประตูตามคิว และจัดคนอื่นจากทุกตำแหน่งที่เล่นได้ ส่วน Animation และข้อมูลเดิมส่วนอื่นจะยังอยู่'
+                ? 'ระบบจะใช้จำนวนคนและแผนที่เลือก วางผู้เล่นหนึ่งคนไว้บริเวณหน้าประตู และจัดคนอื่นจากทุกตำแหน่งที่เล่นได้ ส่วน Animation และข้อมูลเดิมส่วนอื่นจะยังอยู่'
                 : 'ทุกจังหวะและเส้นใน Animation จะถูกล้าง ส่วนตำแหน่งบนกระดานปกติจะยังอยู่'}
             </AlertDialogDescription>
           </AlertDialogHeader>
