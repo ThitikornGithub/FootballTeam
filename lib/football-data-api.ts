@@ -40,6 +40,7 @@ type CachedGameList = {
 
 let gameListRequest: Promise<FootballGameSummary[]> | null = null;
 let memoryGameList: CachedGameList | null = null;
+let gameListMutationVersion = 0;
 
 export class RevisionConflictError extends Error {
   constructor(readonly latest: StoredFootballGame) {
@@ -179,9 +180,14 @@ export function listSharedGames({ force = false }: { force?: boolean } = {}) {
     Date.now() - memoryGameList.cachedAt <= GAME_LIST_NETWORK_FRESH_MS
   )
     return Promise.resolve(cachedGames);
+  const requestMutationVersion = gameListMutationVersion;
   gameListRequest = callRpc<unknown>('list_football_games', {})
     .then(parseGameList)
     .then((games) => {
+      // A delete can finish while this older request is still in flight.
+      // Do not let its stale snapshot restore the deleted game in the cache.
+      if (requestMutationVersion !== gameListMutationVersion)
+        return readCachedSharedGames();
       cacheGameList(games);
       return games;
     })
@@ -231,6 +237,7 @@ export async function deleteSharedGame(gameId: string) {
     p_game_id: gameId,
   });
   if (deleted) {
+    gameListMutationVersion += 1;
     const remaining = readCachedSharedGames().filter(
       (game) => game.id !== gameId,
     );

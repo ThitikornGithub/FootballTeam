@@ -143,6 +143,7 @@ const STORAGE_KEY = 'football-match-maker-v1';
 const STORAGE_GAME_ID_KEY = 'football-match-maker-game-id';
 const STORAGE_PENDING_SYNC_KEY = 'football-match-maker-pending-sync';
 const STORAGE_GAME_BACKUP_PREFIX = 'football-match-maker-game-backup-v2:';
+const MAX_SYNCED_GAME_BACKUPS = 12;
 const PAGES_PATH_KEY = 'football-pages-path';
 const ALL_GAMES_PATH_SEGMENT = 'allgames';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
@@ -190,6 +191,39 @@ type SyncStatus =
 
 function gameBackupKey(gameId: string) {
   return `${STORAGE_GAME_BACKUP_PREFIX}${gameId}`;
+}
+
+function pruneSyncedGameBackups() {
+  try {
+    const syncedBackups: { key: string; savedAt: number }[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(STORAGE_GAME_BACKUP_PREFIX)) continue;
+      const stored = localStorage.getItem(key);
+      if (!stored) continue;
+      let backup: { pendingSync?: unknown; savedAt?: unknown };
+      try {
+        backup = JSON.parse(stored) as typeof backup;
+      } catch {
+        continue;
+      }
+      // Pending edits may be the only unsynced copy, so never prune them.
+      if (backup.pendingSync === true) continue;
+      syncedBackups.push({
+        key,
+        savedAt:
+          typeof backup.savedAt === 'number' && Number.isFinite(backup.savedAt)
+            ? backup.savedAt
+            : 0,
+      });
+    }
+    syncedBackups
+      .sort((a, b) => b.savedAt - a.savedAt)
+      .slice(MAX_SYNCED_GAME_BACKUPS)
+      .forEach(({ key }) => localStorage.removeItem(key));
+  } catch {
+    // Browser storage is only a best-effort offline backup.
+  }
 }
 
 // Returns the message for a failure that retrying cannot fix, and an empty
@@ -244,8 +278,9 @@ function writeLocalBackup(
     if (gameId) {
       localStorage.setItem(
         gameBackupKey(gameId),
-        JSON.stringify({ tournament, pendingSync }),
+        JSON.stringify({ tournament, pendingSync, savedAt: Date.now() }),
       );
+      pruneSyncedGameBackups();
       if (localStorage.getItem(STORAGE_GAME_ID_KEY) === gameId) {
         localStorage.removeItem(STORAGE_KEY);
         localStorage.removeItem(STORAGE_GAME_ID_KEY);
@@ -352,6 +387,21 @@ function scheduledEndTime(tournament: Tournament) {
     : tournament.startTime;
 }
 
+function isNextDayTime(tournament: Tournament, time: string) {
+  return time < tournament.startTime;
+}
+
+function displayTournamentTime(tournament: Tournament, time: string) {
+  return `${time}${isNextDayTime(tournament, time) ? ' (+1 วัน)' : ''}`;
+}
+
+function displayMatchTimeRange(tournament: Tournament, match: Match) {
+  const endTime = addMinutes(match.startTime, tournament.matchDurationMinutes);
+  const startsNextDay = isNextDayTime(tournament, match.startTime);
+  const endsNextDay = startsNextDay || endTime < match.startTime;
+  return `${match.startTime}${startsNextDay ? ' (+1 วัน)' : ''}–${endTime}${endsNextDay ? ' (+1 วัน)' : ''}`;
+}
+
 function formatShareText(tournament: Tournament) {
   const standings = calculateStandings(tournament);
   const topScorers = calculateTopScorers(tournament, 3);
@@ -381,7 +431,7 @@ function formatShareText(tournament: Tournament) {
   }
   lines.push(
     '',
-    `เวลาตามตาราง ${tournament.startTime}–${scheduledEndTime(tournament)}`,
+    `เวลาตามตาราง ${tournament.startTime}–${displayTournamentTime(tournament, scheduledEndTime(tournament))}`,
   );
   return lines.join('\n').trim();
 }
@@ -787,7 +837,7 @@ function CurrentMatchControl({
         <div>
           <p className="font-black text-[#087632]">
             {match.status === 'current' ? 'กำลังแข่ง' : 'เกมถัดไป'} ·{' '}
-            {match.startTime}
+            {displayTournamentTime(tournament, match.startTime)}
           </p>
           <p className="text-xs font-bold text-slate-400">
             เกม {match.matchNumber} · สนาม 1
@@ -856,7 +906,9 @@ function CurrentMatchControl({
       </div>
       {next && (
         <div className="mt-3 flex w-full items-center justify-between border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500">
-          <span>เกมถัดไป {next.startTime}</span>
+          <span>
+            เกมถัดไป {displayTournamentTime(tournament, next.startTime)}
+          </span>
           <span className="text-slate-800">
             {tournament.teams.find((team) => team.id === next.teamAId)?.name} vs{' '}
             {tournament.teams.find((team) => team.id === next.teamBId)?.name}
@@ -2023,7 +2075,7 @@ function ScheduleScreen({
     <>
       <PageHeader
         title="ตารางการแข่งขัน"
-        eyebrow={`${tournament.matches.length} แมตช์ · เวลาสนาม ${tournament.startTime}–${fieldEndTime}`}
+        eyebrow={`${tournament.matches.length} แมตช์ · เวลาสนาม ${tournament.startTime}–${displayTournamentTime(tournament, fieldEndTime)}`}
         action={
           <Button
             onClick={onStandings}
@@ -2072,6 +2124,15 @@ function ScheduleScreen({
                   const teamB = tournament.teams.find(
                     (team) => team.id === match.teamBId,
                   )!;
+                  const matchEndTime = addMinutes(
+                    match.startTime,
+                    tournament.matchDurationMinutes,
+                  );
+                  const startsNextDay = isNextDayTime(
+                    tournament,
+                    match.startTime,
+                  );
+                  const endsNextDay = isNextDayTime(tournament, matchEndTime);
                   const hasScore =
                     match.teamAScore !== undefined &&
                     match.teamBScore !== undefined;
@@ -2098,12 +2159,13 @@ function ScheduleScreen({
                           {match.startTime}
                         </span>
                         <span className="block text-[11px] font-bold text-slate-400">
-                          –
-                          {addMinutes(
-                            match.startTime,
-                            tournament.matchDurationMinutes,
-                          )}
+                          –{matchEndTime}
                         </span>
+                        {(startsNextDay || endsNextDay) && (
+                          <span className="block text-[9px] font-black leading-3 text-[#087632]">
+                            {startsNextDay ? '+1 วัน' : 'จบ +1 วัน'}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell className="p-0 align-middle">
                         <button
@@ -2314,7 +2376,7 @@ function MatchDetailScreen({
     <>
       <PageHeader
         title={`Match ${match.matchNumber}`}
-        eyebrow={`สนาม 1 · ${match.startTime}–${addMinutes(match.startTime, tournament.matchDurationMinutes)}`}
+        eyebrow={`สนาม 1 · ${displayMatchTimeRange(tournament, match)}`}
         onBack={onBack}
       />
       <div className="space-y-4 px-4 py-4 pb-8">
@@ -2643,6 +2705,10 @@ function GamesScreen({
         onNotice('ไม่พบเกมนี้ในฐานข้อมูล');
         return;
       }
+      // An older list request may have captured this game before deletion.
+      // Invalidate it and finish the spinner it no longer owns.
+      refreshTokenRef.current += 1;
+      setLoading(false);
       setGames((items) => items.filter((game) => game.id !== gameId));
       setConfirmingId('');
       onDeleted(gameId);
@@ -3995,10 +4061,12 @@ export default function FootballApp() {
     setView('setup');
   }
   function openAllGames() {
+    openRequestRef.current += 1;
     window.history.pushState({}, '', allGamesPath());
     setView('games');
   }
   function closeAllGames() {
+    openRequestRef.current += 1;
     const targetPath = gameIdRef.current
       ? gamePath(gameIdRef.current)
       : gamePath();
@@ -4058,6 +4126,7 @@ export default function FootballApp() {
   }
   function handleDeletedGame(deletedGameId: string) {
     if (deletedGameId !== gameId) return;
+    const stayOnGameList = allGamesFromPath();
     syncSessionRef.current += 1;
     cancelScheduledRetry();
     clearLocalBackup(deletedGameId);
@@ -4070,7 +4139,13 @@ export default function FootballApp() {
     remoteRevisionRef.current = 0;
     queuedStateRef.current = null;
     dirtyRef.current = false;
-    window.history.replaceState({}, '', gamePath());
+    openRequestRef.current += 1;
+    window.history.replaceState(
+      {},
+      '',
+      stayOnGameList ? allGamesPath() : gamePath(),
+    );
+    setView(stayOnGameList ? 'games' : 'home');
   }
   async function deleteCurrentGame() {
     const targetGameId = gameIdRef.current;
@@ -4167,9 +4242,11 @@ export default function FootballApp() {
         return;
       }
       if (allGamesFromPath()) {
+        openRequestRef.current += 1;
         setView('games');
         return;
       }
+      openRequestRef.current += 1;
       cancelScheduledRetry();
       syncSessionRef.current += 1;
       tournamentRef.current = null;
