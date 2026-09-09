@@ -9,9 +9,14 @@ returns boolean
 language sql
 immutable
 as $$
-  select jsonb_typeof(p_value) = 'number'
-    and (p_value #>> '{}')::numeric = trunc((p_value #>> '{}')::numeric)
-    and (p_value #>> '{}')::numeric between p_min and p_max;
+  -- A missing key reads as SQL NULL, and a CHECK constraint accepts NULL, so
+  -- every branch has to resolve to a definite true or false.
+  select coalesce(
+    jsonb_typeof(p_value) = 'number'
+      and (p_value #>> '{}')::numeric = trunc((p_value #>> '{}')::numeric)
+      and (p_value #>> '{}')::numeric between p_min and p_max,
+    false
+  );
 $$;
 
 -- The client refuses to open a game whose state fails parseTournament, so an
@@ -24,7 +29,7 @@ returns boolean
 language sql
 immutable
 as $$
-  select
+  select coalesce(
     jsonb_typeof(p_state) = 'object'
     and jsonb_typeof(p_state -> 'id') = 'string'
     and jsonb_typeof(p_state -> 'name') = 'string'
@@ -65,7 +70,9 @@ as $$
       where jsonb_typeof(match) is distinct from 'object'
          or jsonb_typeof(match -> 'id') is distinct from 'string'
          or length(match ->> 'id') = 0
-    );
+    ),
+    false
+  );
 $$;
 
 create table if not exists public.football_games (
