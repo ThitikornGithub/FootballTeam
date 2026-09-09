@@ -2364,14 +2364,19 @@ function MatchDetailScreen({
   );
 
   const [editingScore, setEditingScore] = useState(false);
-  /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- reseed on the match itself; score changes are handled below. */
   useEffect(() => {
-    // Adopting a remote score mid-keystroke would wipe the digits being typed,
-    // so wait until the field is left before following the shared game again.
-    if (editingScore) return;
     setScoreA(String(match.teamAScore ?? 0));
     setScoreB(String(match.teamBScore ?? 0));
-  }, [editingScore, match.id, match.teamAScore, match.teamBScore]);
+  }, [match.id]);
+  /* oxlint-enable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    // A finished match holds its draft until the user confirms it, so only a
+    // live match follows the shared game here, and not mid-keystroke.
+    if (editingScore || match.status === 'finished') return;
+    setScoreA(String(match.teamAScore ?? 0));
+    setScoreB(String(match.teamBScore ?? 0));
+  }, [editingScore, match.status, match.teamAScore, match.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -3123,22 +3128,51 @@ function SettingsScreen({
   );
   const sourceSignature = settingsSourceSignature(tournament);
   const seededSignatureRef = useRef(sourceSignature);
+  const seededDraftRef = useRef(initialDraft);
   useEffect(() => {
     if (seededSignatureRef.current === sourceSignature) return;
     seededSignatureRef.current = sourceSignature;
     const draft = settingsDraftFrom(tournament);
-    setName(draft.name);
-    setTeamColors(draft.teamColors);
-    setMatchMinutes(draft.matchMinutes);
-    setBreakMinutes(draft.breakMinutes);
-    setStartTime(draft.startTime);
-    setEndTime(draft.endTime);
-    setFirstPairA(draft.firstPairA);
-    setFirstPairB(draft.firstPairB);
-    setSecondPairA(draft.secondPairA);
-    setSecondPairB(draft.secondPairB);
-    setUseSecondPair(draft.useSecondPair);
-  }, [sourceSignature, tournament]);
+    const seeded = seededDraftRef.current;
+    seededDraftRef.current = draft;
+    const teamIds = new Set(tournament.teams.map((team) => team.id));
+    // Someone finishing a match reseeds this form, so a field the user has
+    // already changed keeps their value and only untouched ones follow the
+    // shared game. A team that no longer exists is replaced either way.
+    if (name === seeded.name) setName(draft.name);
+    if (JSON.stringify(teamColors) === JSON.stringify(seeded.teamColors))
+      setTeamColors(draft.teamColors);
+    if (matchMinutes === seeded.matchMinutes)
+      setMatchMinutes(draft.matchMinutes);
+    if (breakMinutes === seeded.breakMinutes)
+      setBreakMinutes(draft.breakMinutes);
+    if (startTime === seeded.startTime) setStartTime(draft.startTime);
+    if (endTime === seeded.endTime) setEndTime(draft.endTime);
+    if (firstPairA === seeded.firstPairA || !teamIds.has(firstPairA))
+      setFirstPairA(draft.firstPairA);
+    if (firstPairB === seeded.firstPairB || !teamIds.has(firstPairB))
+      setFirstPairB(draft.firstPairB);
+    if (secondPairA === seeded.secondPairA || !teamIds.has(secondPairA))
+      setSecondPairA(draft.secondPairA);
+    if (secondPairB === seeded.secondPairB || !teamIds.has(secondPairB))
+      setSecondPairB(draft.secondPairB);
+    if (useSecondPair === seeded.useSecondPair)
+      setUseSecondPair(draft.useSecondPair);
+  }, [
+    sourceSignature,
+    tournament,
+    name,
+    teamColors,
+    matchMinutes,
+    breakMinutes,
+    startTime,
+    endTime,
+    firstPairA,
+    firstPairB,
+    secondPairA,
+    secondPairB,
+    useSecondPair,
+  ]);
   const finishedCount = tournament.matches.filter(
     (match) => match.status === 'finished',
   ).length;
@@ -3838,6 +3872,9 @@ export default function FootballApp() {
         return;
       void loadSharedGame(gameId)
         .then((game) => {
+          // The guards above ran when the interval fired; by the time the
+          // response lands the user may have switched games or started an edit.
+          if (gameIdRef.current !== gameId) return;
           const recovered = pollFailedRef.current;
           pollFailureCountRef.current = 0;
           pollFailedRef.current = false;
@@ -3861,6 +3898,10 @@ export default function FootballApp() {
             dirtyRef.current = false;
           }
           if (game.revision > remoteRevisionRef.current) {
+            // An edit started while this response was in flight would be
+            // overwritten here, and the save that carries it would then lose to
+            // its own conflict handler. Leave it for that save to settle.
+            if (dirtyRef.current || saveInFlightRef.current) return;
             remoteRevisionRef.current = game.revision;
             lastRemoteStateRef.current = serialized;
             tournamentRef.current = value;
@@ -3992,6 +4033,12 @@ export default function FootballApp() {
     if (hasUnsavedRemoteState) {
       queuedStateRef.current = value;
       dirtyRef.current = true;
+    } else if (targetGameId) {
+      // An edit undone back to the synced state leaves nothing to send. Holding
+      // the queue would keep the poll switched off and let a later keepalive
+      // flush republish the change the user just took back.
+      queuedStateRef.current = null;
+      dirtyRef.current = false;
     }
     writeLocalBackup(value, targetGameId, hasUnsavedRemoteState);
     setSyncStatus(

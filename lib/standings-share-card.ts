@@ -325,6 +325,10 @@ export function renderStandingsShareCard(
     );
   }
 
+  // The scorer rows above leave the context right-aligned, which would hang
+  // this line off the middle of the card instead of centring it.
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
   context.fillStyle = '#758198';
   context.font = `700 24px ${fontFamily}`;
   context.fillText(
