@@ -1,6 +1,9 @@
 import { ImageResponse } from 'next/og';
 import { loadSharedGame } from '@/lib/football-data-api';
 import { TEAM_COLOR_HEX, gameDateLabel } from '@/lib/game-share';
+import backgroundUrl from '@/public/game-og-stadium-bg.png?inline';
+import boldFontUrl from '@/public/fonts/NotoSansThai-Bold.ttf?inline';
+import regularFontUrl from '@/public/fonts/NotoSansThai-Regular.ttf?inline';
 
 type GameImageRouteContext = {
   params: Promise<{ gameId: string }>;
@@ -25,27 +28,18 @@ function gameNameSize(name: string) {
   return 36;
 }
 
-async function fetchAsset(request: Request, pathname: string) {
-  const headers = new Headers();
-  for (const name of ['OAI-Sites-Authorization', 'cookie']) {
-    const value = request.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-  const response = await fetch(new URL(pathname, request.url), { headers });
-  if (!response.ok)
-    throw new Error(`Unable to load game share asset: ${pathname}`);
-  return response.arrayBuffer();
+function dataUrlToArrayBuffer(dataUrl: string) {
+  const marker = ';base64,';
+  const markerIndex = dataUrl.indexOf(marker);
+  if (markerIndex < 0) throw new Error('Expected an inline base64 asset');
+  const binary = atob(dataUrl.slice(markerIndex + marker.length));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1)
+    bytes[index] = binary.charCodeAt(index);
+  return bytes.buffer;
 }
 
-function pngDataUrl(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let offset = 0; offset < bytes.length; offset += 0x8000)
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-  return `data:image/png;base64,${btoa(binary)}`;
-}
-
-export async function GET(request: Request, context: GameImageRouteContext) {
+export async function GET(_request: Request, context: GameImageRouteContext) {
   const { gameId } = await context.params;
   const game = await loadSharedGame(gameId).catch(() => null);
   if (!game)
@@ -54,12 +48,8 @@ export async function GET(request: Request, context: GameImageRouteContext) {
       headers: { 'content-type': 'text/plain; charset=utf-8' },
     });
 
-  const [regularFont, boldFont, background] = await Promise.all([
-    fetchAsset(request, '/fonts/NotoSansThai-Regular.ttf'),
-    fetchAsset(request, '/fonts/NotoSansThai-Bold.ttf'),
-    fetchAsset(request, '/game-og-stadium-bg.png'),
-  ]);
-  const backgroundUrl = pngDataUrl(background);
+  const regularFont = dataUrlToArrayBuffer(regularFontUrl);
+  const boldFont = dataUrlToArrayBuffer(boldFontUrl);
   const tournament = game.state;
   const teamCount = tournament.teams.length;
   const matchCount = tournament.matches.length;
