@@ -21,8 +21,8 @@ export const metadata: Metadata = {
     images: [
       {
         url: publicAsset('/og.png'),
-        width: 1200,
-        height: 630,
+        width: 1254,
+        height: 1254,
         alt: 'Football Match Maker',
       },
     ],
