@@ -33,7 +33,7 @@ export async function generateMetadata({
   }
 
   const description = gameShareDescription(gameId, game.state);
-  const imageUrl = `${GAME_SHARE_ORIGIN}/api/game-og/${encodeURIComponent(gameId)}?v=${game.revision}`;
+  const imageUrl = `${GAME_SHARE_ORIGIN}/api/game-og/${encodeURIComponent(gameId)}?v=${game.revision}-match-day-v2`;
   return {
     metadataBase: new URL(GAME_SHARE_ORIGIN),
     title: `${game.state.name} | Football Match Maker`,
