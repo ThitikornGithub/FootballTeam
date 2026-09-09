@@ -276,11 +276,24 @@ function writeLocalBackup(
 ) {
   try {
     if (gameId) {
-      localStorage.setItem(
-        gameBackupKey(gameId),
-        JSON.stringify({ tournament, pendingSync, savedAt: Date.now() }),
-      );
-      pruneSyncedGameBackups();
+      const key = gameBackupKey(gameId);
+      const payload = JSON.stringify({
+        tournament,
+        pendingSync,
+        savedAt: Date.now(),
+      });
+      const storedCount = localStorage.length;
+      try {
+        localStorage.setItem(key, payload);
+        // Only a write that adds a key can push the collection past the limit,
+        // and this runs on every keystroke, so skip the scan otherwise.
+        if (localStorage.length > storedCount) pruneSyncedGameBackups();
+      } catch {
+        // Storage is full. Dropping synced copies is what makes room, so it has
+        // to happen before the retry rather than after a write that threw.
+        pruneSyncedGameBackups();
+        localStorage.setItem(key, payload);
+      }
       if (localStorage.getItem(STORAGE_GAME_ID_KEY) === gameId) {
         localStorage.removeItem(STORAGE_KEY);
         localStorage.removeItem(STORAGE_GAME_ID_KEY);
@@ -3774,6 +3787,9 @@ export default function FootballApp() {
       if (!gameId) return;
       const serialized = JSON.stringify(tournament);
       if (serialized === lastRemoteStateRef.current) return;
+      // An unresolved conflict owns the status, and flushing is blocked until
+      // the user picks a side, so leave both alone.
+      if (conflictRemoteRef.current) return;
       queuedStateRef.current = tournament;
       dirtyRef.current = true;
       setSyncStatus(
@@ -4101,21 +4117,45 @@ export default function FootballApp() {
         return;
       }
       const value = extendTournamentToEndTime(game.state);
+      const remoteSerialized = JSON.stringify(value);
+      const backup = readLocalBackup(gameIdToOpen);
+      // Reopening a game must not overwrite edits that never reached Neon, the
+      // same way a cold start hands them to the conflict prompt.
+      const pendingLocal =
+        backup.pendingSync && backup.tournament
+          ? extendTournamentToEndTime(backup.tournament)
+          : null;
+      const conflicting =
+        pendingLocal && JSON.stringify(pendingLocal) !== remoteSerialized
+          ? pendingLocal
+          : null;
       syncSessionRef.current += 1;
       cancelScheduledRetry();
-      lastRemoteStateRef.current = JSON.stringify(value);
+      lastRemoteStateRef.current = remoteSerialized;
       remoteRevisionRef.current = game.revision;
       gameIdRef.current = game.id;
-      queuedStateRef.current = null;
-      dirtyRef.current = false;
-      conflictRemoteRef.current = null;
-      setConflictRemote(null);
       setGameId(game.id);
-      setTournament(value);
-      tournamentRef.current = value;
-      writeLocalBackup(value, game.id, false);
-      setSyncStatus('saved');
-      setSelectedTeamId(value.teams[0]?.id ?? '');
+      if (conflicting) {
+        const remoteGame = { ...game, state: value };
+        queuedStateRef.current = conflicting;
+        dirtyRef.current = true;
+        conflictRemoteRef.current = remoteGame;
+        setConflictRemote(remoteGame);
+        setTournament(conflicting);
+        tournamentRef.current = conflicting;
+        setSyncStatus('conflict');
+        setNotice('มีข้อมูลในเครื่องที่ยังไม่ได้ซิงก์ กรุณาเลือกข้อมูลที่จะใช้');
+      } else {
+        queuedStateRef.current = null;
+        dirtyRef.current = false;
+        conflictRemoteRef.current = null;
+        setConflictRemote(null);
+        setTournament(value);
+        tournamentRef.current = value;
+        writeLocalBackup(value, game.id, false);
+        setSyncStatus('saved');
+      }
+      setSelectedTeamId(tournamentRef.current?.teams[0]?.id ?? '');
       setSelectedMatchId('');
       if (updateHistory) window.history.pushState({}, '', gamePath(game.id));
       setView('home');
@@ -4248,6 +4288,9 @@ export default function FootballApp() {
       }
       openRequestRef.current += 1;
       cancelScheduledRetry();
+      // The teardown below drops the queue, so anything still unsent has to
+      // leave now. A save that lands after this marks the backup synced.
+      if (dirtyRef.current) void flushSharedState(gameIdRef.current);
       syncSessionRef.current += 1;
       tournamentRef.current = null;
       gameIdRef.current = '';
