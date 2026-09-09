@@ -64,7 +64,7 @@ Technology:
 | `lib/football-schema.ts`                | Runtime validation ของ state ที่มาจาก DB/local backup                                                     |
 | `lib/standings-share-card.ts`           | วาดและ export PNG ตารางคะแนน                                                                              |
 | `app/layout.tsx`                        | metadata, favicon, Open Graph/X social preview และ Neon preconnect                                        |
-| `public/og.png`                         | รูป preview เมื่อแชร์ลิงก์เว็บไซต์ผ่านแอปแชตหรือ social platform                                          |
+| `public/og*.jpg`                        | รูป preview เมื่อแชร์ลิงก์เว็บไซต์ผ่านแอปแชตหรือ social platform                                          |
 | `lib/demo-data.ts`                      | ข้อมูลตัวอย่าง 4 ทีม                                                                                      |
 | `db/neon-schema.sql`                    | table, RPC functions และ grants ของ Neon                                                                  |
 | `scripts/verify-engine.ts`              | engine smoke checks                                                                                       |
