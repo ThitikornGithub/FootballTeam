@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+  schedule:
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -43,6 +45,9 @@ jobs:
           mv dist/client/FootballTeam/_next dist/client/_next
           rmdir dist/client/FootballTeam
           cp scripts/github-pages-404.html dist/client/404.html
+
+      - name: Generate game share pages from Neon
+        run: npm run generate:game-shares
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
