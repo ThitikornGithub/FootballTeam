@@ -2,8 +2,10 @@
 
 Mobile-first web app สำหรับจัดตารางฟุตบอลแบบ round robin บน 1 สนาม หมุนเวียนผู้รักษาประตู บันทึกสกอร์ ตารางคะแนน และวางแผนบนกระดาน tactic
 
-- Production: <https://thitikorngithub.github.io/FootballTeam/>
+- Production: <https://thitikorngithub.github.io/FootballTeam/> (deployment เดียวของโปรเจกต์)
 - Repository: <https://github.com/ThitikornGithub/FootballTeam>
+- เว็บแชร์แยกบนโดเมน `*.chatgpt.site` เลิกใช้แล้วและตอบ 404 ทั้งหมด ลิงก์แชร์อิง origin
+  ที่เปิดอยู่จริง จึงต้องเปิดแอปจาก URL production ด้านบนเมื่อจะส่งลิงก์ให้เพื่อน
 - เอกสาร architecture, persistence, security model, audit findings และแนวทางส่งต่องาน: [PROJECT_HANDOFF.md](./PROJECT_HANDOFF.md)
 
 ## Run locally

@@ -41,6 +41,11 @@ public.football_games (Postgres, one JSONB state per game)
 
 ไม่มี application server หรือ Vercel Function อยู่กลางทาง ตัว browser เรียก Neon Data API โดยตรง
 
+**GitHub Pages เป็น deployment เดียวของโปรเจกต์นี้** เคยมีเว็บแชร์แยกบนโดเมน `*.chatgpt.site`
+ที่รัน edge route สำหรับสร้าง OG image ต่อเกม แต่ถอดออกแล้วใน `48c9a09` และโดเมนนั้นตอบ 404
+ทั้งหมด ลิงก์แชร์สร้างจาก `window.location.origin` จึงชี้กลับมาที่ GitHub Pages เสมอ
+ไม่ต้องตรวจหรือ deploy host ที่สองอีก
+
 Technology:
 
 - React 19 + TypeScript
@@ -131,6 +136,8 @@ Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906
 - Root `/FootballTeam/` เปิดหน้าเริ่มต้น 3 ปุ่มเสมอ
 - หน้ารวมเกมใช้ `/FootballTeam/allgames` และเปิดตรง/เก็บ bookmark ได้
 - Game URL ใช้ `/FootballTeam/gameYYYYMMDD-N`
+- ปุ่มคัดลอกลิงก์ประกอบ URL จาก `window.location.origin` เท่านั้น ห้าม hardcode โดเมนอื่น
+  มิฉะนั้นลิงก์ที่ส่งให้เพื่อนจะชี้ไป host ที่ไม่ได้ deploy
 - GitHub Pages ไม่มี SPA rewrite จริง จึงใช้ `404.html` เก็บ path ใน `sessionStorage`, redirect ไป root แล้ว React คืน path ก่อนอ่าน Game ID
 - มี `popstate` listener แล้ว ดังนั้น Back/Forward จะโหลด game หรือกลับ Home ให้ตรงกับ URL และจะ invalidate คำขอเปิดเกมเดิมเมื่อผู้ใช้กลับ Home หรือหน้าเกมทั้งหมด
 - เมื่อลบเกมปัจจุบันจากหน้าเกมทั้งหมด แอปจะคง URL `/FootballTeam/allgames` และหน้ารายการไว้; หากผู้ใช้เปลี่ยนหน้าไประหว่างลบจะยึด route ล่าสุดแทน
@@ -252,6 +259,8 @@ Scheduling หลังเริ่มแข่งใช้จำนวนคร
 - JWT ปัจจุบันเป็น public app credential โดยตั้งใจ; การเพิ่มข้อมูลสำคัญต้องเปลี่ยน security model ก่อน
 - ก่อนแก้ scheduling/GK ให้เพิ่มหรือปรับ assertions ใน `scripts/verify-engine.ts`
 - ก่อน deploy ให้รัน lint, typecheck, engine checks และ GitHub Pages production build
+- deploy ไปที่ GitHub Pages ผ่าน `origin` ที่เดียว อย่าเพิ่ม host ที่สอง dynamic route หรือ
+  edge function กลับเข้ามาโดยไม่ได้ตกลงกันก่อน; OG image ต้องเป็นไฟล์ static ใน `public/`
 - ตรวจ deep-link routing หลังแตะ base path, history หรือ 404 script
 - แยกผล simulated/browser QA ออกจาก real-device touch และ native share-sheet testing เสมอ
 - Worktree อาจมีงานของคนอื่นอยู่ ห้าม reset/revert การเปลี่ยนที่ไม่เกี่ยวข้อง
