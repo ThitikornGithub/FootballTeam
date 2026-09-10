@@ -515,25 +515,41 @@ export function TacticsScreen({
     [],
   );
 
-  function resetBoard(setup: Partial<TacticsBoard> = {}) {
+  function resetBoard(
+    setup: Partial<TacticsBoard> = {},
+    { keepAnimation = false } = {},
+  ) {
     const nextBoard = {
       ...makeBoard(tournament, { ...board, ...setup }),
       notes: board.notes,
     };
     setBoard(nextBoard);
-    setSteps([
-      {
-        id: prototypeId('step'),
-        title: 'ตำแหน่งเริ่มต้น',
-        markers: copyMarkers(nextBoard.markers),
-        paths: [],
-      },
-    ]);
-    setActiveStepIndex(0);
+    // Reshaping a lineup should not discard the animation built on top of it,
+    // so re-anchor every step onto the new markers the way a reload does.
+    const keptSteps =
+      keepAnimation && animationHasContent
+        ? steps.map((step) => ({
+            ...step,
+            markers: reconcileMarkers(nextBoard.markers, step.markers),
+          }))
+        : null;
+    setSteps(
+      keptSteps ?? [
+        {
+          id: prototypeId('step'),
+          title: 'ตำแหน่งเริ่มต้น',
+          markers: copyMarkers(nextBoard.markers),
+          paths: [],
+        },
+      ],
+    );
+    setActiveStepIndex(
+      keptSteps ? Math.min(activeStepIndex, keptSteps.length - 1) : 0,
+    );
     setTool('move');
     setPathPreview(null);
     setIsPlaying(false);
-    setAnimationHasContent(false);
+    setAnimationHasContent(Boolean(keptSteps));
   }
 
   function resetCurrentMode() {
@@ -686,6 +702,9 @@ export function TacticsScreen({
 
   function addStep() {
     if (!currentStep || steps.length >= 8) return;
+    // Inserting into the list the playback timer is walking would land the new
+    // step somewhere the user did not aim for.
+    setIsPlaying(false);
     setAnimationHasContent(true);
     const nextStep: TacticStep = {
       id: prototypeId('step'),
@@ -891,11 +910,14 @@ export function TacticsScreen({
                       type="button"
                       aria-pressed={playerCount === count}
                       onClick={() =>
-                        resetBoard({
-                          playerCount: count,
-                          teamAFormation: 'auto',
-                          teamBFormation: 'auto',
-                        })
+                        resetBoard(
+                          {
+                            playerCount: count,
+                            teamAFormation: 'auto',
+                            teamBFormation: 'auto',
+                          },
+                          { keepAnimation: true },
+                        )
                       }
                       className={`h-10 rounded-xl text-sm font-black ${playerCount === count ? 'bg-[#11823b] text-white' : 'border border-slate-200 bg-white text-slate-600'}`}
                     >
@@ -935,10 +957,13 @@ export function TacticsScreen({
                         aria-label={`แผนการเล่น ${side.team?.name ?? ''}`}
                         value={side.formation}
                         onChange={(event) =>
-                          resetBoard({
-                            [side.formationKey]: event.target
-                              .value as TacticFormation,
-                          })
+                          resetBoard(
+                            {
+                              [side.formationKey]: event.target
+                                .value as TacticFormation,
+                            },
+                            { keepAnimation: true },
+                          )
                         }
                         className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-2 text-xs font-black text-slate-800 outline-none"
                       >
@@ -1117,14 +1142,17 @@ export function TacticsScreen({
                 aria-label="ชื่อจังหวะ"
                 value={currentStep?.title ?? ''}
                 onChange={(event) => updateStepTitle(event.target.value)}
-                className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-[#35a95f]"
+                // Playback moves the active step every few seconds, so editing
+                // it mid-run drops the text into whichever step is on screen.
+                disabled={isPlaying}
+                className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-[#35a95f] disabled:opacity-50"
                 placeholder="ตั้งชื่อจังหวะ"
               />
               <Button
                 type="button"
                 variant="outline"
                 onClick={removeStep}
-                disabled={steps.length <= 1}
+                disabled={isPlaying || steps.length <= 1}
                 aria-label="ลบจังหวะนี้"
                 className="h-11 w-11 shrink-0 rounded-xl p-0 text-red-600"
               >

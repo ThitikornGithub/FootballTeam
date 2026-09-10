@@ -2475,6 +2475,11 @@ function MatchDetailScreen({
             บันทึกผลและจบเกม
           </Button>
         )}
+        {hasScorerOverflow && (
+          <p className="text-center text-xs font-bold text-red-600">
+            ผู้ทำประตูรวมมากกว่าสกอร์ จึงยังบันทึกไม่ได้
+          </p>
+        )}
         {match.status === 'finished' && (
           <div className="space-y-3">
             <Button
