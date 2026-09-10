@@ -2,10 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
 import satori from 'satori';
-import {
-  listSharedGames,
-  type FootballGameSummary,
-} from '../lib/football-data-api';
+import { listSharedGames } from '../lib/football-data-api';
 
 const SITE_ORIGIN = 'https://thitikorngithub.github.io';
 const BASE_PATH = '/FootballTeam';
@@ -13,6 +10,9 @@ const OUTPUT_ROOT = join(process.cwd(), 'dist', 'client');
 const IMAGE_WIDTH = 1200;
 const IMAGE_HEIGHT = 630;
 const GAME_ID_PATTERN = /^game\d{8}-\d+$/;
+const PREGENERATE_DAYS_BEFORE = 1;
+const PREGENERATE_DAYS_AFTER = 14;
+const PREGENERATE_GAME_NUMBERS_PER_DAY = 100;
 
 type SharpFactory = (input: Buffer) => {
   jpeg(options: { quality: number; chromaSubsampling: string }): {
@@ -47,13 +47,27 @@ function escapeHtml(value: string) {
     .replaceAll("'", '&#039;');
 }
 
-function creationDate(game: FootballGameSummary) {
-  const createdAt = new Date(game.createdAt);
-  if (!Number.isNaN(createdAt.getTime())) return createdAt;
+function dateFromCode(dateCode: string) {
+  if (!/^\d{8}$/.test(dateCode)) return null;
+  const date = new Date(
+    `${dateCode.slice(0, 4)}-${dateCode.slice(4, 6)}-${dateCode.slice(6, 8)}T12:00:00+07:00`,
+  );
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
-  const idDate = /^game(\d{4})(\d{2})(\d{2})-\d+$/.exec(game.id);
-  if (!idDate) throw new Error(`Invalid creation date for ${game.id}`);
-  return new Date(`${idDate[1]}-${idDate[2]}-${idDate[3]}T00:00:00+07:00`);
+function dateFromGameId(gameId: string) {
+  const match = /^game(\d{8})-[1-9]\d*$/.exec(gameId);
+  return match ? dateFromCode(match[1]) : null;
+}
+
+function dateCode(date: Date) {
+  return DATE_KEY.format(date).replaceAll('-', '');
+}
+
+function bangkokDateAtOffset(offset: number) {
+  const today = dateFromCode(dateCode(new Date()));
+  if (!today) throw new Error('Unable to determine the Bangkok date');
+  return new Date(today.getTime() + offset * 24 * 60 * 60 * 1000);
 }
 
 function calendarIcon() {
@@ -348,12 +362,8 @@ async function renderImage(
     .toFile(outputPath);
 }
 
-function sharePage(
-  game: FootballGameSummary,
-  dateLabel: string,
-  imageUrl: string,
-) {
-  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/${encodeURIComponent(game.id)}`;
+function sharePage(gameId: string, dateLabel: string, imageUrl: string) {
+  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/${encodeURIComponent(gameId)}`;
   const title = `MATCH DAY • ${dateLabel}`;
   const description = 'นัดนี้ เจอกันในสนาม • เปิดลิงก์เพื่อดูทีมและตารางแข่งขัน';
   const redirectTarget = `${BASE_PATH}/`;
@@ -399,7 +409,7 @@ function sharePage(
 }
 
 async function main() {
-  const [background, regularFont, boldFont, antonFont, games] =
+  const [background, regularFont, boldFont, antonFont, storedGames] =
     await Promise.all([
       readFile(join(process.cwd(), 'public', 'game-og-stadium-bg.png')).then(
         (value) =>
@@ -410,20 +420,45 @@ async function main() {
       ),
       readFile(join(process.cwd(), 'public', 'fonts', 'NotoSansThai-Bold.ttf')),
       readFile(join(process.cwd(), 'public', 'fonts', 'Anton-Regular.ttf')),
-      listSharedGames({ force: true }),
+      listSharedGames({ force: true }).catch((error: unknown) => {
+        console.warn('Unable to load existing games from Neon:', error);
+        return [];
+      }),
     ]);
 
   const imageDirectory = join(OUTPUT_ROOT, 'game-og');
   await mkdir(imageDirectory, { recursive: true });
-  const renderedDates = new Set<string>();
+  const gameDates = new Map<string, Date>();
 
-  for (const game of games) {
-    if (!GAME_ID_PATTERN.test(game.id)) {
+  for (const game of storedGames) {
+    const date = dateFromGameId(game.id);
+    if (!date) {
       console.warn(`Skipping invalid game id: ${game.id}`);
       continue;
     }
+    gameDates.set(game.id, date);
+  }
 
-    const date = creationDate(game);
+  for (
+    let offset = -PREGENERATE_DAYS_BEFORE;
+    offset <= PREGENERATE_DAYS_AFTER;
+    offset += 1
+  ) {
+    const date = bangkokDateAtOffset(offset);
+    const code = dateCode(date);
+    for (
+      let number = 1;
+      number <= PREGENERATE_GAME_NUMBERS_PER_DAY;
+      number += 1
+    ) {
+      gameDates.set(`game${code}-${number}`, date);
+    }
+  }
+
+  const renderedDates = new Set<string>();
+
+  for (const [gameId, date] of gameDates) {
+    if (!GAME_ID_PATTERN.test(gameId)) continue;
     const dateLabel = THAI_DATE.format(date);
     const dateKey = DATE_KEY.format(date);
     const imageName = `match-day-${dateKey}.jpg`;
@@ -438,18 +473,18 @@ async function main() {
       renderedDates.add(dateKey);
     }
 
-    const gameDirectory = join(OUTPUT_ROOT, game.id);
+    const gameDirectory = join(OUTPUT_ROOT, gameId);
     await mkdir(gameDirectory, { recursive: true });
     const imageUrl = `${SITE_ORIGIN}${BASE_PATH}/game-og/${imageName}`;
     await writeFile(
       join(gameDirectory, 'index.html'),
-      sharePage(game, dateLabel, imageUrl),
+      sharePage(gameId, dateLabel, imageUrl),
       'utf8',
     );
   }
 
   console.log(
-    `Generated ${games.length} game share pages and ${renderedDates.size} dated OG images.`,
+    `Generated ${gameDates.size} game share pages and ${renderedDates.size} dated OG images (${storedGames.length} existing games plus ${PREGENERATE_DAYS_BEFORE + PREGENERATE_DAYS_AFTER + 1} prepared dates).`,
   );
 }
 
