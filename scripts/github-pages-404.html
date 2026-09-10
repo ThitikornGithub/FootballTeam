@@ -4,26 +4,35 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Football Match Maker</title>
+    <meta
+      name="description"
+      content="นัดนี้ เจอกันในสนาม • จัดทีม • จัดตาราง • หมุนเวียน GK"
+    />
+    <meta property="og:title" content="Football Match Maker" />
+    <meta
+      property="og:description"
+      content="นัดนี้ เจอกันในสนาม • จัดทีม • จัดตาราง • หมุนเวียน GK"
+    />
+    <meta property="og:type" content="website" />
+    <meta
+      property="og:image"
+      content="https://thitikorngithub.github.io/FootballTeam/og-classic.jpg?v=20260910-single"
+    />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="675" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta
+      name="twitter:image"
+      content="https://thitikorngithub.github.io/FootballTeam/og-classic.jpg?v=20260910-single"
+    />
     <script>
-      const gameId = location.pathname
-        .replace(/^\/FootballTeam\//, '')
-        .split('/')[0];
-      if (/^game\d{8}-[1-9]\d*$/.test(gameId)) {
-        location.replace(
-          'https://football-match-maker.b-thitikorn.chatgpt.site/' +
-            gameId +
-            location.search +
-            location.hash,
+      try {
+        sessionStorage.setItem(
+          'football-pages-path',
+          location.pathname + location.search + location.hash,
         );
-      } else {
-        try {
-          sessionStorage.setItem(
-            'football-pages-path',
-            location.pathname + location.search + location.hash,
-          );
-        } catch {}
-        location.replace('/FootballTeam/');
-      }
+      } catch {}
+      location.replace('/FootballTeam/');
     </script>
   </head>
   <body></body>

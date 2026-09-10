@@ -3,8 +3,7 @@ import './globals.css';
 
 const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const siteUrl =
-  process.env.NEXT_PUBLIC_SITE_URL ??
-  'https://football-match-maker.b-thitikorn.chatgpt.site';
+  process.env.NEXT_PUBLIC_SITE_URL ?? 'https://thitikorngithub.github.io';
 const publicAsset = (path: string) => `${basePath}${path}`;
 
 export const metadata: Metadata = {
@@ -16,34 +15,22 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: 'Football Match Maker',
-    description: 'จัดทีม • จัดตาราง • หมุนเวียน GK',
+    description: 'นัดนี้ เจอกันในสนาม • จัดทีม • จัดตาราง • หมุนเวียน GK',
     type: 'website',
     images: [
       {
-        url: publicAsset('/og.jpg?v=20260910-jpg'),
+        url: publicAsset('/og-classic.jpg?v=20260910-single'),
         width: 1200,
         height: 675,
-        alt: 'Football Match Maker tactical board',
-      },
-      {
-        url: publicAsset('/og-classic.jpg?v=20260910-jpg'),
-        width: 1200,
-        height: 675,
-        alt: 'Football Match Maker classic stadium',
-      },
-      {
-        url: publicAsset('/og-dynamic.jpg?v=20260910-jpg'),
-        width: 1200,
-        height: 675,
-        alt: 'Football Match Maker dynamic match',
+        alt: 'Football Match Maker — จัดทีม จัดตาราง และหมุนเวียนผู้รักษาประตู',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Football Match Maker',
-    description: 'จัดทีม • จัดตาราง • หมุนเวียน GK',
-    images: [publicAsset('/og.jpg?v=20260910-jpg')],
+    description: 'นัดนี้ เจอกันในสนาม • จัดทีม • จัดตาราง • หมุนเวียน GK',
+    images: [publicAsset('/og-classic.jpg?v=20260910-single')],
   },
 };
 
