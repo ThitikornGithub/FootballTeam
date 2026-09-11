@@ -75,6 +75,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover';
+import {
   Table,
   TableBody,
   TableCell,
@@ -1679,37 +1684,80 @@ function PlayerPositionPicker({
   onChange: (positions: PlayerPosition[]) => void;
   compact?: boolean;
 }) {
+  function togglePosition(position: PlayerPosition) {
+    const selected = positions.includes(position);
+    onChange(
+      selected
+        ? positions.filter((item) => item !== position)
+        : PLAYER_POSITIONS.filter(
+            (item) => item === position || positions.includes(item),
+          ),
+    );
+  }
+
+  function positionButton(position: PlayerPosition, inPopover = false) {
+    const meta = PLAYER_POSITION_META[position];
+    const selected = positions.includes(position);
+    return (
+      <button
+        key={position}
+        type="button"
+        aria-pressed={selected}
+        aria-label={`${selected ? 'ยกเลิก' : 'เลือก'}${meta.fullLabel}ให้ ${playerName || 'ผู้เล่น'}`}
+        title={meta.fullLabel}
+        onClick={() => togglePosition(position)}
+        className={`${inPopover ? 'flex h-10 min-w-12 items-center justify-center rounded-xl px-3 text-xs' : compact ? 'grid h-8 w-6 shrink-0 place-items-center rounded-lg p-0 text-[10px]' : 'min-h-9 rounded-full px-3 text-xs'} border font-black transition ${selected ? meta.className : 'border-slate-200 bg-white text-slate-400'}`}
+      >
+        {inPopover ? `${meta.shortLabel} · ${meta.fullLabel}` : meta.shortLabel}
+      </button>
+    );
+  }
+
   return (
-    <fieldset
-      className={`flex min-w-0 items-center ${compact ? 'shrink-0 flex-nowrap gap-0.5' : 'flex-wrap gap-1.5'}`}
-    >
-      <legend className="sr-only">ตำแหน่งที่ {playerName || 'ผู้เล่น'} เล่นได้</legend>
-      {PLAYER_POSITIONS.map((position) => {
-        const meta = PLAYER_POSITION_META[position];
-        const selected = positions.includes(position);
-        return (
-          <button
-            key={position}
-            type="button"
-            aria-pressed={selected}
-            aria-label={`${selected ? 'ยกเลิก' : 'เลือก'}${meta.fullLabel}ให้ ${playerName || 'ผู้เล่น'}`}
-            title={meta.fullLabel}
-            onClick={() =>
-              onChange(
-                selected
-                  ? positions.filter((item) => item !== position)
-                  : PLAYER_POSITIONS.filter(
-                      (item) => item === position || positions.includes(item),
-                    ),
-              )
+    <>
+      <fieldset
+        className={`min-w-0 items-center ${compact ? 'hidden shrink-0 flex-nowrap gap-0.5 min-[390px]:flex' : 'flex flex-wrap gap-1.5'}`}
+      >
+        <legend className="sr-only">
+          ตำแหน่งที่ {playerName || 'ผู้เล่น'} เล่นได้
+        </legend>
+        {PLAYER_POSITIONS.map((position) => positionButton(position))}
+      </fieldset>
+      {compact && (
+        <Popover>
+          <PopoverTrigger
+            render={
+              <button
+                type="button"
+                className="flex h-9 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white px-1 text-[10px] font-black text-slate-600 min-[390px]:hidden"
+                aria-label={`เลือกตำแหน่งที่ ${playerName || 'ผู้เล่น'} เล่นได้`}
+                title="ตำแหน่งที่เล่นได้"
+              />
             }
-            className={`${compact ? 'grid h-8 w-6 shrink-0 place-items-center rounded-lg p-0 text-[10px]' : 'min-h-9 rounded-full px-3 text-xs'} border font-black transition ${selected ? meta.className : 'border-slate-200 bg-white text-slate-400'}`}
           >
-            {meta.shortLabel}
-          </button>
-        );
-      })}
-    </fieldset>
+            {positions.length
+              ? positions
+                  .map((position) => PLAYER_POSITION_META[position].shortLabel)
+                  .join('/')
+              : 'ตำแหน่ง'}
+          </PopoverTrigger>
+          <PopoverContent
+            align="end"
+            className="w-auto rounded-2xl border-slate-200 bg-white p-3"
+          >
+            <p className="text-sm font-black text-slate-800">
+              ตำแหน่งของ {playerName || 'ผู้เล่น'}
+            </p>
+            <fieldset className="grid grid-cols-2 gap-2">
+              <legend className="sr-only">เลือกได้หลายตำแหน่ง</legend>
+              {PLAYER_POSITIONS.map((position) =>
+                positionButton(position, true),
+              )}
+            </fieldset>
+          </PopoverContent>
+        </Popover>
+      )}
+    </>
   );
 }
 
@@ -1928,7 +1976,7 @@ function TeamDetailScreen({
                   <div
                     key={player.id}
                     data-player-id={player.id}
-                    className={`flex min-w-0 items-center gap-1.5 px-2 py-2 transition ${draggingPlayerId === player.id ? 'relative z-10 bg-emerald-50 shadow-md' : 'bg-white'}`}
+                    className={`flex min-w-0 items-center gap-1 px-1.5 py-2 transition min-[390px]:gap-1.5 min-[390px]:px-2 ${draggingPlayerId === player.id ? 'relative z-10 bg-emerald-50 shadow-md' : 'bg-white'}`}
                   >
                     <button
                       type="button"
@@ -1963,7 +2011,7 @@ function TeamDetailScreen({
                           ),
                         )
                       }
-                      className={`h-9 min-w-[54px] flex-1 rounded-lg bg-slate-50 px-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#9dd2ab] ${player.absentToday ? 'text-slate-400 line-through' : ''}`}
+                      className={`h-9 min-w-0 flex-1 rounded-lg bg-slate-50 px-2 text-sm font-bold outline-none focus:ring-2 focus:ring-[#9dd2ab] ${player.absentToday ? 'text-slate-400 line-through' : ''}`}
                       aria-label={`ชื่อผู้เล่น ${index + 1}`}
                     />
                     <PlayerPositionPicker
@@ -3882,6 +3930,11 @@ export default function FootballApp() {
   }, [hydrated, gameId]);
   useEffect(() => {
     if (!hydrated || !gameId) return;
+    const pollSession = syncSessionRef.current;
+    const requestStillActive = () =>
+      gameIdRef.current === gameId && syncSessionRef.current === pollSession;
+    pollFailureCountRef.current = 0;
+    pollFailedRef.current = false;
     const poll = window.setInterval(() => {
       if (
         document.visibilityState !== 'visible' ||
@@ -3894,7 +3947,7 @@ export default function FootballApp() {
         .then((game) => {
           // The guards above ran when the interval fired; by the time the
           // response lands the user may have switched games or started an edit.
-          if (gameIdRef.current !== gameId) return;
+          if (!requestStillActive()) return;
           const recovered = pollFailedRef.current;
           pollFailureCountRef.current = 0;
           pollFailedRef.current = false;
@@ -3930,6 +3983,9 @@ export default function FootballApp() {
           }
         })
         .catch((error: unknown) => {
+          // Clearing the interval cannot cancel a request already in flight.
+          // Never let a failure from the previous game mark the new one stale.
+          if (!requestStillActive()) return;
           // Silently swallowing these let the poll fail forever while the
           // header still claimed the game was in sync.
           const blockingNotice = blockingSyncNotice(error);
@@ -3955,6 +4011,12 @@ export default function FootballApp() {
     const timer = window.setTimeout(() => setNotice(''), 2200);
     return () => window.clearTimeout(timer);
   }, [notice]);
+  useEffect(() => {
+    // Main screens share one document scroll container. Reset it when the
+    // destination changes so a long schedule cannot open Home or Settings in
+    // the middle of the page.
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+  }, [view]);
   useEffect(() => {
     const context = (
       document as Document & {

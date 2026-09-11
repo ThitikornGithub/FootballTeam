@@ -415,6 +415,46 @@ function sharePage(gameId: string, dateLabel: string, imageUrl: string) {
 `;
 }
 
+function allGamesPage() {
+  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/allgames/`;
+  const redirectTarget = `${BASE_PATH}/`;
+  const title = 'เกมทั้งหมด';
+  const description = 'เปิดดูเกม ตารางคะแนน รายชื่อทีม และผลการแข่งขัน';
+  const imageUrl = `${SITE_ORIGIN}${BASE_PATH}/og-classic.jpg?v=20260910-single`;
+
+  return `<!doctype html>
+<html lang="th">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title} | Football Match Maker</title>
+    <meta name="description" content="${description}" />
+    <link rel="canonical" href="${pageUrl}" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta property="og:title" content="${title} | Football Match Maker" />
+    <meta property="og:description" content="${description}" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="${pageUrl}" />
+    <meta property="og:image" content="${imageUrl}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="${imageUrl}" />
+    <script>
+      try {
+        sessionStorage.setItem(
+          'football-pages-path',
+          location.pathname + location.search + location.hash,
+        );
+      } catch {}
+      location.replace(${JSON.stringify(redirectTarget)});
+    </script>
+  </head>
+  <body>
+    <p>กำลังเปิดเกมทั้งหมด… <a href="${redirectTarget}">ไปที่ Football Match Maker</a></p>
+  </body>
+</html>
+`;
+}
+
 async function main() {
   const [background, regularFont, boldFont, antonFont, storedGames] =
     await Promise.all([
@@ -440,6 +480,13 @@ async function main() {
 
   const imageDirectory = join(OUTPUT_ROOT, 'game-og');
   await mkdir(imageDirectory, { recursive: true });
+  const allGamesDirectory = join(OUTPUT_ROOT, 'allgames');
+  await mkdir(allGamesDirectory, { recursive: true });
+  await writeFile(
+    join(allGamesDirectory, 'index.html'),
+    allGamesPage(),
+    'utf8',
+  );
   const gameDates = new Map<string, Date>();
 
   for (const game of storedGames) {

@@ -1,8 +1,8 @@
 # FootballTeam — Project Handoff
 
-อัปเดตล่าสุด: 9 กันยายน 2026
+อัปเดตล่าสุด: 11 กันยายน 2026
 ขอบเขตการตรวจ: source code, scheduling engine, Neon persistence, GitHub Pages deployment, dependency audit และข้อมูลที่อยู่ใน Neon ณ วันที่ตรวจ  
-สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ navigation, game-list race, next-day time และ local-backup retention วันที่ 9 กันยายน 2026
+สถานะโค้ดที่ใช้ตรวจ: working tree สำหรับรอบ responsive player controls, navigation scroll, sync-session race, `/allgames` deep link และ dependency security วันที่ 11 กันยายน 2026
 
 ## 1. ภาพรวมโปรเจกต์
 
@@ -19,7 +19,7 @@ FootballTeam เป็น mobile-first web app สำหรับกลุ่ม
 - กระดาน tactic สำหรับสองทีม พร้อมจัดตัวตามตำแหน่ง D/M/W/F ตำแหน่งผู้เล่น และลูกบอล โดยแสดงสนามก่อนและพับค่าผู้เล่น/แผนไว้ด้านล่าง
 - สร้างรูปตารางคะแนน แชร์ผ่าน Web Share API ดาวน์โหลด PNG หรือคัดลอกข้อความ
 - หน้ารวมเกมทั้งหมด เปิดเกมเดิม และลบเกมออกจาก Neon
-- หน้าเกมทั้งหมดอยู่ที่ `/FootballTeam/allgames`; การกด Back หรือเปลี่ยนหน้าจะยกเลิกผลจากคำขอเปิดเกมเก่าที่ยังโหลดไม่เสร็จ
+- หน้าเกมทั้งหมดอยู่ที่ `/FootballTeam/allgames`; มี static entry ของ path นี้โดยตรง และการกด Back หรือเปลี่ยนหน้าจะยกเลิกผลจากคำขอเปิดเกมเก่าที่ยังโหลดไม่เสร็จ
 - Bottom navigation แสดงในหน้าจัดการผู้เล่นด้วย และทางลัดอยู่บนสุดของหน้าตั้งค่า
 - ลิงก์เกมเป็น path เช่น `/FootballTeam/game20260906-1`
 
@@ -73,6 +73,7 @@ Technology:
 | `lib/demo-data.ts`                      | ข้อมูลตัวอย่าง 4 ทีม                                                                                      |
 | `db/neon-schema.sql`                    | table, RPC functions และ grants ของ Neon                                                                  |
 | `scripts/verify-engine.ts`              | engine smoke checks                                                                                       |
+| `scripts/generate-game-share-pages.tsx` | สร้าง static game share/OG pages และ static entry สำหรับ `/allgames`                                      |
 | `scripts/github-pages-404.html`         | redirect deep path ของ GitHub Pages กลับเข้า SPA                                                          |
 | `.github/workflows/deploy-pages.yml`    | build และ deploy ทุกครั้งที่ push `main`                                                                  |
 | `next.config.ts`                        | static export และ `/FootballTeam` asset prefix                                                            |
@@ -128,6 +129,7 @@ RPC ที่ browser เรียกได้:
 10. ทุก RPC มี timeout 20 วินาที และ `keepalive` จะใช้เฉพาะ payload ไม่เกิน 60 KiB; หากใหญ่กว่านั้นจะกลับมาซิงก์แบบปกติเมื่อหน้า visible
 11. sync session แยกตามเกม คำตอบจาก request เก่าจึงไม่สามารถเปลี่ยน revision, queue หรือสถานะของเกมที่เปิดใหม่ได้
 12. รายการเกมมี mutation version และ request token แยกกัน คำตอบจาก list request ที่เริ่มก่อนการลบจึงไม่สามารถนำเกมที่ลบแล้วกลับเข้า cache หรือ UI ได้
+13. ทั้ง success และ failure ของ background poll ตรวจ Game ID และ sync session ก่อนเปลี่ยนสถานะ จึงไม่ทำให้เกมใหม่ขึ้น error จาก request ของเกมเก่า
 
 Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql` และ `db/migrations/20260909_remove_legacy_save.sql`; migration ล่าสุดลบ RPC `save_football_game` ตัวเก่าที่ไม่มี revision check ออกจาก production แล้ว
 
@@ -138,7 +140,8 @@ Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906
 - Game URL ใช้ `/FootballTeam/gameYYYYMMDD-N`
 - ปุ่มคัดลอกลิงก์ประกอบ URL จาก `window.location.origin` เท่านั้น ห้าม hardcode โดเมนอื่น
   มิฉะนั้นลิงก์ที่ส่งให้เพื่อนจะชี้ไป host ที่ไม่ได้ deploy
-- GitHub Pages ไม่มี SPA rewrite จริง จึงใช้ `404.html` เก็บ path ใน `sessionStorage`, redirect ไป root แล้ว React คืน path ก่อนอ่าน Game ID
+- `/FootballTeam/allgames` มี static `allgames/index.html` redirect entry จึงเปิด bookmark นี้ได้โดยไม่ต้องเริ่มจาก HTTP 404
+- Game path ที่ไม่ได้ pre-generate ยังใช้ `404.html` เก็บ path ใน `sessionStorage`, redirect ไป root แล้ว React คืน path ก่อนอ่าน Game ID เพราะ GitHub Pages ไม่มี SPA rewrite จริง
 - มี `popstate` listener แล้ว ดังนั้น Back/Forward จะโหลด game หรือกลับ Home ให้ตรงกับ URL และจะ invalidate คำขอเปิดเกมเดิมเมื่อผู้ใช้กลับ Home หรือหน้าเกมทั้งหมด
 - เมื่อลบเกมปัจจุบันจากหน้าเกมทั้งหมด แอปจะคง URL `/FootballTeam/allgames` และหน้ารายการไว้; หากผู้ใช้เปลี่ยนหน้าไประหว่างลบจะยึด route ล่าสุดแทน
 
@@ -183,9 +186,9 @@ Schema ของ Neon ไม่ได้ apply โดย GitHub Actions หา�
 
 ## 9. Audit result — current data
 
-ผลตรวจแบบ read-only วันที่ 9 กันยายน 2026:
+ผลตรวจแบบ read-only วันที่ 11 กันยายน 2026:
 
-- ตรวจ 2 เกมที่อยู่ใน Neon
+- ตรวจ 4 เกมที่อยู่ใน Neon
 - Game ID และ `state.id` ตรงกัน
 - ไม่พบ duplicate team, player หรือ match IDs
 - ไม่พบ self-match หรือ match ที่อ้างทีมที่หายไป
@@ -201,16 +204,16 @@ Automated checks ที่ผ่าน:
 - TypeScript `--noEmit`
 - Engine smoke checks: defaults, round-robin repeats, time window, score, scorers/Top 3, standings, overtime, GK fairness, tactics formation และ reopen match
 - GitHub Pages production build ด้วย Node 24 ในรอบ audit นี้
-- `npm audit`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.4 และ Wrangler 4.129.0
+- `npm audit --omit=optional`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.7, Wrangler 4.131.0, Sharp 0.35.4 และ Cloudflare Workers Types 5.20260911.1
 - Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
-- Local UI smoke test ที่ 320px: Home, score input, standings table, schedule, tactics marker, player controls, dialog และ select ไม่ล้นขอบ
+- Local UI smoke test ที่ 320px: Home, standings, schedule, settings และหน้าจัดการผู้เล่นไม่ล้นขอบ ปุ่มลบยังมองเห็นครบ ตัวเลือกตำแหน่งแบบ compact มีพื้นขาวทึบ และเปลี่ยนเมนูแล้ว scroll กลับด้านบน
 - Local browser smoke วันที่ 9 กันยายน: scorer popup, share card, tactics 5/7 คน, formation, animation, standings ที่ 320px และ tactics autosave หลังสลับหน้าผ่านทั้งหมด
 - Mocked sync race วันที่ 9 กันยายน: ขณะ save เกม A ค้าง สามารถสร้างและแก้เกม B ได้โดยแต่ละ request และ local backup ยังชี้ Game ID ถูกต้อง
 - Navigation race วันที่ 9 กันยายน: คำขอเปิดเกมที่ช้าจะถูกยกเลิกเชิงตรรกะเมื่อกด Back และไม่สามารถเปิดเกมกลับมาเองได้
 - Game-list delete race วันที่ 9 กันยายน: list response ที่เริ่มก่อน delete จะไม่สามารถเขียนเกมที่ลบแล้วกลับเข้า cache; spinner/request ของหน้าเดิมถูก invalidate หลังลบสำเร็จ
 - Next-day display วันที่ 9 กันยายน: เวลาหลังเที่ยงคืนแสดง `(+1 วัน)` ในหน้า Home ตารางแข่งขัน รายละเอียดแมตช์ และข้อความแชร์
 - Local backup retention วันที่ 9 กันยายน: ล้างเฉพาะ backup ที่ซิงก์แล้วซึ่งเกิน 12 เกม และรักษาทุก backup ที่ยังรอซิงก์
-- Neon production ยืนยันว่า legacy `save_football_game(text,jsonb)` ถูกลบแล้ว และเกมทั้ง 2 รายการยังโหลดผ่าน runtime schema
+- Neon production ยืนยันว่า legacy `save_football_game(text,jsonb)` ถูกลบแล้ว และเกมทั้ง 4 รายการยังโหลดผ่าน runtime schema
 
 ยังไม่มี browser/E2E suite ที่ commit อยู่ใน repository; smoke scripts รอบ audit เป็น ad-hoc และไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
 
@@ -219,6 +222,8 @@ Automated checks ที่ผ่าน:
 รายการ P1/P2 ที่ตรวจพบในรอบก่อนถูกแก้แล้ว: revision CAS และ conflict UI, serialized save queue/retry, local draft recovery, safe match transition, tactic roster reconciliation, runtime schema validation, responsive score/table/player controls, score cap ที่ 99, settings copy, `popstate` history, dialog/select contrast, การลบเกมจาก Settings ให้ลบ Neon จริง, game-list request deduplication และ `npm test`
 
 รอบล่าสุดแก้ navigation/delete edge cases เพิ่มแล้ว: กด Back ระหว่างเปิดเกมจะไม่ถูก request เก่าดึงกลับ, การลบเกมปัจจุบันจาก `/allgames` จะไม่ทำให้ URL กับหน้าจอไม่ตรงกัน, และผล list request เก่าจะไม่ทำให้เกมที่ลบแล้วกลับมาแสดงชั่วคราว
+
+รอบวันที่ 11 กันยายนเพิ่มการป้องกัน failure จาก background poll ของเกมเก่าไม่ให้เปลี่ยนสถานะของเกมใหม่, รีเซ็ต scroll เมื่อเปลี่ยนเมนูหลัก, ทำแถวผู้เล่นที่หน้าจอต่ำกว่า 390px ให้ใช้ตัวเลือกตำแหน่งแบบ compact โดยไม่ตัดปุ่มลบ และสร้าง static entry สำหรับ `/FootballTeam/allgames`
 
 ตารางแข่งขันแสดงเลข Match แยกจากเวลา และเรียงรายการที่แข่งแล้วจากเก่าไปใหม่เพื่อให้รายการล่าสุดอยู่ล่างสุด
 
@@ -238,10 +243,11 @@ Scheduling หลังเริ่มแข่งใช้จำนวนคร
 
 ข้อจำกัดที่ยังตั้งใจคงไว้:
 
-- GitHub Pages ไม่มี server-side rewrite จริง จึงอาจตอบ 404 ชั่วครู่เมื่อเปิด `/FootballTeam/game...` โดยตรงก่อน `404.html` redirect กลับเข้า SPA
+- GitHub Pages ไม่มี server-side rewrite จริง จึงอาจตอบ 404 ชั่วครู่เมื่อเปิด game path ที่อยู่นอกชุด static pages ซึ่ง workflow เตรียมย้อนหลัง 1 วันและล่วงหน้า 45 วัน วันละ 12 Game ID; game ที่มีอยู่ใน Neon จะถูกสร้าง static page ทุกครั้งที่ deploy/nightly run
 - ยังไม่มี automated browser/E2E suite; รอบนี้มี local UI smoke test ที่ 320px และต้องตรวจ touch/native share บนอุปกรณ์จริงเมื่อมีโอกาส
 - แอปเปิดให้ทุกคนที่มีลิงก์แก้ไขและลบได้ตาม requirement กลุ่มเล็ก จึงไม่เหมาะกับข้อมูลสำคัญ
 - Backup ใน localStorage เป็นเพียง fallback; ระบบเก็บรายการที่ซิงก์แล้วล่าสุด 12 เกมเพื่อไม่ให้พื้นที่ browser โตไม่จำกัด แต่ข้อมูลหลักของเกมที่มี Game ID ยังคงอยู่ใน Neon
+- Local staging ที่ใช้ Neon Data API ต้องใช้ origin ที่อนุญาตใน Neon CORS; ปัจจุบัน `http://localhost:3000` ใช้ได้ ส่วน port อื่น เช่น 3100 ต้องเพิ่ม origin ก่อนจึงจะทดสอบการโหลด DB ได้
 
 `npm audit` หลังแก้รายงาน 0 vulnerabilities และ production build ผ่าน
 
