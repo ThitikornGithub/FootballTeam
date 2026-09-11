@@ -7,6 +7,9 @@ import type {
   Tournament,
 } from './football-types';
 
+// Must stay in step with the bound parseTournament enforces in football-schema.
+export const MAX_AVAILABLE_TIME_MINUTES = 1440;
+
 export function makeId(prefix: string) {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
     return `${prefix}-${crypto.randomUUID()}`;
@@ -31,6 +34,17 @@ function shuffledDifferent<T>(items: readonly T[], previous?: readonly T[]) {
     tries += 1
   ) {
     result = shuffle(items);
+  }
+  // Whoever closed the previous cycle must not open this one, or that player
+  // keeps goal two matches running. With two players no shuffle satisfies both
+  // rules at once, so repair the order rather than reshuffling for it.
+  const previousLast = previous?.at(-1);
+  if (previousLast !== undefined && result[0] === previousLast) {
+    const swapIndex = result.findIndex(
+      (item, index) => index > 0 && item !== previousLast,
+    );
+    if (swapIndex > 0)
+      [result[0], result[swapIndex]] = [result[swapIndex], result[0]];
   }
   return result;
 }
@@ -551,12 +565,18 @@ export function reshuffleUpcomingMatches(
     const pair = generatedPairs[editableIndex];
     const existingId = match.id;
     editableIndex += 1;
+    // Before the first result the live match is reshuffleable, so a score
+    // already typed into it used to be dropped by changing any setting. Keep it
+    // whenever the fixture is unchanged; a different pairing starts blank.
+    const samePairing =
+      pair.teamAId === match.teamAId && pair.teamBId === match.teamBId;
     return {
       id: existingId,
       ...pair,
       ...scheduled,
-      teamAScore: undefined,
-      teamBScore: undefined,
+      teamAScore: samePairing ? match.teamAScore : undefined,
+      teamBScore: samePairing ? match.teamBScore : undefined,
+      scorers: samePairing ? match.scorers : undefined,
       teamAGkPlayerId: undefined,
       teamBGkPlayerId: undefined,
       status:
@@ -622,8 +642,12 @@ export function extendTournamentByMatches(
     tournament.matchDurationMinutes + tournament.breakDurationMinutes;
   return extendTournamentToEndTime({
     ...tournament,
-    availableTimeMinutes:
+    // parseTournament rejects anything past a full day, so an unclamped total
+    // would make the saved game unreadable on every device.
+    availableTimeMinutes: Math.min(
+      MAX_AVAILABLE_TIME_MINUTES,
       tournament.availableTimeMinutes + Math.max(0, matchCount) * slotMinutes,
+    ),
   });
 }
 
@@ -843,11 +867,21 @@ export function setMatchStatus(
   const liveElsewhere = tournament.matches.some(
     (match, index) => index !== targetIndex && match.status === 'current',
   );
+  // Prefer the next match in the running order, but fall back to any upcoming
+  // one so finishing a match started out of turn still leaves a live match.
   const promoteIndex =
     status === 'finished' && !liveElsewhere
-      ? tournament.matches.findIndex(
-          (match, index) => index > targetIndex && match.status === 'upcoming',
-        )
+      ? (() => {
+          const next = tournament.matches.findIndex(
+            (match, index) =>
+              index > targetIndex && match.status === 'upcoming',
+          );
+          return next >= 0
+            ? next
+            : tournament.matches.findIndex(
+                (match) => match.status === 'upcoming',
+              );
+        })()
       : -1;
   const matches = tournament.matches.map((match, index) => {
     if (index === targetIndex) return { ...match, status };

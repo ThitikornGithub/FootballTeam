@@ -43,6 +43,7 @@ import {
   type MainView,
   NumberStepper,
   PageHeader,
+  ScreenErrorBoundary,
   TeamBadge,
   TeamShirtIcon,
 } from './shared';
@@ -4379,6 +4380,14 @@ export default function FootballApp() {
   const selectedMatch = tournament?.matches.find(
     (match) => match.id === selectedMatchId,
   );
+  /* oxlint-disable react/react-compiler -- the view has to follow a match that no longer exists. */
+  useEffect(() => {
+    // Shortening the schedule elsewhere can delete the match being viewed, and
+    // this screen carries no bottom navigation to escape an empty render with.
+    if (view === 'match-detail' && tournament && !selectedMatch)
+      setView('schedule');
+  }, [selectedMatch, tournament, view]);
+  /* oxlint-enable react/react-compiler */
   if (!hydrated)
     return (
       <main className="grid min-h-dvh place-items-center bg-[#edf3ee]">
@@ -4468,20 +4477,22 @@ export default function FootballApp() {
             />
           )}
           {tournament && view === 'tactics' && (
-            <Suspense
-              fallback={
-                <div className="grid min-h-[520px] place-items-center font-black text-[#11823b]">
-                  <LoaderCircle className="h-6 w-6 animate-spin" />
-                  <span className="sr-only">กำลังเปิดกระดานแท็กติก</span>
-                </div>
-              }
-            >
-              <TacticsScreen
-                tournament={tournament}
-                onUpdate={applyTournament}
-                onCopyLink={() => void copyGameLink()}
-              />
-            </Suspense>
+            <ScreenErrorBoundary label="กระดานแท็กติก">
+              <Suspense
+                fallback={
+                  <div className="grid min-h-[520px] place-items-center font-black text-[#11823b]">
+                    <LoaderCircle className="h-6 w-6 animate-spin" />
+                    <span className="sr-only">กำลังเปิดกระดานแท็กติก</span>
+                  </div>
+                }
+              >
+                <TacticsScreen
+                  tournament={tournament}
+                  onUpdate={applyTournament}
+                  onCopyLink={() => void copyGameLink()}
+                />
+              </Suspense>
+            </ScreenErrorBoundary>
           )}
           {tournament && view === 'standings' && (
             <StandingsScreen

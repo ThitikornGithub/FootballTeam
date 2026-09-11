@@ -741,6 +741,72 @@ assert(
   'Runtime validation must reject tactic paths outside the pitch',
 );
 
+const liveBeforeSettings = tournament.matches.find(
+  (match) => match.status === 'current',
+)!;
+const withLiveScore = setMatchScorers(
+  setMatchScore(tournament, liveBeforeSettings.id, 2, 1),
+  liveBeforeSettings.id,
+  [
+    {
+      id: 'live-scorer',
+      teamId: liveBeforeSettings.teamAId,
+      playerName: 'ผู้ทำประตู',
+      goals: 2,
+    },
+  ],
+);
+const reshuffledBeforeAnyResult = reshuffleUpcomingMatches(withLiveScore, [
+  [liveBeforeSettings.teamAId, liveBeforeSettings.teamBId],
+]);
+const liveAfterSettings = reshuffledBeforeAnyResult.matches.find(
+  (match) => match.id === liveBeforeSettings.id,
+);
+assert(
+  liveAfterSettings?.teamAScore === 2 &&
+    liveAfterSettings?.teamBScore === 1 &&
+    liveAfterSettings?.scorers?.length === 1,
+  'Changing settings before any result must keep the score typed into the live match',
+);
+
+const cappedExtension = extendTournamentByMatches(
+  { ...tournament, availableTimeMinutes: 1430 },
+  4,
+);
+assert(
+  cappedExtension.availableTimeMinutes <= 1440 &&
+    parseTournament(cappedExtension) !== null,
+  'Playing on must stay inside the persisted time limit instead of corrupting the game',
+);
+
+const startedOutOfOrder = setMatchStatus(
+  tournament,
+  tournament.matches[5].id,
+  'current',
+);
+const finishedOutOfOrder = setMatchStatus(
+  startedOutOfOrder,
+  tournament.matches[5].id,
+  'finished',
+);
+assert(
+  finishedOutOfOrder.matches.filter((match) => match.status === 'current')
+    .length === 1,
+  'Finishing a match started out of order must still leave one live match',
+);
+
+for (const team of tournament.teams) {
+  const duties = tournament.matches
+    .filter((match) => match.teamAId === team.id || match.teamBId === team.id)
+    .map((match) =>
+      match.teamAId === team.id ? match.teamAGkPlayerId : match.teamBGkPlayerId,
+    );
+  assert(
+    duties.every((id, index) => index === 0 || id !== duties[index - 1]),
+    `${team.name} must never keep goal in two matches running`,
+  );
+}
+
 const unusableScore = setMatchScore(
   afterSkip,
   afterSkip.matches[0].id,

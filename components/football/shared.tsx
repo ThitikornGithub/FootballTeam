@@ -10,10 +10,46 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
-import type { ComponentType } from 'react';
-
+import { Component, type ComponentType, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import type { Team, TeamColor } from '@/lib/football-types';
+
+// A lazily loaded screen whose chunk fails to arrive — a dropped connection, or
+// a deploy that replaced the file this tab was told to fetch — would otherwise
+// throw through the whole tree and leave a blank page with no way back.
+export class ScreenErrorBoundary extends Component<
+  { children: ReactNode; label: string },
+  { failed: boolean }
+> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="grid min-h-[520px] place-items-center px-6 text-center">
+        <div>
+          <p className="font-black text-slate-800">
+            เปิด{this.props.label}ไม่สำเร็จ
+          </p>
+          <p className="mt-1 text-sm font-semibold text-slate-500">
+            การเชื่อมต่ออาจหลุด หรือแอปมีเวอร์ชันใหม่ ข้อมูลเกมยังอยู่ครบ
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-4 h-12 rounded-xl bg-[#11823b] px-6 font-black text-white"
+          >
+            โหลดหน้าใหม่
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
 
 export const COLOR_HEX: Record<TeamColor, string> = {
   green: '#159447',

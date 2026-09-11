@@ -420,9 +420,12 @@ async function main() {
       ),
       readFile(join(process.cwd(), 'public', 'fonts', 'NotoSansThai-Bold.ttf')),
       readFile(join(process.cwd(), 'public', 'fonts', 'Anton-Regular.ttf')),
+      // Continuing without the list would publish a site whose every existing
+      // game has lost its share page, while the workflow still reports success.
       listSharedGames({ force: true }).catch((error: unknown) => {
-        console.warn('Unable to load existing games from Neon:', error);
-        return [];
+        throw new Error(
+          `Unable to load existing games from Neon, refusing to publish share pages without them: ${String(error)}`,
+        );
       }),
     ]);
 

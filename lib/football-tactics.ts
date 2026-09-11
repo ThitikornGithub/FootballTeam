@@ -120,6 +120,27 @@ function playerSlotScore(player: Player, slot: FormationSlot) {
 function assignPlayersToSlots(players: Player[], slots: FormationSlot[]) {
   const remaining = [...players];
   const assignments = new Map<number, Player>();
+  // A squad too small for the formation staffs the slots it actually suits and
+  // leaves the rest open, instead of filling the hardest slots with whoever is
+  // left and stranding the positions these players do play.
+  const staffedSlots =
+    players.length < slots.length
+      ? new Set(
+          slots
+            .map((slot, index) => ({
+              index,
+              fit: Math.min(
+                ...players.map((player) => playerSlotScore(player, slot)),
+              ),
+            }))
+            .sort(
+              (first, second) =>
+                first.fit - second.fit || first.index - second.index,
+            )
+            .slice(0, players.length)
+            .map((entry) => entry.index),
+        )
+      : null;
   const slotOrder = slots
     .map((slot, index) => ({
       index,
@@ -133,6 +154,7 @@ function assignPlayersToSlots(players: Player[], slots: FormationSlot[]) {
         first.naturalFits - second.naturalFits || first.index - second.index,
     );
   for (const { index, slot } of slotOrder) {
+    if (staffedSlots && !staffedSlots.has(index)) continue;
     const ranked = remaining
       .map((player, playerIndex) => ({
         player,
@@ -148,10 +170,9 @@ function assignPlayersToSlots(players: Player[], slots: FormationSlot[]) {
     assignments.set(index, selected.player);
     remaining.splice(selected.playerIndex, 1);
   }
-  return slots.flatMap((_, index) => {
-    const player = assignments.get(index);
-    return player ? [player] : [];
-  });
+  // Aligned with slots, so a short roster leaves a gap where it could not
+  // staff a slot instead of shifting everyone onto the wrong line.
+  return slots.map((_, index) => assignments.get(index));
 }
 
 export function goalkeeperForTeam(team: Team, preferredPlayerId?: string) {
