@@ -11,8 +11,12 @@ const IMAGE_WIDTH = 1200;
 const IMAGE_HEIGHT = 630;
 const GAME_ID_PATTERN = /^game\d{8}-\d+$/;
 const PREGENERATE_DAYS_BEFORE = 1;
-const PREGENERATE_DAYS_AFTER = 14;
-const PREGENERATE_GAME_NUMBERS_PER_DAY = 100;
+// A link for a date past this window still opens, but a crawler gets the 404
+// page and shows no card, so the window is wider than a gap between deploys.
+// Numbers per day only need to cover games actually created in one day; every
+// extra one is a page that previews a game nobody can open.
+const PREGENERATE_DAYS_AFTER = 45;
+const PREGENERATE_GAME_NUMBERS_PER_DAY = 12;
 
 type SharpFactory = (input: Buffer) => {
   jpeg(options: { quality: number; chromaSubsampling: string }): {
@@ -363,7 +367,10 @@ async function renderImage(
 }
 
 function sharePage(gameId: string, dateLabel: string, imageUrl: string) {
-  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/${encodeURIComponent(gameId)}`;
+  // Each page is written as <gameId>/index.html, so the address without the
+  // trailing slash only 301s here. Point canonical and og:url at what is
+  // actually served, for scrapers that do not follow the redirect.
+  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/${encodeURIComponent(gameId)}/`;
   const title = `MATCH DAY • ${dateLabel}`;
   const description = 'นัดนี้ เจอกันในสนาม • เปิดลิงก์เพื่อดูทีมและตารางแข่งขัน';
   const redirectTarget = `${BASE_PATH}/`;
@@ -411,7 +418,9 @@ function sharePage(gameId: string, dateLabel: string, imageUrl: string) {
 async function main() {
   const [background, regularFont, boldFont, antonFont, storedGames] =
     await Promise.all([
-      readFile(join(process.cwd(), 'public', 'game-og-stadium-bg.png')).then(
+      // Lives outside public/ because satori only needs it while this script
+      // runs; shipping it would put 1.8 MB on the site that nothing requests.
+      readFile(join(process.cwd(), 'assets', 'game-og-stadium-bg.png')).then(
         (value) =>
           `data:image/png;base64,${Buffer.from(value).toString('base64')}`,
       ),

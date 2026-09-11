@@ -1713,8 +1713,18 @@ function PlayerPositionPicker({
   );
 }
 
+// Covers the whole player, not just the id: committing a drag writes these
+// objects back wholesale, so a rename or position change that arrived from
+// another device mid-drag would be reverted by the snapshot taken before it.
 function rosterSignature(players: Team['players']) {
-  return players.map((player) => player.id).join(',');
+  return JSON.stringify(
+    players.map((player) => [
+      player.id,
+      player.name,
+      player.absentToday,
+      player.positions ?? [],
+    ]),
+  );
 }
 
 function TeamDetailScreen({
@@ -1928,6 +1938,11 @@ function TeamDetailScreen({
                       onPointerMove={movePlayerDrag}
                       onPointerUp={(event) => finishPlayerDrag(event, true)}
                       onPointerCancel={(event) =>
+                        finishPlayerDrag(event, false)
+                      }
+                      // Losing the pointer without either event above would
+                      // leave the list frozen on the drag-time snapshot.
+                      onLostPointerCapture={(event) =>
                         finishPlayerDrag(event, false)
                       }
                       className="flex h-9 w-9 shrink-0 touch-none items-center justify-center gap-0.5 rounded-lg bg-[#e6f5ea] text-xs font-black text-[#087632] cursor-grab active:cursor-grabbing"
@@ -3142,7 +3157,9 @@ function SettingsScreen({
     // Someone finishing a match reseeds this form, so a field the user has
     // already changed keeps their value and only untouched ones follow the
     // shared game. A team that no longer exists is replaced either way.
-    if (name === seeded.name) setName(draft.name);
+    // Saving trims, so comparing raw text would treat a stray trailing space as
+    // an edit and unstick this field from the shared game for good.
+    if (name.trim() === seeded.name.trim()) setName(draft.name);
     if (JSON.stringify(teamColors) === JSON.stringify(seeded.teamColors))
       setTeamColors(draft.teamColors);
     if (matchMinutes === seeded.matchMinutes)

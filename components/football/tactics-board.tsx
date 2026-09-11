@@ -360,7 +360,21 @@ export function TacticsScreen({
   const autosaveTimerRef = useRef<number | null>(null);
   const pendingPlanRef = useRef<TacticsBoard | null>(null);
   const sourceTacticsSignature = JSON.stringify(tournament.tactics ?? null);
-  const sourceRosterSignature = JSON.stringify(tournament.teams);
+  // Only what the board actually draws. Including the whole team would rebuild
+  // it — losing the selected step and stopping playback — every time someone
+  // skipped a goalkeeper, which the board does not show at all.
+  const sourceRosterSignature = JSON.stringify(
+    tournament.teams.map((team) => [
+      team.id,
+      team.color,
+      team.players.map((player) => [
+        player.id,
+        player.name,
+        player.absentToday,
+        player.positions ?? [],
+      ]),
+    ]),
+  );
   const lastPublishedSignatureRef = useRef(sourceTacticsSignature);
   const lastRosterSignatureRef = useRef(sourceRosterSignature);
   const initialPersistedBoard = {

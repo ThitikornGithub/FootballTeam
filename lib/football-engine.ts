@@ -345,7 +345,9 @@ export function assignGoalkeepers(tournament: Tournament): Tournament {
     );
     const cycleOrders = normalizedCycleOrders(team, eligibleIds, cyclesNeeded);
     team.gkCycleOrders = cycleOrders;
-    team.gkRotation = cycleOrders[0] ?? eligibleIds;
+    // Copied, or the queue and the first cycle would be one array under two
+    // names, and a later edit to either would silently rewrite both.
+    team.gkRotation = [...(cycleOrders[0] ?? eligibleIds)];
 
     const dutyCounts = Object.fromEntries(
       eligibleIds.map((id) => [id, 0]),
