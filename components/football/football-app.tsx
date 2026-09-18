@@ -1376,7 +1376,12 @@ function HomeScreen({
               ยกเลิก
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={onCloseGame}
+              // AlertDialogAction is a plain button, not a Close like Cancel,
+              // so the dialog stays up unless the handler dismisses it.
+              onClick={() => {
+                setConfirmingClose(false);
+                onCloseGame();
+              }}
               className="h-12 rounded-xl bg-[#11823b] font-black"
             >
               <Flag />
