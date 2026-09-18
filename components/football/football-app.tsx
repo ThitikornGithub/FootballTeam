@@ -11,6 +11,7 @@ import {
   CloudOff,
   Copy,
   Download,
+  Flag,
   FolderOpen,
   GripVertical,
   LoaderCircle,
@@ -378,19 +379,23 @@ function latestPath() {
 
 // The game created most recently, not the one edited most recently: someone
 // correcting last week's score must not send everyone's shortcut back to it.
-function newestGame(games: FootballGameSummary[]) {
-  return [...games].sort((first, second) =>
-    second.createdAt.localeCompare(first.createdAt),
-  )[0];
+// A game the group has ended is skipped, so next week's shortcut lands on the
+// start screen instead of last week's finished game.
+function newestOpenGame(games: FootballGameSummary[]) {
+  return [...games]
+    .filter((game) => !game.closed)
+    .sort((first, second) =>
+      second.createdAt.localeCompare(first.createdAt),
+    )[0];
 }
 
 // Asks the network first because the cached list is exactly what goes stale
 // when a new game is created. Offline, the cache is still better than nothing.
 async function resolveLatestGameId() {
   try {
-    return newestGame(await listSharedGames({ force: true }))?.id ?? '';
+    return newestOpenGame(await listSharedGames({ force: true }))?.id ?? '';
   } catch {
-    return newestGame(readCachedSharedGames())?.id ?? '';
+    return newestOpenGame(readCachedSharedGames())?.id ?? '';
   }
 }
 
@@ -1127,6 +1132,8 @@ function HomeScreen({
   onPublish,
   onCopyLink,
   onOpenNewer,
+  onCloseGame,
+  onReopenGame,
 }: {
   tournament: Tournament;
   gameId: string;
@@ -1138,7 +1145,10 @@ function HomeScreen({
   onPublish: () => void;
   onCopyLink: () => void;
   onOpenNewer: () => void;
+  onCloseGame: () => void;
+  onReopenGame: () => void;
 }) {
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const current =
     tournament.matches.find((match) => match.status === 'current') ??
     tournament.matches.find((match) => match.status === 'upcoming');
@@ -1231,6 +1241,23 @@ function HomeScreen({
             <span className="shrink-0 text-[#087632]">เปิดเกมล่าสุด</span>
           </button>
         )}
+        {tournament.closedAt && (
+          <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-100 p-3 text-sm font-black text-slate-700">
+            <span className="min-w-0">
+              <span className="block">เกมนี้จบแล้ว</span>
+              <span className="block text-xs font-bold text-slate-500">
+                ลิงก์เกมล่าสุดจะไม่เปิดเกมนี้ ดูผลย้อนหลังได้ตามปกติ
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={onReopenGame}
+              className="shrink-0 text-[#087632]"
+            >
+              เปิดเกมต่อ
+            </button>
+          </div>
+        )}
         <section className="grid grid-cols-3 gap-2">
           {actions.map(({ label, icon: Icon, view }) => (
             <button
@@ -1316,7 +1343,48 @@ function HomeScreen({
           </div>
           <StandingsTable tournament={tournament} />
         </section>
+        {gameId && !tournament.closedAt && (
+          <section className="space-y-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setConfirmingClose(true)}
+              className="h-12 w-full rounded-xl font-black"
+            >
+              <Flag />
+              จบเกมวันนี้
+            </Button>
+            <p className="text-center text-xs font-bold text-slate-400">
+              กดเมื่อเลิกเล่นแล้ว ลิงก์เกมล่าสุดจะไปหาเกมใหม่แทนเกมนี้
+            </p>
+          </section>
+        )}
       </div>
+      <AlertDialog open={confirmingClose} onOpenChange={setConfirmingClose}>
+        <AlertDialogContent className="rounded-[24px] p-5">
+          <AlertDialogHeader className="place-items-start text-left">
+            <AlertDialogTitle className="text-lg font-black">
+              จบเกมวันนี้?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-left font-semibold leading-6">
+              ผลแข่งและตารางคะแนนยังอยู่ครบ แต่ลิงก์เกมล่าสุดจะไม่เปิดเกมนี้อีก
+              ครั้งหน้าที่เปิดจะได้หน้าสร้างเกมใหม่แทน เปิดเกมต่อทีหลังได้
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 grid grid-cols-2 bg-white">
+            <AlertDialogCancel className="h-12 rounded-xl font-black">
+              ยกเลิก
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={onCloseGame}
+              className="h-12 rounded-xl bg-[#11823b] font-black"
+            >
+              <Flag />
+              จบเกม
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -2918,7 +2986,16 @@ function GamesScreen({
                   disabled={Boolean(openingId)}
                   className="min-w-0 flex-1 text-left"
                 >
-                  <p className="truncate text-base font-black">{game.name}</p>
+                  <p className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-base font-black">
+                      {game.name}
+                    </span>
+                    {game.closed && (
+                      <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-black text-slate-500">
+                        จบแล้ว
+                      </span>
+                    )}
+                  </p>
                   <p className="mt-1 text-xs font-bold text-slate-400">
                     {game.id} · อัปเดต {formatGameDate(game.updatedAt)}
                   </p>
@@ -3943,6 +4020,9 @@ export default function FootballApp() {
       );
       setSyncStatus('local');
       setView(pathShowsAllGames ? 'games' : 'home');
+      // /latest found nothing in progress: the last game was ended, or there is
+      // none. Say so, or the start screen looks like the shortcut broke.
+      if (pathShowsLatest) setNotice('ยังไม่มีเกมที่กำลังเล่นอยู่ กดสร้างตารางใหม่ได้เลย');
       if (!cancelled) setHydrated(true);
     }
     void hydrate();
@@ -3961,7 +4041,7 @@ export default function FootballApp() {
     listSharedGames()
       .then((games) => {
         if (cancelled) return;
-        const newest = newestGame(games);
+        const newest = newestOpenGame(games);
         const current = games.find((game) => game.id === gameId);
         setNewerGameState({
           forGameId: gameId,
@@ -4331,6 +4411,17 @@ export default function FootballApp() {
     setSelectedMatchId(id);
     setView('match-detail');
   }
+  function closeCurrentGame() {
+    if (!tournament) return;
+    applyTournament({ ...tournament, closedAt: new Date().toISOString() });
+    setNotice('จบเกมแล้ว ลิงก์เกมล่าสุดจะไปหาเกมใหม่แทน');
+  }
+  function reopenCurrentGame() {
+    if (!tournament) return;
+    const { closedAt: _closedAt, ...reopened } = tournament;
+    applyTournament(reopened);
+    setNotice('เปิดเกมต่อแล้ว');
+  }
   async function openLatestGame(updateHistory = true) {
     // Resolving can take seconds on a cold database, and a navigation the user
     // makes meanwhile must win over this one.
@@ -4338,7 +4429,7 @@ export default function FootballApp() {
     const latestId = await resolveLatestGameId();
     if (request !== openRequestRef.current) return;
     if (!latestId) {
-      setNotice('ยังไม่มีเกมในฐานข้อมูล');
+      setNotice('ยังไม่มีเกมที่กำลังเล่นอยู่ กดสร้างตารางใหม่ได้เลย');
       return;
     }
     if (updateHistory) window.history.pushState({}, '', latestPath());
@@ -4645,6 +4736,8 @@ export default function FootballApp() {
               onPublish={() => void publishTournament(tournament, 'บันทึกเกมแล้ว')}
               onCopyLink={() => void copyGameLink()}
               onOpenNewer={() => void openLatestGame()}
+              onCloseGame={closeCurrentGame}
+              onReopenGame={reopenCurrentGame}
             />
           )}
           {tournament && view === 'teams' && (

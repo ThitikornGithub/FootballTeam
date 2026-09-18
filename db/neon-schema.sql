@@ -250,7 +250,8 @@ as $$
         ),
         'startTime', coalesce(state ->> 'startTime', ''),
         'createdAt', created_at,
-        'updatedAt', updated_at
+        'updatedAt', updated_at,
+        'closed', coalesce(jsonb_typeof(state -> 'closedAt') = 'string', false)
       )
       order by updated_at desc
     ),

@@ -30,6 +30,7 @@ export type FootballGameSummary = {
   startTime: string;
   createdAt: string;
   updatedAt: string;
+  closed: boolean;
 };
 
 type SaveFootballGameResponse = StoredFootballGame & { conflict?: boolean };
@@ -263,7 +264,9 @@ function parseGameList(value: unknown): FootballGameSummary[] {
       typeof game.updatedAt !== 'string'
     )
       throw new Error('ข้อมูลสรุปเกมมีรูปแบบไม่ถูกต้อง');
-    return game as FootballGameSummary;
+    // Absent until the list function returns it, so a database that has not
+    // been migrated yet reads every game as still open rather than failing.
+    return { ...game, closed: game.closed === true } as FootballGameSummary;
   });
 }
 

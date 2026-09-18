@@ -236,7 +236,9 @@ function parseTactics(
     (!Array.isArray(value.animationSteps) ||
       value.animationSteps.length < 1 ||
       value.animationSteps.length > 8 ||
-      !value.animationSteps.every((step) => parseTacticStep(step, boardTeamIds)))
+      !value.animationSteps.every((step) =>
+        parseTacticStep(step, boardTeamIds),
+      ))
   )
     return null;
   return value as TacticsBoard;
@@ -299,7 +301,8 @@ export function parseTournament(value: unknown): Tournament | null {
     !TIME_PATTERN.test(value.startTime) ||
     !isIntegerBetween(value.availableTimeMinutes, 1, 1440) ||
     !Array.isArray(value.matches) ||
-    !isString(value.createdAt)
+    !isString(value.createdAt) ||
+    (value.closedAt !== undefined && !isString(value.closedAt))
   )
     return null;
 
@@ -321,10 +324,11 @@ export function parseTournament(value: unknown): Tournament | null {
       new Set(team.players.map((player) => player.id)),
     ]),
   );
-  const hasPlayer = (teamId: string | undefined, playerId: string | undefined) =>
-    Boolean(
-      teamId && playerId && playerIdsByTeam.get(teamId)?.has(playerId),
-    );
+  const hasPlayer = (
+    teamId: string | undefined,
+    playerId: string | undefined,
+  ) =>
+    Boolean(teamId && playerId && playerIdsByTeam.get(teamId)?.has(playerId));
   const parsedMatches = (matches as Match[]).map((match) => ({
     ...match,
     teamAGkPlayerId:
@@ -348,8 +352,7 @@ export function parseTournament(value: unknown): Tournament | null {
   const sanitizeMarker = (marker: TacticMarker): TacticMarker => ({
     ...marker,
     playerId:
-      marker.kind === 'player' &&
-      hasPlayer(marker.teamId, marker.playerId)
+      marker.kind === 'player' && hasPlayer(marker.teamId, marker.playerId)
         ? marker.playerId
         : undefined,
   });

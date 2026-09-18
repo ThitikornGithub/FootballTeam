@@ -132,6 +132,9 @@ export type Tournament = {
   matches: Match[];
   tactics?: TacticsBoard;
   createdAt: string;
+  // Set when the group ends the session. A game usually stops before every
+  // scheduled match is played, so this cannot be derived from match statuses.
+  closedAt?: string;
 };
 
 export type TeamDraft = Pick<Team, 'name' | 'color'>;

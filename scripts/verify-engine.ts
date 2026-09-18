@@ -838,6 +838,21 @@ for (const team of tournament.teams) {
   );
 }
 
+assert(
+  parseTournament({ ...tournament, closedAt: '2026-09-19T15:00:00.000Z' })
+    ?.closedAt === '2026-09-19T15:00:00.000Z' &&
+    parseTournament({ ...tournament, closedAt: 1 }) === null &&
+    parseTournament(tournament)?.closedAt === undefined,
+  'A closed game must round-trip its closedAt, reject a malformed one, and stay open when absent',
+);
+assert(
+  extendTournamentByMatches(
+    { ...tournament, closedAt: '2026-09-19T15:00:00.000Z' },
+    1,
+  ).closedAt === '2026-09-19T15:00:00.000Z',
+  'Schedule changes must not silently reopen a closed game',
+);
+
 const unusableScore = setMatchScore(
   afterSkip,
   afterSkip.matches[0].id,
