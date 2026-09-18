@@ -152,6 +152,7 @@ const STORAGE_GAME_BACKUP_PREFIX = 'football-match-maker-game-backup-v2:';
 const MAX_SYNCED_GAME_BACKUPS = 12;
 const PAGES_PATH_KEY = 'football-pages-path';
 const ALL_GAMES_PATH_SEGMENT = 'allgames';
+const LATEST_PATH_SEGMENT = 'latest';
 const GAME_ID_PATTERN = /^game\d{8}-[1-9]\d*$/;
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 const PLAYER_POSITION_META: Record<
@@ -365,6 +366,32 @@ function gameIdFromPath() {
 
 function allGamesFromPath() {
   return routeSegmentFromPath() === ALL_GAMES_PATH_SEGMENT;
+}
+
+function latestFromPath() {
+  return routeSegmentFromPath() === LATEST_PATH_SEGMENT;
+}
+
+function latestPath() {
+  return `${gamePath()}${LATEST_PATH_SEGMENT}`;
+}
+
+// The game created most recently, not the one edited most recently: someone
+// correcting last week's score must not send everyone's shortcut back to it.
+function newestGame(games: FootballGameSummary[]) {
+  return [...games].sort((first, second) =>
+    second.createdAt.localeCompare(first.createdAt),
+  )[0];
+}
+
+// Asks the network first because the cached list is exactly what goes stale
+// when a new game is created. Offline, the cache is still better than nothing.
+async function resolveLatestGameId() {
+  try {
+    return newestGame(await listSharedGames({ force: true }))?.id ?? '';
+  } catch {
+    return newestGame(readCachedSharedGames())?.id ?? '';
+  }
 }
 
 function gamePath(gameId?: string) {
@@ -1093,20 +1120,24 @@ function HomeScreen({
   tournament,
   gameId,
   syncStatus,
+  newerGame,
   onNavigate,
   onOpenMatch,
   onUpdate,
   onPublish,
   onCopyLink,
+  onOpenNewer,
 }: {
   tournament: Tournament;
   gameId: string;
   syncStatus: SyncStatus;
+  newerGame: FootballGameSummary | null;
   onNavigate: (view: AppView) => void;
   onOpenMatch: (id: string) => void;
   onUpdate: (value: Tournament) => void;
   onPublish: () => void;
   onCopyLink: () => void;
+  onOpenNewer: () => void;
 }) {
   const current =
     tournament.matches.find((match) => match.status === 'current') ??
@@ -1181,6 +1212,23 @@ function HomeScreen({
           >
             <span>เกมนี้อยู่เฉพาะเครื่อง</span>
             <span className="text-[#087632]">บันทึกขึ้นฐานข้อมูล</span>
+          </button>
+        )}
+        {newerGame && (
+          // Shown rather than redirecting: someone may have opened last week's
+          // game on purpose to check a result.
+          <button
+            type="button"
+            onClick={onOpenNewer}
+            className="flex w-full items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50 p-3 text-left text-sm font-black text-sky-900"
+          >
+            <span className="min-w-0">
+              <span className="block">นี่เป็นเกมเก่า มีเกมใหม่กว่านี้แล้ว</span>
+              <span className="block truncate text-xs font-bold text-sky-700">
+                {newerGame.name}
+              </span>
+            </span>
+            <span className="shrink-0 text-[#087632]">เปิดเกมล่าสุด</span>
           </button>
         )}
         <section className="grid grid-cols-3 gap-2">
@@ -3627,6 +3675,12 @@ export default function FootballApp() {
   );
   const [conflictRemote, setConflictRemote] =
     useState<StoredFootballGame | null>(null);
+  // Keyed by the game it was computed for, so switching games never shows a
+  // banner that belonged to the previous one while the new list loads.
+  const [newerGameState, setNewerGameState] = useState<{
+    forGameId: string;
+    game: FootballGameSummary | null;
+  } | null>(null);
   const conflictRemoteRef = useRef<StoredFootballGame | null>(null);
   const tournamentRef = useRef<Tournament | null>(null);
   const gameIdRef = useRef('');
@@ -3771,7 +3825,13 @@ export default function FootballApp() {
     let cancelled = false;
     async function hydrate() {
       restoreGitHubPagesPath();
-      const pathGameId = gameIdFromPath();
+      const pathShowsLatest = latestFromPath();
+      // /latest stays in the address bar while the resolved game is shown, so a
+      // home-screen shortcut saved from it keeps finding tonight's game.
+      const pathGameId =
+        gameIdFromPath() ||
+        (pathShowsLatest ? await resolveLatestGameId() : '');
+      if (cancelled) return;
       const pathShowsAllGames = allGamesFromPath();
       const backup = readLocalBackup(pathGameId);
       if (pathGameId) {
@@ -3830,8 +3890,19 @@ export default function FootballApp() {
               writeLocalBackup(remoteValue, pathGameId, false);
             }
           } else {
-            if (backupForGame) setSyncStatus('error');
-            setNotice('ไม่พบเกมจากลิงก์นี้');
+            // A shortcut saved weeks ago usually points at a game that has
+            // since been deleted; tonight's game is what its owner is after.
+            const latestId = pathShowsLatest ? '' : await resolveLatestGameId();
+            if (cancelled) return;
+            if (latestId && latestId !== pathGameId) {
+              window.history.replaceState({}, '', latestPath());
+              await openSharedGame(latestId, false);
+              if (cancelled) return;
+              setNotice('เกมจากลิงก์นี้ถูกลบแล้ว เปิดเกมล่าสุดให้แทน');
+            } else {
+              if (backupForGame) setSyncStatus('error');
+              setNotice('ไม่พบเกมจากลิงก์นี้');
+            }
           }
         } catch (error) {
           if (cancelled) return;
@@ -3883,6 +3954,31 @@ export default function FootballApp() {
   useEffect(() => {
     if (!hydrated || gameId) return;
     void prefetchSharedGames().catch(() => undefined);
+  }, [hydrated, gameId]);
+  useEffect(() => {
+    if (!hydrated || !gameId) return;
+    let cancelled = false;
+    listSharedGames()
+      .then((games) => {
+        if (cancelled) return;
+        const newest = newestGame(games);
+        const current = games.find((game) => game.id === gameId);
+        setNewerGameState({
+          forGameId: gameId,
+          game:
+            newest &&
+            current &&
+            newest.id !== gameId &&
+            newest.createdAt > current.createdAt
+              ? newest
+              : null,
+        });
+      })
+      // Only a hint: without the list the old game simply shows no banner.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [hydrated, gameId]);
   useEffect(() => {
     tournamentRef.current = tournament;
@@ -4235,6 +4331,19 @@ export default function FootballApp() {
     setSelectedMatchId(id);
     setView('match-detail');
   }
+  async function openLatestGame(updateHistory = true) {
+    // Resolving can take seconds on a cold database, and a navigation the user
+    // makes meanwhile must win over this one.
+    const request = ++openRequestRef.current;
+    const latestId = await resolveLatestGameId();
+    if (request !== openRequestRef.current) return;
+    if (!latestId) {
+      setNotice('ยังไม่มีเกมในฐานข้อมูล');
+      return;
+    }
+    if (updateHistory) window.history.pushState({}, '', latestPath());
+    await openSharedGame(latestId, false);
+  }
   async function openSharedGame(gameIdToOpen: string, updateHistory = true) {
     const openRequest = ++openRequestRef.current;
     const startingSession = syncSessionRef.current;
@@ -4418,6 +4527,10 @@ export default function FootballApp() {
         setView('games');
         return;
       }
+      if (latestFromPath()) {
+        void openLatestGame(false);
+        return;
+      }
       openRequestRef.current += 1;
       cancelScheduledRetry();
       // The teardown below drops the queue, so anything still unsent has to
@@ -4521,11 +4634,17 @@ export default function FootballApp() {
               tournament={tournament}
               gameId={gameId}
               syncStatus={syncStatus}
+              newerGame={
+                newerGameState?.forGameId === gameId
+                  ? newerGameState.game
+                  : null
+              }
               onNavigate={setView}
               onOpenMatch={openMatch}
               onUpdate={applyTournament}
               onPublish={() => void publishTournament(tournament, 'บันทึกเกมแล้ว')}
               onCopyLink={() => void copyGameLink()}
+              onOpenNewer={() => void openLatestGame()}
             />
           )}
           {tournament && view === 'teams' && (

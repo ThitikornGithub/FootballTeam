@@ -94,6 +94,37 @@ for (let teamCount = 2; teamCount <= 8; teamCount += 1) {
   );
 }
 
+for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
+  const teams = Array.from({ length: teamCount }, (_, index) =>
+    makeTeam(`Team ${index + 1}`, TEAM_COLORS[index]),
+  );
+  const pairCount = (teamCount * (teamCount - 1)) / 2;
+  let schedule = createTournament({
+    name: `${teamCount} teams`,
+    teams,
+    firstMatchTeamIds: [teams[0].id, teams[1].id],
+    matchDurationMinutes: 7,
+    breakDurationMinutes: 1,
+    startTime: '19:00',
+    availableTimeMinutes: 180,
+  });
+  for (let index = 0; index < 4; index += 1)
+    schedule = extendTournamentByMatches(schedule, 1);
+  const lastMet = new Map<string, number>();
+  let shortestGap = Infinity;
+  schedule.matches.forEach((match, index) => {
+    const key = [match.teamAId, match.teamBId].sort().join(':');
+    const previous = lastMet.get(key);
+    if (previous !== undefined)
+      shortestGap = Math.min(shortestGap, index - previous);
+    lastMet.set(key, index);
+  });
+  assert(
+    shortestGap >= Math.min(pairCount, 6),
+    `${teamCount} teams must not meet the same opponent again after only ${shortestGap} matches`,
+  );
+}
+
 for (const team of tournament.teams) {
   const teamMatches = tournament.matches.filter(
     (match) => match.teamAId === team.id || match.teamBId === team.id,

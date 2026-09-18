@@ -415,11 +415,22 @@ function sharePage(gameId: string, dateLabel: string, imageUrl: string) {
 `;
 }
 
-function allGamesPage() {
-  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/allgames/`;
+// A fixed route that is not a game id. GitHub Pages serves a real 200 page for
+// it instead of 404.html, so link previews render and a home-screen shortcut
+// saved from it keeps working.
+function routePage({
+  segment,
+  title,
+  description,
+  loadingText,
+}: {
+  segment: string;
+  title: string;
+  description: string;
+  loadingText: string;
+}) {
+  const pageUrl = `${SITE_ORIGIN}${BASE_PATH}/${segment}/`;
   const redirectTarget = `${BASE_PATH}/`;
-  const title = 'เกมทั้งหมด';
-  const description = 'เปิดดูเกม ตารางคะแนน รายชื่อทีม และผลการแข่งขัน';
   const imageUrl = `${SITE_ORIGIN}${BASE_PATH}/og-classic.jpg?v=20260910-single`;
 
   return `<!doctype html>
@@ -449,7 +460,7 @@ function allGamesPage() {
     </script>
   </head>
   <body>
-    <p>กำลังเปิดเกมทั้งหมด… <a href="${redirectTarget}">ไปที่ Football Match Maker</a></p>
+    <p>${loadingText} <a href="${redirectTarget}">ไปที่ Football Match Maker</a></p>
   </body>
 </html>
 `;
@@ -480,13 +491,24 @@ async function main() {
 
   const imageDirectory = join(OUTPUT_ROOT, 'game-og');
   await mkdir(imageDirectory, { recursive: true });
-  const allGamesDirectory = join(OUTPUT_ROOT, 'allgames');
-  await mkdir(allGamesDirectory, { recursive: true });
-  await writeFile(
-    join(allGamesDirectory, 'index.html'),
-    allGamesPage(),
-    'utf8',
-  );
+  for (const route of [
+    {
+      segment: 'allgames',
+      title: 'เกมทั้งหมด',
+      description: 'เปิดดูเกม ตารางคะแนน รายชื่อทีม และผลการแข่งขัน',
+      loadingText: 'กำลังเปิดเกมทั้งหมด…',
+    },
+    {
+      segment: 'latest',
+      title: 'เกมล่าสุด',
+      description: 'เปิดเกมล่าสุดของกลุ่มทุกครั้ง บันทึกลิงก์นี้ไว้ในหน้าจอโฮมได้เลย',
+      loadingText: 'กำลังเปิดเกมล่าสุด…',
+    },
+  ]) {
+    const directory = join(OUTPUT_ROOT, route.segment);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, 'index.html'), routePage(route), 'utf8');
+  }
   const gameDates = new Map<string, Date>();
 
   for (const game of storedGames) {

@@ -214,11 +214,22 @@ function balancedFuturePairs(
         const overlapsLast = last
           ? teams.filter((teamId) => includesTeam(last, teamId)).length
           : 0;
+        const key = pairKey(pair.teamAId, pair.teamBId);
+        let lastMet = -1;
+        for (let index = sequence.length - 1; index >= 0; index -= 1) {
+          if (
+            pairKey(sequence[index].teamAId, sequence[index].teamBId) === key
+          ) {
+            lastMet = index;
+            break;
+          }
+        }
         return {
           pair,
           canonicalIndex,
-          pairCount: pairCounts.get(pairKey(pair.teamAId, pair.teamBId)) ?? 0,
+          pairCount: pairCounts.get(key) ?? 0,
           threeInARow,
+          sinceLastMet: lastMet < 0 ? Infinity : sequence.length - lastMet,
           overlapsLast,
           teamLoad:
             (teamCounts.get(pair.teamAId) ?? 0) +
@@ -226,9 +237,18 @@ function balancedFuturePairs(
         };
       })
       .sort(
+        // Once every pairing has met the same number of times the counts tie,
+        // and without recency the pair that just finished could be picked
+        // straight back — with four teams, one match later. Prefer the pairing
+        // that has waited longest.
         (a, b) =>
           a.pairCount - b.pairCount ||
           a.threeInARow - b.threeInARow ||
+          (a.sinceLastMet === b.sinceLastMet
+            ? 0
+            : a.sinceLastMet < b.sinceLastMet
+              ? 1
+              : -1) ||
           a.overlapsLast - b.overlapsLast ||
           a.teamLoad - b.teamLoad ||
           a.canonicalIndex - b.canonicalIndex,
