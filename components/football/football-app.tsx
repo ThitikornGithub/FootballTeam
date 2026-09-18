@@ -500,13 +500,11 @@ function ScorePicker({
   color,
   score,
   onChange,
-  onEditingChange,
 }: {
   label: string;
   color: TeamColor;
   score: string;
   onChange: (score: string) => void;
-  onEditingChange?: (editing: boolean) => void;
 }) {
   const numericScore = Number.parseInt(score, 10) || 0;
   return (
@@ -533,14 +531,8 @@ function ScorePicker({
           onChange={(event) => {
             onChange(event.target.value.replace(/\D/g, '').slice(0, 2));
           }}
-          onFocus={(event) => {
-            event.currentTarget.select();
-            onEditingChange?.(true);
-          }}
-          onBlur={() => {
-            if (!score) onChange('0');
-            onEditingChange?.(false);
-          }}
+          onFocus={(event) => event.currentTarget.select()}
+          onBlur={() => !score && onChange('0')}
           aria-label={`สกอร์ทีม ${label}`}
           className="h-11 w-14 shrink-0 rounded-xl border border-slate-200 bg-white text-center text-xl font-black tabular-nums outline-none focus:border-[#35a95f]"
         />
@@ -857,15 +849,26 @@ function CurrentMatchControl({
         .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
   );
 
-  const [editingScore, setEditingScore] = useState(false);
-  /* oxlint-disable react/react-compiler -- keep the score editor aligned with remote updates for the same match. */
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- a new match always starts from its own score. */
   useEffect(() => {
-    // Adopting a remote score mid-keystroke would wipe the digits being typed,
-    // so wait until the field is left before following the shared game again.
-    if (editingScore) return;
     setScoreA(String(match.teamAScore ?? 0));
     setScoreB(String(match.teamBScore ?? 0));
-  }, [editingScore, match.id, match.teamAScore, match.teamBScore]);
+  }, [match.id]);
+  /* oxlint-enable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    // Every digit typed is saved at once, so a non-empty field already holds
+    // what was sent and can always follow the shared game. Only a field the
+    // user has just cleared to retype is kept. Holding the field for as long as
+    // it had focus froze it on phones, where focus lingers after typing, and
+    // then finishing the match committed the stale number over the other
+    // device's goals.
+    setScoreA((current) =>
+      current === '' ? current : String(match.teamAScore ?? 0),
+    );
+    setScoreB((current) =>
+      current === '' ? current : String(match.teamBScore ?? 0),
+    );
+  }, [match.teamAScore, match.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -908,14 +911,12 @@ function CurrentMatchControl({
           color={teamA.color}
           score={scoreA}
           onChange={(value) => updateDraftScore('a', value)}
-          onEditingChange={setEditingScore}
         />
         <ScorePicker
           label={teamB.name}
           color={teamB.color}
           score={scoreB}
           onChange={(value) => updateDraftScore('b', value)}
-          onEditingChange={setEditingScore}
         />
       </div>
       <ScorerEditor
@@ -2545,7 +2546,6 @@ function MatchDetailScreen({
         .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
   );
 
-  const [editingScore, setEditingScore] = useState(false);
   /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- reseed on the match itself; score changes are handled below. */
   useEffect(() => {
     setScoreA(String(match.teamAScore ?? 0));
@@ -2553,12 +2553,17 @@ function MatchDetailScreen({
   }, [match.id]);
   /* oxlint-enable react-hooks/exhaustive-deps */
   useEffect(() => {
-    // A finished match holds its draft until the user confirms it, so only a
-    // live match follows the shared game here, and not mid-keystroke.
-    if (editingScore || match.status === 'finished') return;
-    setScoreA(String(match.teamAScore ?? 0));
-    setScoreB(String(match.teamBScore ?? 0));
-  }, [editingScore, match.status, match.teamAScore, match.teamBScore]);
+    // A finished match holds its draft until the user confirms it. A live one
+    // saves every digit as it is typed, so it follows the shared game except
+    // for a field just cleared to retype — see CurrentMatchControl.
+    if (match.status === 'finished') return;
+    setScoreA((current) =>
+      current === '' ? current : String(match.teamAScore ?? 0),
+    );
+    setScoreB((current) =>
+      current === '' ? current : String(match.teamBScore ?? 0),
+    );
+  }, [match.status, match.teamAScore, match.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -2607,14 +2612,12 @@ function MatchDetailScreen({
               color={teamA.color}
               score={scoreA}
               onChange={(value) => updateDraftScore('a', value)}
-              onEditingChange={setEditingScore}
             />
             <ScorePicker
               label={teamB.name}
               color={teamB.color}
               score={scoreB}
               onChange={(value) => updateDraftScore('b', value)}
-              onEditingChange={setEditingScore}
             />
           </div>
           <ScorerEditor
@@ -4116,17 +4119,22 @@ export default function FootballApp() {
       gameIdRef.current === gameId && syncSessionRef.current === pollSession;
     pollFailureCountRef.current = 0;
     pollFailedRef.current = false;
-    const poll = window.setInterval(() => {
+    // Only one read at a time: a cold database can take longer than the
+    // interval, and piling requests up would only slow each one down.
+    let pullInFlight = false;
+    const pollOnce = () => {
       if (
+        pullInFlight ||
         document.visibilityState !== 'visible' ||
         saveInFlightRef.current ||
         conflictRemoteRef.current ||
         (dirtyRef.current && remoteRevisionRef.current > 0)
       )
         return;
+      pullInFlight = true;
       void loadSharedGame(gameId)
         .then((game) => {
-          // The guards above ran when the interval fired; by the time the
+          // The guards above ran when this pull started; by the time the
           // response lands the user may have switched games or started an edit.
           if (!requestStillActive()) return;
           const recovered = pollFailedRef.current;
@@ -4176,9 +4184,28 @@ export default function FootballApp() {
           pollFailedRef.current = true;
           setSyncStatus('error');
           setNotice(blockingNotice || 'ยังดึงข้อมูลล่าสุดไม่ได้ กำลังลองใหม่');
+        })
+        .finally(() => {
+          pullInFlight = false;
         });
-    }, 15000);
-    return () => window.clearInterval(poll);
+    };
+    // Phones stop timers while the screen is locked, so a phone that has just
+    // been unlocked would otherwise show the old score until the next tick.
+    const pullWhenVisible = () => {
+      if (document.visibilityState === 'visible') pollOnce();
+    };
+    // Scores change on the pitch every few seconds; 15s left the second phone
+    // visibly behind and people refreshed by hand instead.
+    const poll = window.setInterval(pollOnce, 5000);
+    document.addEventListener('visibilitychange', pullWhenVisible);
+    window.addEventListener('pageshow', pullWhenVisible);
+    window.addEventListener('focus', pullWhenVisible);
+    return () => {
+      window.clearInterval(poll);
+      document.removeEventListener('visibilitychange', pullWhenVisible);
+      window.removeEventListener('pageshow', pullWhenVisible);
+      window.removeEventListener('focus', pullWhenVisible);
+    };
   }, [hydrated, gameId, conflictRemote]);
   useEffect(
     () => () => {
