@@ -445,6 +445,18 @@ function newestOpenGame(games: FootballGameSummary[]) {
     )[0];
 }
 
+// The game /latest would open, when it is not this one and was created after it.
+function newerGameThan(games: FootballGameSummary[], gameId: string) {
+  const newest = newestOpenGame(games);
+  const current = games.find((game) => game.id === gameId);
+  return newest &&
+    current &&
+    newest.id !== gameId &&
+    newest.createdAt > current.createdAt
+    ? newest
+    : null;
+}
+
 // Asks the network first because the cached list is exactly what goes stale
 // when a new game is created. Offline, the cache is still better than nothing.
 async function resolveLatestGameId() {
@@ -1191,6 +1203,9 @@ function HomeScreen({
   onOpenNewer,
   onCloseGame,
   onReopenGame,
+  refreshing,
+  onRefresh,
+  onOpenAllGames,
 }: {
   tournament: Tournament;
   gameId: string;
@@ -1204,6 +1219,9 @@ function HomeScreen({
   onOpenNewer: () => void;
   onCloseGame: () => void;
   onReopenGame: () => void;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onOpenAllGames: () => void;
 }) {
   const [confirmingClose, setConfirmingClose] = useState(false);
   const current =
@@ -1240,29 +1258,48 @@ function HomeScreen({
         title="Football Match Maker"
         eyebrow={tournament.name}
         action={
-          <div
-            aria-label={`สถานะข้อมูล: ${syncStatus}`}
-            title={`สถานะข้อมูล: ${syncStatus}`}
-            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 min-[350px]:px-2.5 text-xs font-black ${syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
-          >
-            {syncStatus === 'saving' || syncStatus === 'loading' ? (
-              <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : syncStatus === 'error' || syncStatus === 'local' ? (
-              <CloudOff className="h-4 w-4" />
-            ) : (
-              <Cloud className="h-4 w-4" />
+          <div className="flex shrink-0 items-center gap-1.5">
+            {gameId && (
+              // Updates arrive on their own every few seconds; this is for
+              // whoever wants to be sure, and is quicker than reloading the
+              // whole page, which is what people did instead.
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+                aria-label="ดึงข้อมูลล่าสุด"
+                title="ดึงข้อมูลล่าสุด"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#e1f4e6] text-[#11823b] active:scale-95 disabled:opacity-60"
+              >
+                <RotateCcw
+                  className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
+                />
+              </button>
             )}
-            <span className="hidden min-[350px]:inline">
-              {syncStatus === 'loading'
-                ? 'กำลังอัปเดต'
-                : syncStatus === 'saving'
-                  ? 'กำลังบันทึก'
-                  : syncStatus === 'saved'
-                    ? 'บันทึกแล้ว'
-                    : syncStatus === 'error'
-                      ? 'ซิงก์ไม่สำเร็จ'
-                      : 'เฉพาะเครื่อง'}
-            </span>
+            <div
+              aria-label={`สถานะข้อมูล: ${syncStatus}`}
+              title={`สถานะข้อมูล: ${syncStatus}`}
+              className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 min-[350px]:px-2.5 text-xs font-black ${syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
+            >
+              {syncStatus === 'saving' || syncStatus === 'loading' ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : syncStatus === 'error' || syncStatus === 'local' ? (
+                <CloudOff className="h-4 w-4" />
+              ) : (
+                <Cloud className="h-4 w-4" />
+              )}
+              <span className="hidden min-[350px]:inline">
+                {syncStatus === 'loading'
+                  ? 'กำลังอัปเดต'
+                  : syncStatus === 'saving'
+                    ? 'กำลังบันทึก'
+                    : syncStatus === 'saved'
+                      ? 'บันทึกแล้ว'
+                      : syncStatus === 'error'
+                        ? 'ซิงก์ไม่สำเร็จ'
+                        : 'เฉพาะเครื่อง'}
+              </span>
+            </div>
           </div>
         }
       />
@@ -1412,6 +1449,22 @@ function HomeScreen({
             </p>
           </section>
         )}
+        <button
+          type="button"
+          onClick={onOpenAllGames}
+          className="flex min-h-14 w-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm active:scale-[.99]"
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]">
+            <FolderOpen className="h-4 w-4" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-black">ดูเกมทั้งหมด</span>
+            <span className="block text-xs font-bold text-slate-400">
+              เปิดเกมอื่น หรือดูผลสัปดาห์ก่อนๆ
+            </span>
+          </span>
+          <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
+        </button>
       </div>
       <AlertDialog open={confirmingClose} onOpenChange={setConfirmingClose}>
         <AlertDialogContent className="rounded-[24px] p-5">
@@ -3821,6 +3874,7 @@ export default function FootballApp() {
   );
   // True for a few seconds after an update from another phone lands.
   const [remoteUpdateVisible, setRemoteUpdateVisible] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   // Keyed by the game it was computed for, so switching games never shows a
   // banner that belonged to the previous one while the new list loads.
   const [newerGameState, setNewerGameState] = useState<{
@@ -3936,6 +3990,85 @@ export default function FootballApp() {
     setTournament(remote.state);
     writeLocalBackup(remote.state, targetGameId, false, currentSyncBase());
     setSyncStatus('saved');
+  }
+
+  // Takes in a copy just read from the database. Edits made while it could
+  // not be reached are settled against it; otherwise it replaces what is on
+  // screen when it is newer and nothing typed here is waiting to be sent.
+  function adoptFetchedGame(
+    game: StoredFootballGame,
+  ): 'settled' | 'updated' | 'unchanged' {
+    const value = extendTournamentToEndTime(game.state);
+    if (dirtyRef.current && remoteRevisionRef.current === 0) {
+      settleWithRemote(
+        { ...game, state: value },
+        queuedStateRef.current ?? tournamentRef.current,
+        offlineBaseRef.current,
+      );
+      return 'settled';
+    }
+    // An edit started while this copy was on its way would be overwritten
+    // here. Leave it to its save, which settles against this same newer copy
+    // if it loses the race.
+    if (
+      game.revision <= remoteRevisionRef.current ||
+      dirtyRef.current ||
+      saveInFlightRef.current
+    )
+      return 'unchanged';
+    remoteRevisionRef.current = game.revision;
+    lastRemoteStateRef.current = canonicalJson(value);
+    tournamentRef.current = value;
+    setTournament(value);
+    setSyncStatus('saved');
+    return 'updated';
+  }
+
+  async function refreshNow() {
+    const targetGameId = gameIdRef.current;
+    const session = syncSessionRef.current;
+    if (!targetGameId || refreshing) return;
+    const stillHere = () =>
+      session === syncSessionRef.current && gameIdRef.current === targetGameId;
+    setRefreshing(true);
+    try {
+      // Whatever is waiting goes first, so the copy read below already has
+      // it. A tap is also a request to retry now rather than after backoff.
+      if (dirtyRef.current) {
+        cancelScheduledRetry(false);
+        await flushSharedState(targetGameId);
+      }
+      const [game, games] = await Promise.all([
+        loadSharedGame(targetGameId),
+        listSharedGames({ force: true }).catch(() => null),
+      ]);
+      if (!stillHere()) return;
+      if (games)
+        setNewerGameState({
+          forGameId: targetGameId,
+          game: newerGameThan(games, targetGameId),
+        });
+      if (!game) {
+        setNotice('ไม่พบเกมนี้ในฐานข้อมูลแล้ว');
+        return;
+      }
+      pollFailureCountRef.current = 0;
+      pollFailedRef.current = false;
+      const outcome = adoptFetchedGame(game);
+      if (outcome === 'updated') setNotice('อัปเดตข้อมูลล่าสุดแล้ว');
+      else if (outcome === 'unchanged') {
+        const pending = dirtyRef.current || saveInFlightRef.current;
+        if (!pending) setSyncStatus('saved');
+        setNotice(
+          pending ? 'กำลังบันทึกสิ่งที่แก้ไว้ เสร็จแล้วจะอัปเดตให้เอง' : 'ข้อมูลเป็นล่าสุดแล้ว',
+        );
+      }
+    } catch (error) {
+      if (!stillHere()) return;
+      setNotice(blockingSyncNotice(error) || 'ดึงข้อมูลไม่สำเร็จ ลองใหม่อีกครั้ง');
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   async function flushSharedState(
@@ -4183,17 +4316,9 @@ export default function FootballApp() {
     listSharedGames()
       .then((games) => {
         if (cancelled) return;
-        const newest = newestOpenGame(games);
-        const current = games.find((game) => game.id === gameId);
         setNewerGameState({
           forGameId: gameId,
-          game:
-            newest &&
-            current &&
-            newest.id !== gameId &&
-            newest.createdAt > current.createdAt
-              ? newest
-              : null,
+          game: newerGameThan(games, gameId),
         });
       })
       // Only a hint: without the list the old game simply shows no banner.
@@ -4270,30 +4395,7 @@ export default function FootballApp() {
           pollFailureCountRef.current = 0;
           pollFailedRef.current = false;
           if (recovered && !dirtyRef.current) setSyncStatus('saved');
-          if (!game) return;
-          const value = extendTournamentToEndTime(game.state);
-          // Opened while the database could not be reached, with edits made
-          // since: settle them now that it answers.
-          if (dirtyRef.current && remoteRevisionRef.current === 0) {
-            settleWithRemote(
-              { ...game, state: value },
-              queuedStateRef.current ?? tournamentRef.current,
-              offlineBaseRef.current,
-            );
-            return;
-          }
-          if (game.revision > remoteRevisionRef.current) {
-            // An edit started while this response was in flight would be
-            // overwritten here. Leave it to its save, which settles against
-            // this same newer copy if it loses the race.
-            if (dirtyRef.current || saveInFlightRef.current) return;
-            remoteRevisionRef.current = game.revision;
-            lastRemoteStateRef.current = canonicalJson(value);
-            tournamentRef.current = value;
-            setTournament(value);
-            setSyncStatus('saved');
-            flashRemoteUpdate();
-          }
+          if (game && adoptFetchedGame(game) === 'updated') flashRemoteUpdate();
         })
         .catch((error: unknown) => {
           // Clearing the interval cannot cancel a request already in flight.
@@ -4874,6 +4976,9 @@ export default function FootballApp() {
                 onOpenNewer={() => void openLatestGame()}
                 onCloseGame={closeCurrentGame}
                 onReopenGame={reopenCurrentGame}
+                refreshing={refreshing}
+                onRefresh={() => void refreshNow()}
+                onOpenAllGames={openAllGames}
               />
             )}
             {tournament && view === 'teams' && (
