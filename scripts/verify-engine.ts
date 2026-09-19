@@ -961,6 +961,39 @@ assert(
   );
 }
 
+// Settings leaves "กำหนดคู่ที่ 2" unticked unless the queued second game
+// differs from what the planner would pick after the first one. That only
+// holds if an untouched schedule's second game is exactly that pick.
+for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
+  const teams = Array.from({ length: teamCount }, (_, index) =>
+    makeTeam(`Team ${index + 1}`, TEAM_COLORS[index]),
+  );
+  for (const opening of [
+    [teams[0].id, teams[1].id],
+    [teams.at(-1)!.id, teams[1].id],
+  ] as Array<[string, string]>) {
+    const untouched = createTournament({
+      name: 'second pair default',
+      teams,
+      firstMatchTeamIds: opening,
+      matchDurationMinutes: 7,
+      breakDurationMinutes: 1,
+      startTime: '19:00',
+      availableTimeMinutes: 180,
+    });
+    const [first, second] = untouched.matches;
+    const planned = recommendUpcomingPairs(untouched, 2, [
+      [first.teamAId, first.teamBId],
+    ])[1];
+    assert(
+      planned &&
+        [second.teamAId, second.teamBId].sort().join(':') ===
+          [...planned].sort().join(':'),
+      `A fresh ${teamCount}-team schedule must read as having no hand-picked second game`,
+    );
+  }
+}
+
 console.log(
-  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, and persisted-state validation.',
+  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
 );

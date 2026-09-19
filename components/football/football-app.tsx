@@ -3344,6 +3344,28 @@ function settingsDraftFrom(tournament: Tournament) {
     (match) => match.status !== 'finished' && match.id !== lockedCurrent?.id,
   );
   const recommendations = recommendUpcomingPairs(tournament, 2);
+  const samePair = (
+    first?: Pick<Match, 'teamAId' | 'teamBId'> | [string, string],
+    second?: Pick<Match, 'teamAId' | 'teamBId'> | [string, string],
+  ) => {
+    const teams = (pair: typeof first) =>
+      pair
+        ? (Array.isArray(pair) ? [...pair] : [pair.teamAId, pair.teamBId])
+            .sort()
+            .join(':')
+        : '';
+    return Boolean(first && second) && teams(first) === teams(second);
+  };
+  // The second pair starts unticked: left alone, saving plans that game the
+  // same way the schedule would anyway. The one exception is a second game
+  // someone already picked by hand before the first result, which stays
+  // ticked so saving an unrelated setting does not quietly replace it.
+  const plannedSecond =
+    finishedCount === 0 && firstQueuedMatch
+      ? recommendUpcomingPairs(tournament, 2, [
+          [firstQueuedMatch.teamAId, firstQueuedMatch.teamBId],
+        ])[1]
+      : undefined;
   const fallbackTeamA = tournament.teams[0]?.id ?? '';
   const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
   return {
@@ -3371,7 +3393,11 @@ function settingsDraftFrom(tournament: Tournament) {
       (finishedCount > 0 ? recommendations[1]?.[1] : undefined) ??
       secondQueuedMatch?.teamBId ??
       fallbackTeamB,
-    useSecondPair: Boolean(secondQueuedMatch),
+    useSecondPair: Boolean(
+      secondQueuedMatch &&
+      plannedSecond &&
+      !samePair(secondQueuedMatch, plannedSecond),
+    ),
   };
 }
 
