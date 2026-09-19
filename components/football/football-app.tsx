@@ -139,7 +139,11 @@ import {
   saveSharedGame,
 } from '@/lib/football-data-api';
 import { parseTournament } from '@/lib/football-schema';
-import { newestPendingState, syncRetryDelayMs } from '@/lib/football-sync';
+import {
+  canonicalJson,
+  newestPendingState,
+  syncRetryDelayMs,
+} from '@/lib/football-sync';
 const TacticsScreen = lazy(() =>
   import('./tactics-board').then((module) => ({
     default: module.TacticsScreen,
@@ -329,6 +333,25 @@ function clearLocalBackup(gameId = '') {
   } catch {
     // Browser storage is only a best-effort offline backup.
   }
+}
+
+// Creating a game used to leave its pre-creation copy in the draft slot, which
+// the start screen then offered as unsaved. The database keeps the creation
+// time, so a game backup that shares it means this draft is already a game.
+function draftAlreadyPublished(draft: Tournament) {
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(STORAGE_GAME_BACKUP_PREFIX)) continue;
+      const backup = JSON.parse(localStorage.getItem(key) ?? 'null') as {
+        tournament?: { createdAt?: unknown };
+      } | null;
+      if (backup?.tournament?.createdAt === draft.createdAt) return true;
+    }
+  } catch {
+    // Unreadable storage: keep offering the draft rather than risk losing it.
+  }
+  return false;
 }
 
 function markLocalBackupSyncedIfUnchanged(gameId: string, saved: Tournament) {
@@ -2721,8 +2744,12 @@ function ShareScreen({
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isSharing, setIsSharing] = useState(false);
+  // Not the address bar: opened through /latest it reads /latest, and a link
+  // shared with tonight's table would open some other game next week.
   const gameUrl =
-    typeof window !== 'undefined' && gameId ? window.location.href : '';
+    typeof window !== 'undefined' && gameId
+      ? `${window.location.origin}${gamePath(gameId)}`
+      : '';
   const text = [
     formatShareText(tournament),
     gameUrl ? `เปิดเกมและแก้ไขร่วมกัน: ${gameUrl}` : '',
@@ -3781,6 +3808,8 @@ export default function FootballApp() {
   const openRequestRef = useRef(0);
   const pollFailureCountRef = useRef(0);
   const pollFailedRef = useRef(false);
+  // The sync session of a game still being created in the database, if any.
+  const publishSessionRef = useRef<number | null>(null);
 
   function cancelScheduledRetry(resetAttempt = true) {
     if (retryTimerRef.current !== null) {
@@ -3833,12 +3862,25 @@ export default function FootballApp() {
     let saveSucceeded = false;
     setSyncStatus('saving');
     try {
-      const game = await saveSharedGame(
-        targetGameId,
-        value,
-        remoteRevisionRef.current,
-        options,
-      );
+      let game: StoredFootballGame;
+      try {
+        game = await saveSharedGame(
+          targetGameId,
+          value,
+          remoteRevisionRef.current,
+          options,
+        );
+      } catch (error) {
+        // Two phones often make the same edit at once, such as both tapping +
+        // for one goal. The database then already holds exactly what this save
+        // carried, so there is nothing for anyone to choose between.
+        if (
+          !(error instanceof RevisionConflictError) ||
+          canonicalJson(error.latest.state) !== canonicalJson(value)
+        )
+          throw error;
+        game = error.latest;
+      }
       saveSucceeded = true;
       if (!requestStillActive()) {
         markLocalBackupSyncedIfUnchanged(targetGameId, value);
@@ -4023,9 +4065,10 @@ export default function FootballApp() {
       tournamentRef.current = null;
       gameIdRef.current = '';
       setGameId('');
-      setRecoverableDraft(
-        backup.tournament && !backup.gameId ? backup.tournament : null,
-      );
+      const draft =
+        backup.tournament && !backup.gameId ? backup.tournament : null;
+      if (draft && draftAlreadyPublished(draft)) clearLocalBackup();
+      else setRecoverableDraft(draft);
       setSyncStatus('local');
       setView(pathShowsAllGames ? 'games' : 'home');
       // /latest found nothing in progress: the last game was ended, or there is
@@ -4338,13 +4381,18 @@ export default function FootballApp() {
           ? 'saving'
           : targetGameId
             ? 'saved'
-            : 'local',
+            : publishSessionRef.current === syncSessionRef.current
+              ? // Still being created, not local-only. Calling it local offered
+                // a save button that created the same game a second time.
+                'saving'
+              : 'local',
     );
     setTournament(value);
   }
   async function publishTournament(value: Tournament, message: string) {
     syncSessionRef.current += 1;
     const publishSession = syncSessionRef.current;
+    publishSessionRef.current = publishSession;
     cancelScheduledRetry();
     tournamentRef.current = value;
     lastRemoteStateRef.current = '';
@@ -4363,19 +4411,45 @@ export default function FootballApp() {
     try {
       const game = await createSharedGame(value, bangkokDateCode());
       if (publishSession !== syncSessionRef.current) return;
+      publishSessionRef.current = null;
+      // A slow first request can take seconds, and a score or name typed in
+      // that time is newer than what was sent. Replacing it with the created
+      // copy silently threw it away.
+      const editedMeanwhile =
+        tournamentRef.current && tournamentRef.current !== value
+          ? tournamentRef.current
+          : null;
       const storedValue = extendTournamentToEndTime(game.state);
       lastRemoteStateRef.current = JSON.stringify(storedValue);
       remoteRevisionRef.current = game.revision;
       gameIdRef.current = game.id;
       setGameId(game.id);
-      setTournament(storedValue);
-      tournamentRef.current = storedValue;
-      writeLocalBackup(storedValue, game.id, false);
-      setSyncStatus('saved');
+      // The draft slot only guarded the game until the database had it. Left
+      // behind, the start screen offered it as an unsaved game, and saving it
+      // from there created the same game a second time.
+      clearLocalBackup();
+      if (editedMeanwhile) {
+        const localValue = extendTournamentToEndTime({
+          ...editedMeanwhile,
+          id: game.id,
+        });
+        tournamentRef.current = localValue;
+        queuedStateRef.current = localValue;
+        dirtyRef.current = true;
+        setTournament(localValue);
+        writeLocalBackup(localValue, game.id, true);
+        setSyncStatus('saving');
+      } else {
+        setTournament(storedValue);
+        tournamentRef.current = storedValue;
+        writeLocalBackup(storedValue, game.id, false);
+        setSyncStatus('saved');
+      }
       window.history.pushState({}, '', gamePath(game.id));
       setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
     } catch {
       if (publishSession !== syncSessionRef.current) return;
+      publishSessionRef.current = null;
       setSyncStatus('local');
       setNotice(`${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`);
     }

@@ -28,6 +28,7 @@ import {
 } from '../lib/football-tactics';
 import { parseTournament } from '../lib/football-schema';
 import {
+  canonicalJson,
   MAX_SYNC_RETRY_MS,
   newestPendingState,
   syncRetryDelayMs,
@@ -887,6 +888,33 @@ assert(
   'A failed save must keep the newest queued or current state instead of restoring the stale in-flight state',
 );
 
+// The same match as the app builds it and as Postgres jsonb hands it back.
+const appOrderMatch = {
+  id: 'm1',
+  matchNumber: 1,
+  teamAId: 'a',
+  teamBId: 'b',
+  status: 'current',
+  teamAGkPlayerId: undefined,
+  teamAScore: 2,
+  teamBScore: 0,
+};
+const databaseOrderMatch = JSON.parse(
+  '{"id": "m1", "status": "current", "teamAId": "a", "teamBId": "b", "teamAScore": 2, "teamBScore": 0, "matchNumber": 1}',
+) as typeof appOrderMatch;
+assert(
+  JSON.stringify(appOrderMatch) !== JSON.stringify(databaseOrderMatch) &&
+    canonicalJson({ matches: [appOrderMatch] }) ===
+      canonicalJson({ matches: [databaseOrderMatch] }),
+  'The same game must compare equal whatever order the database stored its keys in',
+);
+assert(
+  canonicalJson({ matches: [appOrderMatch] }) !==
+    canonicalJson({ matches: [{ ...databaseOrderMatch, teamAScore: 3 }] }) &&
+    canonicalJson(['a', 'b']) !== canonicalJson(['b', 'a']),
+  'Ignoring key order must still tell a different value or a different running order apart',
+);
+
 console.log(
-  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, and persisted-state validation.',
+  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, and persisted-state validation.',
 );

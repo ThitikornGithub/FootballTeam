@@ -8,6 +8,21 @@ export function syncRetryDelayMs(attempt: number) {
   );
 }
 
+// Postgres jsonb stores object keys in its own order, so a game read back from
+// the database serializes differently from the same game built in the app.
+// Compare through this whenever the question is "is this the same data".
+export function canonicalJson(value: unknown) {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item).sort(([first], [second]) =>
+            first < second ? -1 : first > second ? 1 : 0,
+          ),
+        )
+      : item,
+  );
+}
+
 export function newestPendingState<T>(
   inFlightState: T,
   queuedState: T | null,

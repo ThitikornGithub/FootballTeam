@@ -46,6 +46,7 @@ import {
   playersAvailableForTactics,
   resolvedFormationLabel,
 } from '@/lib/football-tactics';
+import { canonicalJson } from '@/lib/football-sync';
 import {
   type Match,
   type TacticMarker,
@@ -359,7 +360,11 @@ export function TacticsScreen({
   const onUpdateRef = useRef(onUpdate);
   const autosaveTimerRef = useRef<number | null>(null);
   const pendingPlanRef = useRef<TacticsBoard | null>(null);
-  const sourceTacticsSignature = JSON.stringify(tournament.tactics ?? null);
+  // Order-insensitive: a plan read back from the database lists its keys in a
+  // different order, and treating that as a new plan rebuilt the board — back
+  // to step 1, playback stopped, a just-dragged marker dropped — every time
+  // another phone saved anything at all, such as a score.
+  const sourceTacticsSignature = canonicalJson(tournament.tactics ?? null);
   // Only what the board actually draws. Including the whole team would rebuild
   // it — losing the selected step and stopping playback — every time someone
   // skipped a goalkeeper, which the board does not show at all.
@@ -381,7 +386,7 @@ export function TacticsScreen({
     ...initialBoard,
     animationSteps: initialBoard.animationSteps?.length ? steps : undefined,
   };
-  const lastLocalSignatureRef = useRef(JSON.stringify(initialPersistedBoard));
+  const lastLocalSignatureRef = useRef(canonicalJson(initialPersistedBoard));
   const persistedBoard = useMemo(
     () => ({
       ...board,
@@ -389,7 +394,7 @@ export function TacticsScreen({
     }),
     [animationHasContent, board, steps],
   );
-  const localPlanSignature = JSON.stringify(persistedBoard);
+  const localPlanSignature = canonicalJson(persistedBoard);
   const currentStep = steps[activeStepIndex] ?? steps[0];
   const visibleMarkers =
     mode === 'position'
@@ -479,7 +484,7 @@ export function TacticsScreen({
     const hasAnimation = Boolean(nextBoard.animationSteps?.length);
     lastPublishedSignatureRef.current = sourceTacticsSignature;
     lastRosterSignatureRef.current = sourceRosterSignature;
-    lastLocalSignatureRef.current = JSON.stringify({
+    lastLocalSignatureRef.current = canonicalJson({
       ...nextBoard,
       animationSteps: hasAnimation ? nextSteps : undefined,
     });
@@ -502,7 +507,7 @@ export function TacticsScreen({
       const plan = pendingPlanRef.current;
       if (!plan) return;
       pendingPlanRef.current = null;
-      const signature = JSON.stringify(plan);
+      const signature = canonicalJson(plan);
       lastLocalSignatureRef.current = signature;
       lastPublishedSignatureRef.current = signature;
       onUpdateRef.current({
@@ -518,7 +523,7 @@ export function TacticsScreen({
         window.clearTimeout(autosaveTimerRef.current);
       const plan = pendingPlanRef.current;
       if (!plan) return;
-      const signature = JSON.stringify(plan);
+      const signature = canonicalJson(plan);
       lastLocalSignatureRef.current = signature;
       lastPublishedSignatureRef.current = signature;
       onUpdateRef.current({
