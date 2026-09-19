@@ -44,6 +44,7 @@ import {
   type MainView,
   NumberStepper,
   PageHeader,
+  RemoteUpdateContext,
   ScreenErrorBoundary,
   TeamBadge,
   TeamShirtIcon,
@@ -141,8 +142,11 @@ import {
 import { parseTournament } from '@/lib/football-schema';
 import {
   canonicalJson,
+  describeUnsavedChanges,
   newestPendingState,
+  type SyncBase,
   syncRetryDelayMs,
+  type UnsavedChange,
 } from '@/lib/football-sync';
 const TacticsScreen = lazy(() =>
   import('./tactics-board').then((module) => ({
@@ -193,13 +197,7 @@ type AppView =
   | 'standings'
   | 'share'
   | 'games';
-type SyncStatus =
-  | 'local'
-  | 'loading'
-  | 'saving'
-  | 'saved'
-  | 'error'
-  | 'conflict';
+type SyncStatus = 'local' | 'loading' | 'saving' | 'saved' | 'error';
 
 function gameBackupKey(gameId: string) {
   return `${STORAGE_GAME_BACKUP_PREFIX}${gameId}`;
@@ -256,11 +254,27 @@ function readLocalBackup(gameId = '') {
         const backup = JSON.parse(storedGame) as {
           tournament?: unknown;
           pendingSync?: unknown;
+          revision?: unknown;
+          baseState?: unknown;
         };
+        const tournament = parseTournament(backup.tournament);
+        const pendingSync = backup.pendingSync === true;
+        const revision = Number(backup.revision);
+        // Unsent edits need the copy they were made on; a synced backup is
+        // that copy itself. Backups written before either was kept have none.
+        const baseState = pendingSync
+          ? typeof backup.baseState === 'string'
+            ? backup.baseState
+            : null
+          : tournament && canonicalJson(tournament);
         return {
-          tournament: parseTournament(backup.tournament),
+          tournament,
           gameId,
-          pendingSync: backup.pendingSync === true,
+          pendingSync,
+          base:
+            Number.isInteger(revision) && revision > 0 && baseState
+              ? ({ revision, state: baseState } satisfies SyncBase)
+              : null,
         };
       }
     }
@@ -268,16 +282,17 @@ function readLocalBackup(gameId = '') {
     const tournament = stored ? parseTournament(JSON.parse(stored)) : null;
     const legacyGameId = localStorage.getItem(STORAGE_GAME_ID_KEY);
     if (gameId && legacyGameId !== gameId)
-      return { tournament: null, gameId, pendingSync: false };
+      return { tournament: null, gameId, pendingSync: false, base: null };
     if (!gameId && legacyGameId)
-      return { tournament: null, gameId: null, pendingSync: false };
+      return { tournament: null, gameId: null, pendingSync: false, base: null };
     return {
       tournament,
       gameId: legacyGameId,
       pendingSync: localStorage.getItem(STORAGE_PENDING_SYNC_KEY) === '1',
+      base: null,
     };
   } catch {
-    return { tournament: null, gameId: null, pendingSync: false };
+    return { tournament: null, gameId: null, pendingSync: false, base: null };
   }
 }
 
@@ -285,6 +300,7 @@ function writeLocalBackup(
   tournament: Tournament,
   gameId = '',
   pendingSync = false,
+  base: SyncBase | null = null,
 ) {
   try {
     if (gameId) {
@@ -293,6 +309,8 @@ function writeLocalBackup(
         tournament,
         pendingSync,
         savedAt: Date.now(),
+        revision: base?.revision,
+        baseState: pendingSync ? base?.state : undefined,
       });
       const storedCount = localStorage.length;
       try {
@@ -354,13 +372,28 @@ function draftAlreadyPublished(draft: Tournament) {
   return false;
 }
 
-function markLocalBackupSyncedIfUnchanged(gameId: string, saved: Tournament) {
+function markLocalBackupSyncedIfUnchanged(
+  gameId: string,
+  saved: Tournament,
+  revision: number,
+) {
   const backup = readLocalBackup(gameId);
   if (
     backup.tournament &&
-    JSON.stringify(backup.tournament) === JSON.stringify(saved)
+    canonicalJson(backup.tournament) === canonicalJson(saved)
   )
-    writeLocalBackup(saved, gameId, false);
+    writeLocalBackup(saved, gameId, false, {
+      revision,
+      state: canonicalJson(saved),
+    });
+}
+
+function syncBaseTournament(base: SyncBase) {
+  try {
+    return parseTournament(JSON.parse(base.state));
+  } catch {
+    return null;
+  }
 }
 
 function restoreGitHubPagesPath() {
@@ -1210,13 +1243,11 @@ function HomeScreen({
           <div
             aria-label={`สถานะข้อมูล: ${syncStatus}`}
             title={`สถานะข้อมูล: ${syncStatus}`}
-            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 min-[350px]:px-2.5 text-xs font-black ${syncStatus === 'conflict' ? 'bg-orange-50 text-orange-700' : syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
+            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-xl px-2 min-[350px]:px-2.5 text-xs font-black ${syncStatus === 'error' ? 'bg-red-50 text-red-600' : syncStatus === 'local' ? 'bg-amber-50 text-amber-700' : 'bg-[#e1f4e6] text-[#11823b]'}`}
           >
             {syncStatus === 'saving' || syncStatus === 'loading' ? (
               <LoaderCircle className="h-4 w-4 animate-spin" />
-            ) : syncStatus === 'error' ||
-              syncStatus === 'local' ||
-              syncStatus === 'conflict' ? (
+            ) : syncStatus === 'error' || syncStatus === 'local' ? (
               <CloudOff className="h-4 w-4" />
             ) : (
               <Cloud className="h-4 w-4" />
@@ -1230,9 +1261,7 @@ function HomeScreen({
                     ? 'บันทึกแล้ว'
                     : syncStatus === 'error'
                       ? 'ซิงก์ไม่สำเร็จ'
-                      : syncStatus === 'conflict'
-                        ? 'ข้อมูลชนกัน'
-                        : 'เฉพาะเครื่อง'}
+                      : 'เฉพาะเครื่อง'}
             </span>
           </div>
         }
@@ -3785,17 +3814,22 @@ export default function FootballApp() {
   const [recoverableDraft, setRecoverableDraft] = useState<Tournament | null>(
     null,
   );
-  const [conflictRemote, setConflictRemote] =
-    useState<StoredFootballGame | null>(null);
+  // What this phone had that another phone's earlier save replaced, shown once
+  // so it can be entered again on top of the latest copy.
+  const [unsavedChanges, setUnsavedChanges] = useState<UnsavedChange[] | null>(
+    null,
+  );
+  // True for a few seconds after an update from another phone lands.
+  const [remoteUpdateVisible, setRemoteUpdateVisible] = useState(false);
   // Keyed by the game it was computed for, so switching games never shows a
   // banner that belonged to the previous one while the new list loads.
   const [newerGameState, setNewerGameState] = useState<{
     forGameId: string;
     game: FootballGameSummary | null;
   } | null>(null);
-  const conflictRemoteRef = useRef<StoredFootballGame | null>(null);
   const tournamentRef = useRef<Tournament | null>(null);
   const gameIdRef = useRef('');
+  // canonicalJson of the last copy known to be in the database.
   const lastRemoteStateRef = useRef('');
   const remoteRevisionRef = useRef(0);
   const queuedStateRef = useRef<Tournament | null>(null);
@@ -3810,6 +3844,11 @@ export default function FootballApp() {
   const pollFailedRef = useRef(false);
   // The sync session of a game still being created in the database, if any.
   const publishSessionRef = useRef<number | null>(null);
+  // From the backup, for a game opened while the database could not be
+  // reached: the copy its unsent edits are based on, until the live revision
+  // is known.
+  const offlineBaseRef = useRef<SyncBase | null>(null);
+  const remoteUpdateTimerRef = useRef<number | null>(null);
 
   function cancelScheduledRetry(resetAttempt = true) {
     if (retryTimerRef.current !== null) {
@@ -3829,6 +3868,76 @@ export default function FootballApp() {
     }, delay);
   }
 
+  function currentSyncBase(): SyncBase | null {
+    return remoteRevisionRef.current > 0 && lastRemoteStateRef.current
+      ? {
+          revision: remoteRevisionRef.current,
+          state: lastRemoteStateRef.current,
+        }
+      : offlineBaseRef.current;
+  }
+
+  function flashRemoteUpdate() {
+    setRemoteUpdateVisible(true);
+    if (remoteUpdateTimerRef.current !== null)
+      window.clearTimeout(remoteUpdateTimerRef.current);
+    remoteUpdateTimerRef.current = window.setTimeout(() => {
+      remoteUpdateTimerRef.current = null;
+      setRemoteUpdateVisible(false);
+    }, 5000);
+  }
+
+  // Settles this phone's unsent edits against what the database now holds.
+  // When nobody else has saved since the edits were made, they are sent as
+  // they are. Otherwise the database copy wins and this phone is shown what
+  // it had that did not make it. Asking which side to keep let one tap wipe
+  // out another phone's goal without anyone seeing it go.
+  function settleWithRemote(
+    remote: StoredFootballGame,
+    local: Tournament | null,
+    base: SyncBase | null,
+  ) {
+    const targetGameId = gameIdRef.current;
+    const remoteSerialized = canonicalJson(remote.state);
+    offlineBaseRef.current = null;
+    cancelScheduledRetry();
+    remoteRevisionRef.current = remote.revision;
+    lastRemoteStateRef.current = remoteSerialized;
+    if (local && canonicalJson(local) !== remoteSerialized) {
+      if (base?.revision === remote.revision) {
+        tournamentRef.current = local;
+        queuedStateRef.current = local;
+        dirtyRef.current = true;
+        setTournament(local);
+        writeLocalBackup(local, targetGameId, true, currentSyncBase());
+        setSyncStatus('saving');
+        window.setTimeout(() => void flushSharedState(targetGameId), 0);
+        return;
+      }
+      const lost = describeUnsavedChanges(
+        local,
+        remote.state,
+        base ? syncBaseTournament(base) : null,
+      );
+      // A second race before the first message is read replaces what it said
+      // about the same match rather than listing that match twice.
+      if (lost.length)
+        setUnsavedChanges((current) => [
+          ...(current ?? []).filter(
+            (item) => !lost.some((change) => change.title === item.title),
+          ),
+          ...lost,
+        ]);
+      else flashRemoteUpdate();
+    }
+    queuedStateRef.current = null;
+    dirtyRef.current = false;
+    tournamentRef.current = remote.state;
+    setTournament(remote.state);
+    writeLocalBackup(remote.state, targetGameId, false, currentSyncBase());
+    setSyncStatus('saved');
+  }
+
   async function flushSharedState(
     targetGameId = gameIdRef.current,
     options: { keepalive?: boolean } = {},
@@ -3836,7 +3945,6 @@ export default function FootballApp() {
     if (
       !targetGameId ||
       saveInFlightRef.current ||
-      conflictRemoteRef.current ||
       remoteRevisionRef.current < 1 ||
       (retryTimerRef.current !== null && !options.keepalive)
     )
@@ -3847,18 +3955,20 @@ export default function FootballApp() {
     const requestStillActive = () =>
       requestSession === syncSessionRef.current &&
       gameIdRef.current === targetGameId;
-    const serialized = JSON.stringify(value);
+    const serialized = canonicalJson(value);
     if (serialized === lastRemoteStateRef.current) {
       queuedStateRef.current = null;
       dirtyRef.current = false;
       setSyncStatus('saved');
-      writeLocalBackup(value, targetGameId, false);
+      writeLocalBackup(value, targetGameId, false, currentSyncBase());
       return;
     }
 
+    // The copy these edits sit on, to tell what this phone changed if another
+    // phone turns out to have saved first.
+    const base = currentSyncBase();
     queuedStateRef.current = null;
     saveInFlightRef.current = true;
-    let conflictDetected = false;
     let saveSucceeded = false;
     setSyncStatus('saving');
     try {
@@ -3873,32 +3983,36 @@ export default function FootballApp() {
       } catch (error) {
         // Two phones often make the same edit at once, such as both tapping +
         // for one goal. The database then already holds exactly what this save
-        // carried, so there is nothing for anyone to choose between.
+        // carried, so nothing was lost and there is nothing to report.
         if (
           !(error instanceof RevisionConflictError) ||
-          canonicalJson(error.latest.state) !== canonicalJson(value)
+          canonicalJson(error.latest.state) !== serialized
         )
           throw error;
         game = error.latest;
       }
       saveSucceeded = true;
       if (!requestStillActive()) {
-        markLocalBackupSyncedIfUnchanged(targetGameId, value);
+        markLocalBackupSyncedIfUnchanged(targetGameId, value, game.revision);
         return;
       }
       remoteRevisionRef.current = game.revision;
-      lastRemoteStateRef.current = JSON.stringify(game.state);
+      lastRemoteStateRef.current = canonicalJson(game.state);
       cancelScheduledRetry();
-      const latestSerialized = JSON.stringify(tournamentRef.current);
-      if (latestSerialized !== serialized) {
+      if (canonicalJson(tournamentRef.current) !== serialized) {
         queuedStateRef.current = tournamentRef.current;
         dirtyRef.current = true;
         if (tournamentRef.current)
-          writeLocalBackup(tournamentRef.current, targetGameId, true);
+          writeLocalBackup(
+            tournamentRef.current,
+            targetGameId,
+            true,
+            currentSyncBase(),
+          );
       } else {
         dirtyRef.current = false;
         setSyncStatus('saved');
-        writeLocalBackup(value, targetGameId, false);
+        writeLocalBackup(value, targetGameId, false, currentSyncBase());
       }
     } catch (error) {
       if (!requestStillActive()) return;
@@ -3907,17 +4021,19 @@ export default function FootballApp() {
         queuedStateRef.current,
         tournamentRef.current,
       );
-      queuedStateRef.current = latestPending;
-      dirtyRef.current = true;
-      writeLocalBackup(latestPending, targetGameId, true);
       if (error instanceof RevisionConflictError) {
-        conflictDetected = true;
-        cancelScheduledRetry(false);
-        remoteRevisionRef.current = error.latest.revision;
-        conflictRemoteRef.current = error.latest;
-        setConflictRemote(error.latest);
-        setSyncStatus('conflict');
+        settleWithRemote(
+          {
+            ...error.latest,
+            state: extendTournamentToEndTime(error.latest.state),
+          },
+          latestPending,
+          base,
+        );
       } else {
+        queuedStateRef.current = latestPending;
+        dirtyRef.current = true;
+        writeLocalBackup(latestPending, targetGameId, true, currentSyncBase());
         const blockingNotice = blockingSyncNotice(error);
         setSyncStatus('error');
         setNotice(blockingNotice || 'ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
@@ -3928,18 +4044,11 @@ export default function FootballApp() {
       saveInFlightRef.current = false;
       if (!requestStillActive()) {
         const activeGameId = gameIdRef.current;
-        if (
-          activeGameId &&
-          queuedStateRef.current &&
-          !conflictRemoteRef.current &&
-          !options.keepalive
-        )
+        if (activeGameId && queuedStateRef.current && !options.keepalive)
           window.setTimeout(() => void flushSharedState(activeGameId), 0);
       } else if (
         saveSucceeded &&
         queuedStateRef.current &&
-        !conflictDetected &&
-        !conflictRemoteRef.current &&
         !options.keepalive
       ) {
         window.setTimeout(() => void flushSharedState(targetGameId), 0);
@@ -3968,8 +4077,14 @@ export default function FootballApp() {
           backup.gameId === pathGameId ? backup.tournament : null;
         if (backupForGame) {
           const cachedValue = extendTournamentToEndTime(backupForGame);
+          // Until the database answers, the backup is the best idea of what it
+          // holds: for unsent edits, the copy those edits were made on.
+          offlineBaseRef.current = backup.base;
           tournamentRef.current = cachedValue;
-          lastRemoteStateRef.current = JSON.stringify(cachedValue);
+          lastRemoteStateRef.current =
+            backup.pendingSync && backup.base
+              ? backup.base.state
+              : canonicalJson(cachedValue);
           queuedStateRef.current = backup.pendingSync ? cachedValue : null;
           dirtyRef.current = backup.pendingSync;
           setTournament(cachedValue);
@@ -3981,41 +4096,17 @@ export default function FootballApp() {
           const game = await loadSharedGame(pathGameId);
           if (cancelled) return;
           if (game) {
-            const remoteValue = extendTournamentToEndTime(game.state);
-            const remoteSerialized = JSON.stringify(remoteValue);
-            lastRemoteStateRef.current = remoteSerialized;
-            remoteRevisionRef.current = game.revision;
-            const pendingLocalValue =
-              (backup.pendingSync || dirtyRef.current) &&
-              (tournamentRef.current ?? backupForGame);
-            if (pendingLocalValue) {
-              const localValue = extendTournamentToEndTime(pendingLocalValue);
-              if (JSON.stringify(localValue) !== remoteSerialized) {
-                const remoteGame = { ...game, state: remoteValue };
-                tournamentRef.current = localValue;
-                queuedStateRef.current = localValue;
-                dirtyRef.current = true;
-                conflictRemoteRef.current = remoteGame;
-                setTournament(localValue);
-                setConflictRemote(remoteGame);
-                setSyncStatus('conflict');
-                setNotice('มีข้อมูลในเครื่องที่ยังไม่ได้ซิงก์ กรุณาเลือกข้อมูลที่จะใช้');
-              } else {
-                queuedStateRef.current = null;
-                dirtyRef.current = false;
-                tournamentRef.current = remoteValue;
-                setTournament(remoteValue);
-                setSyncStatus('saved');
-                writeLocalBackup(remoteValue, pathGameId, false);
-              }
-            } else {
-              queuedStateRef.current = null;
-              dirtyRef.current = false;
-              tournamentRef.current = remoteValue;
-              setTournament(remoteValue);
-              setSyncStatus('saved');
-              writeLocalBackup(remoteValue, pathGameId, false);
-            }
+            // Unsent edits from last time, or made on the cached copy while
+            // this load was running.
+            const localValue =
+              backup.pendingSync || dirtyRef.current
+                ? (tournamentRef.current ?? backupForGame)
+                : null;
+            settleWithRemote(
+              { ...game, state: extendTournamentToEndTime(game.state) },
+              localValue && extendTournamentToEndTime(localValue),
+              offlineBaseRef.current,
+            );
           } else {
             // A shortcut saved weeks ago usually points at a game that has
             // since been deleted; tonight's game is what its owner is after.
@@ -4042,11 +4133,11 @@ export default function FootballApp() {
             if (backup.pendingSync || dirtyRef.current) {
               queuedStateRef.current = value;
               dirtyRef.current = true;
-              writeLocalBackup(value, pathGameId, true);
+              writeLocalBackup(value, pathGameId, true, currentSyncBase());
             } else {
               queuedStateRef.current = null;
               dirtyRef.current = false;
-              writeLocalBackup(value, pathGameId, false);
+              writeLocalBackup(value, pathGameId, false, currentSyncBase());
             }
             setTournament(value);
             setSyncStatus('error');
@@ -4115,13 +4206,9 @@ export default function FootballApp() {
     tournamentRef.current = tournament;
     if (!hydrated) return;
     if (tournament) {
-      writeLocalBackup(tournament, gameId, dirtyRef.current);
+      writeLocalBackup(tournament, gameId, dirtyRef.current, currentSyncBase());
       if (!gameId) return;
-      const serialized = JSON.stringify(tournament);
-      if (serialized === lastRemoteStateRef.current) return;
-      // An unresolved conflict owns the status, and flushing is blocked until
-      // the user picks a side, so leave both alone.
-      if (conflictRemoteRef.current) return;
+      if (canonicalJson(tournament) === lastRemoteStateRef.current) return;
       queuedStateRef.current = tournament;
       dirtyRef.current = true;
       setSyncStatus(
@@ -4170,7 +4257,6 @@ export default function FootballApp() {
         pullInFlight ||
         document.visibilityState !== 'visible' ||
         saveInFlightRef.current ||
-        conflictRemoteRef.current ||
         (dirtyRef.current && remoteRevisionRef.current > 0)
       )
         return;
@@ -4183,35 +4269,30 @@ export default function FootballApp() {
           const recovered = pollFailedRef.current;
           pollFailureCountRef.current = 0;
           pollFailedRef.current = false;
-          if (recovered && !dirtyRef.current && !conflictRemoteRef.current)
-            setSyncStatus('saved');
+          if (recovered && !dirtyRef.current) setSyncStatus('saved');
           if (!game) return;
           const value = extendTournamentToEndTime(game.state);
-          const serialized = JSON.stringify(value);
+          // Opened while the database could not be reached, with edits made
+          // since: settle them now that it answers.
           if (dirtyRef.current && remoteRevisionRef.current === 0) {
-            const pendingValue =
-              queuedStateRef.current ?? tournamentRef.current;
-            if (pendingValue && JSON.stringify(pendingValue) !== serialized) {
-              remoteRevisionRef.current = game.revision;
-              const conflict = { ...game, state: value };
-              conflictRemoteRef.current = conflict;
-              setConflictRemote(conflict);
-              setSyncStatus('conflict');
-              return;
-            }
-            queuedStateRef.current = null;
-            dirtyRef.current = false;
+            settleWithRemote(
+              { ...game, state: value },
+              queuedStateRef.current ?? tournamentRef.current,
+              offlineBaseRef.current,
+            );
+            return;
           }
           if (game.revision > remoteRevisionRef.current) {
             // An edit started while this response was in flight would be
-            // overwritten here, and the save that carries it would then lose to
-            // its own conflict handler. Leave it for that save to settle.
+            // overwritten here. Leave it to its save, which settles against
+            // this same newer copy if it loses the race.
             if (dirtyRef.current || saveInFlightRef.current) return;
             remoteRevisionRef.current = game.revision;
-            lastRemoteStateRef.current = serialized;
+            lastRemoteStateRef.current = canonicalJson(value);
             tournamentRef.current = value;
             setTournament(value);
             setSyncStatus('saved');
+            flashRemoteUpdate();
           }
         })
         .catch((error: unknown) => {
@@ -4249,10 +4330,12 @@ export default function FootballApp() {
       window.removeEventListener('pageshow', pullWhenVisible);
       window.removeEventListener('focus', pullWhenVisible);
     };
-  }, [hydrated, gameId, conflictRemote]);
+  }, [hydrated, gameId]);
   useEffect(
     () => () => {
       if (retryTimerRef.current) window.clearTimeout(retryTimerRef.current);
+      if (remoteUpdateTimerRef.current)
+        window.clearTimeout(remoteUpdateTimerRef.current);
     },
     [],
   );
@@ -4360,7 +4443,7 @@ export default function FootballApp() {
   function applyTournament(value: Tournament) {
     const targetGameId = gameIdRef.current;
     const hasUnsavedRemoteState = Boolean(
-      targetGameId && JSON.stringify(value) !== lastRemoteStateRef.current,
+      targetGameId && canonicalJson(value) !== lastRemoteStateRef.current,
     );
     tournamentRef.current = value;
     if (hasUnsavedRemoteState) {
@@ -4373,19 +4456,22 @@ export default function FootballApp() {
       queuedStateRef.current = null;
       dirtyRef.current = false;
     }
-    writeLocalBackup(value, targetGameId, hasUnsavedRemoteState);
+    writeLocalBackup(
+      value,
+      targetGameId,
+      hasUnsavedRemoteState,
+      currentSyncBase(),
+    );
     setSyncStatus(
-      conflictRemoteRef.current
-        ? 'conflict'
-        : hasUnsavedRemoteState
-          ? 'saving'
-          : targetGameId
-            ? 'saved'
-            : publishSessionRef.current === syncSessionRef.current
-              ? // Still being created, not local-only. Calling it local offered
-                // a save button that created the same game a second time.
-                'saving'
-              : 'local',
+      hasUnsavedRemoteState
+        ? 'saving'
+        : targetGameId
+          ? 'saved'
+          : publishSessionRef.current === syncSessionRef.current
+            ? // Still being created, not local-only. Calling it local offered
+              // a save button that created the same game a second time.
+              'saving'
+            : 'local',
     );
     setTournament(value);
   }
@@ -4399,8 +4485,7 @@ export default function FootballApp() {
     remoteRevisionRef.current = 0;
     queuedStateRef.current = null;
     dirtyRef.current = false;
-    conflictRemoteRef.current = null;
-    setConflictRemote(null);
+    offlineBaseRef.current = null;
     gameIdRef.current = '';
     setGameId('');
     setSyncStatus('saving');
@@ -4420,7 +4505,7 @@ export default function FootballApp() {
           ? tournamentRef.current
           : null;
       const storedValue = extendTournamentToEndTime(game.state);
-      lastRemoteStateRef.current = JSON.stringify(storedValue);
+      lastRemoteStateRef.current = canonicalJson(storedValue);
       remoteRevisionRef.current = game.revision;
       gameIdRef.current = game.id;
       setGameId(game.id);
@@ -4437,12 +4522,12 @@ export default function FootballApp() {
         queuedStateRef.current = localValue;
         dirtyRef.current = true;
         setTournament(localValue);
-        writeLocalBackup(localValue, game.id, true);
+        writeLocalBackup(localValue, game.id, true, currentSyncBase());
         setSyncStatus('saving');
       } else {
         setTournament(storedValue);
         tournamentRef.current = storedValue;
-        writeLocalBackup(storedValue, game.id, false);
+        writeLocalBackup(storedValue, game.id, false, currentSyncBase());
         setSyncStatus('saved');
       }
       window.history.pushState({}, '', gamePath(game.id));
@@ -4554,45 +4639,19 @@ export default function FootballApp() {
         setNotice('ไม่พบเกมนี้ในฐานข้อมูล');
         return;
       }
-      const value = extendTournamentToEndTime(game.state);
-      const remoteSerialized = JSON.stringify(value);
       const backup = readLocalBackup(gameIdToOpen);
-      // Reopening a game must not overwrite edits that never reached Neon, the
-      // same way a cold start hands them to the conflict prompt.
-      const pendingLocal =
-        backup.pendingSync && backup.tournament
-          ? extendTournamentToEndTime(backup.tournament)
-          : null;
-      const conflicting =
-        pendingLocal && JSON.stringify(pendingLocal) !== remoteSerialized
-          ? pendingLocal
-          : null;
       syncSessionRef.current += 1;
-      cancelScheduledRetry();
-      lastRemoteStateRef.current = remoteSerialized;
-      remoteRevisionRef.current = game.revision;
       gameIdRef.current = game.id;
       setGameId(game.id);
-      if (conflicting) {
-        const remoteGame = { ...game, state: value };
-        queuedStateRef.current = conflicting;
-        dirtyRef.current = true;
-        conflictRemoteRef.current = remoteGame;
-        setConflictRemote(remoteGame);
-        setTournament(conflicting);
-        tournamentRef.current = conflicting;
-        setSyncStatus('conflict');
-        setNotice('มีข้อมูลในเครื่องที่ยังไม่ได้ซิงก์ กรุณาเลือกข้อมูลที่จะใช้');
-      } else {
-        queuedStateRef.current = null;
-        dirtyRef.current = false;
-        conflictRemoteRef.current = null;
-        setConflictRemote(null);
-        setTournament(value);
-        tournamentRef.current = value;
-        writeLocalBackup(value, game.id, false);
-        setSyncStatus('saved');
-      }
+      // Edits that never reached the database are settled the same way a cold
+      // start settles them, so reopening a game cannot silently drop them.
+      settleWithRemote(
+        { ...game, state: extendTournamentToEndTime(game.state) },
+        backup.pendingSync && backup.tournament
+          ? extendTournamentToEndTime(backup.tournament)
+          : null,
+        backup.base,
+      );
       setSelectedTeamId(tournamentRef.current?.teams[0]?.id ?? '');
       setSelectedMatchId('');
       if (updateHistory) window.history.pushState({}, '', gamePath(game.id));
@@ -4661,8 +4720,6 @@ export default function FootballApp() {
     remoteRevisionRef.current = 0;
     queuedStateRef.current = null;
     dirtyRef.current = false;
-    conflictRemoteRef.current = null;
-    setConflictRemote(null);
     window.history.pushState({}, '', gamePath());
     setView('home');
     setNotice(
@@ -4682,34 +4739,6 @@ export default function FootballApp() {
     clearLocalBackup();
     setRecoverableDraft(null);
     setNotice('ลบข้อมูลร่างในเครื่องแล้ว');
-  }
-  function useLatestConflictData() {
-    if (!conflictRemote) return;
-    cancelScheduledRetry();
-    const value = extendTournamentToEndTime(conflictRemote.state);
-    remoteRevisionRef.current = conflictRemote.revision;
-    lastRemoteStateRef.current = JSON.stringify(value);
-    queuedStateRef.current = null;
-    dirtyRef.current = false;
-    tournamentRef.current = value;
-    setTournament(value);
-    writeLocalBackup(value, gameIdRef.current, false);
-    conflictRemoteRef.current = null;
-    setConflictRemote(null);
-    setSyncStatus('saved');
-    setNotice('ใช้ข้อมูลล่าสุดจากฐานข้อมูลแล้ว');
-  }
-  function overwriteConflictWithLocal() {
-    if (!conflictRemote || !tournamentRef.current) return;
-    cancelScheduledRetry();
-    remoteRevisionRef.current = conflictRemote.revision;
-    queuedStateRef.current = tournamentRef.current;
-    dirtyRef.current = true;
-    conflictRemoteRef.current = null;
-    setConflictRemote(null);
-    setSyncStatus('saving');
-    writeLocalBackup(tournamentRef.current, gameIdRef.current, true);
-    window.setTimeout(() => void flushSharedState(), 0);
   }
   /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- browser history selects the game encoded in the URL. */
   useEffect(() => {
@@ -4739,8 +4768,6 @@ export default function FootballApp() {
       remoteRevisionRef.current = 0;
       queuedStateRef.current = null;
       dirtyRef.current = false;
-      conflictRemoteRef.current = null;
-      setConflictRemote(null);
       setTournament(null);
       setGameId('');
       setSyncStatus('local');
@@ -4789,147 +4816,151 @@ export default function FootballApp() {
   return (
     <main className="min-h-dvh bg-[#edf3ee] text-slate-950 sm:py-7">
       <div className="relative mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-[#f8faf8] shadow-[0_22px_70px_rgba(15,45,29,.15)] sm:min-h-[844px] sm:overflow-hidden sm:rounded-[32px] sm:border sm:border-white">
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
-          {!tournament && !['setup', 'games'].includes(view) && (
-            <>
-              <PageHeader
-                title="Football Match Maker"
-                eyebrow="Ready when you are"
-              />
-              <EmptyHome
-                onSetup={openNewSetup}
-                onDemo={loadDemo}
-                onGames={openAllGames}
-                recoverableDraft={recoverableDraft}
-                onRecover={recoverDraft}
-                onDiscardDraft={discardDraft}
-              />
-            </>
-          )}
-          {view === 'games' && (
-            <GamesScreen
-              onBack={closeAllGames}
-              onOpen={(id) => openSharedGame(id)}
-              onDeleted={handleDeletedGame}
-              onNotice={setNotice}
-            />
-          )}
-          {view === 'setup' && (
-            <SetupScreen
-              tournament={setupSource}
-              copyMode={setupCopyMode}
-              onCancel={() => setView('home')}
-              onCreate={(value) => {
-                setSetupSource(null);
-                setSetupCopyMode(false);
-                void publishTournament(value, 'สร้างตารางใหม่แล้ว');
-              }}
-            />
-          )}
-          {tournament && view === 'home' && (
-            <HomeScreen
-              tournament={tournament}
-              gameId={gameId}
-              syncStatus={syncStatus}
-              newerGame={
-                newerGameState?.forGameId === gameId
-                  ? newerGameState.game
-                  : null
-              }
-              onNavigate={setView}
-              onOpenMatch={openMatch}
-              onUpdate={applyTournament}
-              onPublish={() => void publishTournament(tournament, 'บันทึกเกมแล้ว')}
-              onCopyLink={() => void copyGameLink()}
-              onOpenNewer={() => void openLatestGame()}
-              onCloseGame={closeCurrentGame}
-              onReopenGame={reopenCurrentGame}
-            />
-          )}
-          {tournament && view === 'teams' && (
-            <TeamsScreen tournament={tournament} onOpenTeam={openTeam} />
-          )}
-          {tournament && view === 'team-detail' && selectedTeam && (
-            <TeamDetailScreen
-              team={selectedTeam}
-              onBack={() => setView('teams')}
-              onUpdate={(team) =>
-                applyTournament(
-                  assignGoalkeepers({
-                    ...tournament,
-                    teams: tournament.teams.map((item) =>
-                      item.id === team.id ? team : item,
-                    ),
-                  }),
-                )
-              }
-            />
-          )}
-          {tournament && view === 'schedule' && (
-            <ScheduleScreen
-              tournament={tournament}
-              onOpenMatch={openMatch}
-              onUpdate={applyTournament}
-              onStandings={() => setView('standings')}
-            />
-          )}
-          {tournament && view === 'tactics' && (
-            <ScreenErrorBoundary label="กระดานแท็กติก">
-              <Suspense
-                fallback={
-                  <div className="grid min-h-[520px] place-items-center font-black text-[#11823b]">
-                    <LoaderCircle className="h-6 w-6 animate-spin" />
-                    <span className="sr-only">กำลังเปิดกระดานแท็กติก</span>
-                  </div>
-                }
-              >
-                <TacticsScreen
-                  tournament={tournament}
-                  onUpdate={applyTournament}
-                  onCopyLink={() => void copyGameLink()}
+        <RemoteUpdateContext.Provider value={remoteUpdateVisible}>
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
+            {!tournament && !['setup', 'games'].includes(view) && (
+              <>
+                <PageHeader
+                  title="Football Match Maker"
+                  eyebrow="Ready when you are"
                 />
-              </Suspense>
-            </ScreenErrorBoundary>
-          )}
-          {tournament && view === 'standings' && (
-            <StandingsScreen
-              tournament={tournament}
-              onBack={() => setView('schedule')}
-            />
-          )}
-          {tournament && view === 'match-detail' && selectedMatch && (
-            <MatchDetailScreen
-              tournament={tournament}
-              match={selectedMatch}
-              onBack={() => setView('schedule')}
-              onUpdate={applyTournament}
-            />
-          )}
-          {tournament && view === 'share' && (
-            <ShareScreen
-              tournament={tournament}
-              gameId={gameId}
-              onBack={() => setView('home')}
-              onNotice={setNotice}
-            />
-          )}
-          {tournament && view === 'settings' && (
-            <SettingsScreen
-              key={gameId || tournament.id}
-              tournament={tournament}
-              gameId={gameId}
-              onCreateNew={openNewSetup}
-              onCopySettings={openCopySetup}
-              onSave={(value) => {
-                applyTournament(value);
-                setNotice('บันทึกการตั้งค่าแล้ว');
-              }}
-              onGames={openAllGames}
-              onTeams={() => setView('teams')}
-              onDelete={deleteCurrentGame}
-            />
-          )}
-        </div>
+                <EmptyHome
+                  onSetup={openNewSetup}
+                  onDemo={loadDemo}
+                  onGames={openAllGames}
+                  recoverableDraft={recoverableDraft}
+                  onRecover={recoverDraft}
+                  onDiscardDraft={discardDraft}
+                />
+              </>
+            )}
+            {view === 'games' && (
+              <GamesScreen
+                onBack={closeAllGames}
+                onOpen={(id) => openSharedGame(id)}
+                onDeleted={handleDeletedGame}
+                onNotice={setNotice}
+              />
+            )}
+            {view === 'setup' && (
+              <SetupScreen
+                tournament={setupSource}
+                copyMode={setupCopyMode}
+                onCancel={() => setView('home')}
+                onCreate={(value) => {
+                  setSetupSource(null);
+                  setSetupCopyMode(false);
+                  void publishTournament(value, 'สร้างตารางใหม่แล้ว');
+                }}
+              />
+            )}
+            {tournament && view === 'home' && (
+              <HomeScreen
+                tournament={tournament}
+                gameId={gameId}
+                syncStatus={syncStatus}
+                newerGame={
+                  newerGameState?.forGameId === gameId
+                    ? newerGameState.game
+                    : null
+                }
+                onNavigate={setView}
+                onOpenMatch={openMatch}
+                onUpdate={applyTournament}
+                onPublish={() =>
+                  void publishTournament(tournament, 'บันทึกเกมแล้ว')
+                }
+                onCopyLink={() => void copyGameLink()}
+                onOpenNewer={() => void openLatestGame()}
+                onCloseGame={closeCurrentGame}
+                onReopenGame={reopenCurrentGame}
+              />
+            )}
+            {tournament && view === 'teams' && (
+              <TeamsScreen tournament={tournament} onOpenTeam={openTeam} />
+            )}
+            {tournament && view === 'team-detail' && selectedTeam && (
+              <TeamDetailScreen
+                team={selectedTeam}
+                onBack={() => setView('teams')}
+                onUpdate={(team) =>
+                  applyTournament(
+                    assignGoalkeepers({
+                      ...tournament,
+                      teams: tournament.teams.map((item) =>
+                        item.id === team.id ? team : item,
+                      ),
+                    }),
+                  )
+                }
+              />
+            )}
+            {tournament && view === 'schedule' && (
+              <ScheduleScreen
+                tournament={tournament}
+                onOpenMatch={openMatch}
+                onUpdate={applyTournament}
+                onStandings={() => setView('standings')}
+              />
+            )}
+            {tournament && view === 'tactics' && (
+              <ScreenErrorBoundary label="กระดานแท็กติก">
+                <Suspense
+                  fallback={
+                    <div className="grid min-h-[520px] place-items-center font-black text-[#11823b]">
+                      <LoaderCircle className="h-6 w-6 animate-spin" />
+                      <span className="sr-only">กำลังเปิดกระดานแท็กติก</span>
+                    </div>
+                  }
+                >
+                  <TacticsScreen
+                    tournament={tournament}
+                    onUpdate={applyTournament}
+                    onCopyLink={() => void copyGameLink()}
+                  />
+                </Suspense>
+              </ScreenErrorBoundary>
+            )}
+            {tournament && view === 'standings' && (
+              <StandingsScreen
+                tournament={tournament}
+                onBack={() => setView('schedule')}
+              />
+            )}
+            {tournament && view === 'match-detail' && selectedMatch && (
+              <MatchDetailScreen
+                tournament={tournament}
+                match={selectedMatch}
+                onBack={() => setView('schedule')}
+                onUpdate={applyTournament}
+              />
+            )}
+            {tournament && view === 'share' && (
+              <ShareScreen
+                tournament={tournament}
+                gameId={gameId}
+                onBack={() => setView('home')}
+                onNotice={setNotice}
+              />
+            )}
+            {tournament && view === 'settings' && (
+              <SettingsScreen
+                key={gameId || tournament.id}
+                tournament={tournament}
+                gameId={gameId}
+                onCreateNew={openNewSetup}
+                onCopySettings={openCopySetup}
+                onSave={(value) => {
+                  applyTournament(value);
+                  setNotice('บันทึกการตั้งค่าแล้ว');
+                }}
+                onGames={openAllGames}
+                onTeams={() => setView('teams')}
+                onDelete={deleteCurrentGame}
+              />
+            )}
+          </div>
+        </RemoteUpdateContext.Provider>
         {tournament &&
           !['setup', 'match-detail', 'share', 'games'].includes(view) && (
             <BottomNavigation active={mainView} onChange={setView} />
@@ -4940,30 +4971,37 @@ export default function FootballApp() {
             {notice}
           </output>
         )}
-        <AlertDialog open={Boolean(conflictRemote)}>
+        <AlertDialog
+          open={Boolean(unsavedChanges)}
+          onOpenChange={(open) => !open && setUnsavedChanges(null)}
+        >
           <AlertDialogContent className="rounded-[24px] p-5">
             <AlertDialogHeader className="place-items-start text-left">
               <AlertDialogTitle className="text-lg font-black">
-                มีการแก้ไขจากอีกเครื่อง
+                มีอีกเครื่องบันทึกก่อนเครื่องนี้
               </AlertDialogTitle>
               <AlertDialogDescription className="text-left font-semibold leading-6">
-                ระบบหยุดการบันทึกไว้ก่อนเพื่อไม่ให้ข้อมูลของใครถูกทับ เลือกว่าจะโหลดข้อมูลล่าสุด
-                หรือใช้ข้อมูลที่อยู่บนเครื่องนี้แทน
+                ระบบโหลดข้อมูลล่าสุดมาแล้ว สิ่งที่เครื่องนี้แก้ไว้ด้านล่างยังไม่ถูกบันทึก
+                ดูแล้วแก้ใหม่ได้ถ้ายังต้องการ
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter className="mt-2 grid gap-2 bg-white">
+            <ul className="max-h-[40dvh] space-y-2 overflow-y-auto rounded-2xl bg-slate-50 p-3">
+              {unsavedChanges?.map((change) => (
+                <li key={change.title} className="text-sm leading-5">
+                  <p className="font-black text-slate-900">{change.title}</p>
+                  <p className="font-semibold text-slate-600">
+                    {change.detail}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <AlertDialogFooter className="mt-2 grid bg-white">
               <AlertDialogAction
-                variant="outline"
-                onClick={useLatestConflictData}
-                className="h-12 rounded-xl font-black"
-              >
-                ใช้ข้อมูลล่าสุด
-              </AlertDialogAction>
-              <AlertDialogAction
-                onClick={overwriteConflictWithLocal}
+                // A plain button, not a Close: dismiss it here.
+                onClick={() => setUnsavedChanges(null)}
                 className="h-12 rounded-xl bg-[#11823b] font-black"
               >
-                เก็บข้อมูลเครื่องนี้
+                เข้าใจแล้ว
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

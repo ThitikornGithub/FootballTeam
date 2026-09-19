@@ -7,10 +7,17 @@ import {
   Map,
   Minus,
   Plus,
+  RefreshCw,
   Settings,
   Users,
 } from 'lucide-react';
-import { Component, type ComponentType, type ReactNode } from 'react';
+import {
+  Component,
+  createContext,
+  type ComponentType,
+  type ReactNode,
+  useContext,
+} from 'react';
 import { Button } from '@/components/ui/button';
 import type { Team, TeamColor } from '@/lib/football-types';
 
@@ -130,6 +137,10 @@ export function TeamBadge({
   );
 }
 
+// True for a few seconds after an update from another phone lands, so every
+// screen's header can say so. Someone else editing is otherwise invisible.
+export const RemoteUpdateContext = createContext(false);
+
 export function PageHeader({
   title,
   eyebrow,
@@ -141,8 +152,15 @@ export function PageHeader({
   onBack?: () => void;
   action?: React.ReactNode;
 }) {
+  const remoteUpdate = useContext(RemoteUpdateContext);
   return (
     <header className="sticky top-0 z-30 flex min-h-[70px] items-center gap-3 border-b border-slate-200/80 bg-white/95 px-4 pb-3 pt-[max(12px,env(safe-area-inset-top))] backdrop-blur">
+      {remoteUpdate && (
+        <output className="pointer-events-none absolute left-1/2 top-full mt-2 flex -translate-x-1/2 items-center gap-1.5 whitespace-nowrap rounded-full bg-sky-600 px-3 py-1.5 text-xs font-black text-white shadow-lg">
+          <RefreshCw className="h-3.5 w-3.5" />
+          อัปเดตจากอีกเครื่องเมื่อสักครู่
+        </output>
+      )}
       {onBack && (
         <button
           onClick={onBack}

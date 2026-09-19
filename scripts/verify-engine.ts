@@ -29,6 +29,7 @@ import {
 import { parseTournament } from '../lib/football-schema';
 import {
   canonicalJson,
+  describeUnsavedChanges,
   MAX_SYNC_RETRY_MS,
   newestPendingState,
   syncRetryDelayMs,
@@ -915,6 +916,51 @@ assert(
   'Ignoring key order must still tell a different value or a different running order apart',
 );
 
+{
+  // Phone B's view when phone A saved first: A put a goal on Red, B one on
+  // Blue, both starting from 0-0.
+  const syncBase = createDemoTournament();
+  const liveId = syncBase.matches[0].id;
+  const phoneA = setMatchScore(syncBase, liveId, 1, 0);
+  const phoneB = setMatchScore(syncBase, liveId, 0, 1);
+  const lost = describeUnsavedChanges(phoneB, phoneA, syncBase);
+  assert(
+    lost.length === 1 &&
+      lost[0].title.startsWith('Match 1 ·') &&
+      lost[0].detail === 'เครื่องนี้ 0-1 กำลังแข่ง · ล่าสุด 1-0 กำลังแข่ง',
+    `A phone that lost the race must be told the score it had and the score everyone now sees, got ${JSON.stringify(lost)}`,
+  );
+  assert(
+    describeUnsavedChanges(syncBase, phoneA, syncBase).length === 0,
+    'A goal entered on the other phone is not an edit this phone lost, and listing it would invite entering it twice',
+  );
+  assert(
+    describeUnsavedChanges(phoneA, phoneA, syncBase).length === 0 &&
+      describeUnsavedChanges(phoneB, phoneA, null).length === 1,
+    'Identical copies list nothing, and without a base every difference is listed',
+  );
+  const renamed = {
+    ...phoneB,
+    teams: phoneB.teams.map((team, index) =>
+      index === 0 ? { ...team, name: `${team.name} FC` } : team,
+    ),
+    closedAt: '2026-09-19T12:00:00.000Z',
+  };
+  const other = describeUnsavedChanges(renamed, phoneA, syncBase).at(-1);
+  assert(
+    other?.title === 'การแก้ไขอื่น' &&
+      other.detail === 'ผู้เล่น ทีม หรือคิว GK, การกดจบเกมวันนี้',
+    `Edits outside the scores must still be named, got ${JSON.stringify(other)}`,
+  );
+  const finishedOnB = finishMatchWithScore(syncBase, liveId, 2, 0);
+  const finishedLost = describeUnsavedChanges(finishedOnB, phoneA, syncBase);
+  assert(
+    finishedLost.length === 1 &&
+      finishedLost[0].detail === 'เครื่องนี้ 2-0 จบแล้ว · ล่าสุด 1-0 กำลังแข่ง',
+    `Finishing a match reads as one result change, not a goalkeeper reshuffle too, got ${JSON.stringify(finishedLost)}`,
+  );
+}
+
 console.log(
-  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, and persisted-state validation.',
+  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, and persisted-state validation.',
 );
