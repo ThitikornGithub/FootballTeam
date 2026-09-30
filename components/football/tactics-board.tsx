@@ -47,6 +47,7 @@ import {
   resolvedFormationLabel,
 } from '@/lib/football-tactics';
 import { canonicalJson } from '@/lib/football-sync';
+import { teamNameForDisplay } from '@/lib/football-team-labels';
 import {
   type Match,
   type TacticMarker,
@@ -58,7 +59,7 @@ import {
   type PlayerPosition,
   type Tournament,
 } from '@/lib/football-types';
-import { COLOR_HEX, COLOR_LABEL, PageHeader, TeamShirtIcon } from './shared';
+import { COLOR_HEX, PageHeader, TeamShirtIcon } from './shared';
 
 const PLAYER_POSITION_SHORT: Record<PlayerPosition, string> = {
   defender: 'D',
@@ -875,9 +876,9 @@ export function TacticsScreen({
             <div className="min-w-0">
               <h2 className="section-title">ตั้งค่าผู้เล่นและแผน</h2>
               <p className="mt-0.5 truncate text-xs font-bold text-slate-500">
-                {teamA?.name ?? 'ทีมแรก'} vs {teamB?.name ?? 'ทีมที่สอง'} ·{' '}
-                {playerCount} คน ·{' '}
-                {resolvedFormationLabel(teamAFormation, playerCount)} /{' '}
+                {teamA ? teamNameForDisplay(teamA) : 'ทีมแรก'} vs{' '}
+                {teamB ? teamNameForDisplay(teamB) : 'ทีมที่สอง'} · {playerCount}{' '}
+                คน · {resolvedFormationLabel(teamAFormation, playerCount)} /{' '}
                 {resolvedFormationLabel(teamBFormation, playerCount)}
               </p>
             </div>
@@ -896,7 +897,7 @@ export function TacticsScreen({
                 >
                   {tournament.teams.map((team) => (
                     <option key={team.id} value={team.id}>
-                      {COLOR_LABEL[team.color]} · {team.name}
+                      {teamNameForDisplay(team)}
                     </option>
                   ))}
                 </select>
@@ -913,7 +914,7 @@ export function TacticsScreen({
                       value={team.id}
                       disabled={team.id === board.teamAId}
                     >
-                      {COLOR_LABEL[team.color]} · {team.name}
+                      {teamNameForDisplay(team)}
                     </option>
                   ))}
                 </select>
@@ -967,13 +968,13 @@ export function TacticsScreen({
                         <TeamShirtIcon color={side.team.color} size="xs" />
                       )}
                       <p className="truncate text-sm font-black">
-                        {side.team?.name ?? 'ยังไม่มีทีม'}
+                        {side.team ? teamNameForDisplay(side.team) : 'ยังไม่มีทีม'}
                       </p>
                     </div>
                     <label className="block text-[11px] font-black text-slate-400">
                       แผนการเล่น
                       <select
-                        aria-label={`แผนการเล่น ${side.team?.name ?? ''}`}
+                        aria-label={`แผนการเล่น ${side.team ? teamNameForDisplay(side.team) : ''}`}
                         value={side.formation}
                         onChange={(event) =>
                           resetBoard(
@@ -1039,7 +1040,7 @@ export function TacticsScreen({
                         {side.team && (
                           <TeamShirtIcon color={side.team.color} size="xs" />
                         )}
-                        {side.team?.name}
+                        {side.team && teamNameForDisplay(side.team)}
                       </div>
                       <p className="mt-1 text-sm font-bold text-slate-800">
                         {side.players.length
@@ -1228,7 +1229,7 @@ export function TacticsScreen({
 
         <section
           ref={pitchRef}
-          aria-label={`กระดานแท็กติก ${teamA?.name ?? ''} พบ ${teamB?.name ?? ''}`}
+          aria-label={`กระดานแท็กติก ${teamA ? teamNameForDisplay(teamA) : ''} พบ ${teamB ? teamNameForDisplay(teamB) : ''}`}
           onPointerDown={(event) => {
             if (tool === 'move' || isPlaying) return;
             event.preventDefault();

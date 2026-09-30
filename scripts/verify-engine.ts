@@ -37,10 +37,100 @@ import {
   syncRetryDelayMs,
 } from '../lib/football-sync';
 import { TEAM_COLORS, type Match } from '../lib/football-types';
+import {
+  TEAM_COLOR_NAMES,
+  teamNameForDisplay,
+} from '../lib/football-team-labels';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+
+const expectedColorNames = [
+  'Green',
+  'Red',
+  'Blue',
+  'Yellow',
+  'White',
+  'Black',
+  'Orange',
+  'Purple',
+];
+TEAM_COLORS.forEach((color, index) => {
+  assert(
+    TEAM_COLOR_NAMES[color] === expectedColorNames[index],
+    `The ${color} shirt must have its proper English color name`,
+  );
+  for (const name of [
+    expectedColorNames[index],
+    `  ${expectedColorNames[index].toUpperCase()}  `,
+    'Yellow',
+  ]) {
+    assert(
+      teamNameForDisplay(Object.freeze({ name, color })) ===
+        expectedColorNames[index],
+      `Every ${color} team must display its actual shirt color`,
+    );
+  }
+});
+
+for (const name of [
+  'เขียว',
+  'แดง',
+  'น้ำเงิน',
+  'ฟ้า',
+  'เหลือง',
+  'ขาว',
+  'ดำ',
+  'ส้ม',
+  'ม่วง',
+  ' สีเหลือง ',
+  ' สีฟ้า ',
+]) {
+  assert(
+    teamNameForDisplay(Object.freeze({ name, color: 'blue' as const })) ===
+      'Blue',
+    'Legacy Thai color names must display the actual English shirt color',
+  );
+}
+
+const legacyColorTeam = {
+  id: 'legacy-green',
+  name: 'Yellow',
+  color: 'green',
+} as const;
+const legacyColorSnapshot = JSON.stringify(legacyColorTeam);
+assert(
+  teamNameForDisplay(legacyColorTeam) === 'Green' &&
+    JSON.stringify(legacyColorTeam) === legacyColorSnapshot,
+  'A legacy green-shirt Yellow team must display Green without changing its input',
+);
+
+const customLabelTeams = [
+  { id: 'custom-green', name: '  Friends FC  ', color: 'green' },
+  { id: 'custom-red', name: 'friends fc', color: 'red' },
+] as const;
+const customLabelSnapshot = JSON.stringify(customLabelTeams);
+assert(
+  teamNameForDisplay(customLabelTeams[0]) === 'Green' &&
+    teamNameForDisplay(customLabelTeams[1]) === 'Red' &&
+    JSON.stringify(customLabelTeams) === customLabelSnapshot,
+  'Legacy custom names remain stored unchanged but display only English shirt colors',
+);
+assert(
+  teamNameForDisplay(
+    Object.freeze({ name: 'Green Dragons', color: 'red' as const }),
+  ) === 'Red',
+  'A team label must depend only on the actual shirt color, not a legacy custom name',
+);
+const duplicateColorNames = [
+  { id: 'color-green-1', name: 'green', color: 'green' },
+  { id: 'color-green-2', name: 'เขียว', color: 'green' },
+] as const;
+assert(
+  duplicateColorNames.every((team) => teamNameForDisplay(team) === 'Green'),
+  'Color-named teams must not gain a redundant Green · Green prefix',
+);
 
 function meetingCounts(matches: Match[]) {
   const counts = new Map<string, number>();
@@ -1246,6 +1336,21 @@ assert(
   const phoneA = setMatchScore(syncBase, liveId, 1, 0);
   const phoneB = setMatchScore(syncBase, liveId, 0, 1);
   const lost = describeUnsavedChanges(phoneB, phoneA, syncBase);
+  const legacyNamedPhone = {
+    ...phoneB,
+    teams: phoneB.teams.map((team) => ({ ...team, name: 'ชื่อเดิม' })),
+  };
+  const expectedPairNames = [
+    syncBase.matches[0].teamAId,
+    syncBase.matches[0].teamBId,
+  ].map((id) =>
+    teamNameForDisplay(syncBase.teams.find((team) => team.id === id)!),
+  );
+  assert(
+    describeUnsavedChanges(legacyNamedPhone, phoneA, null)[0].title ===
+      `Match 1 · ${expectedPairNames.join(' vs ')}`,
+    'Sync conflict match labels must use English shirt colors instead of legacy names',
+  );
   assert(
     lost.length === 1 &&
       lost[0].title.startsWith('Match 1 ·') &&
@@ -1317,5 +1422,5 @@ for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
 }
 
 console.log(
-  'Engine checks passed: defaults, 2-8 team pairing coverage, stable ordered repeats, legacy display/score/GK ownership, immutable extensions, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
+  'Engine checks passed: English team/color labels, defaults, 2-8 team pairing coverage, stable ordered repeats, legacy display/score/GK ownership, immutable extensions, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
 );

@@ -5,6 +5,7 @@ import {
   calculateTopScorers,
 } from '@/lib/football-engine';
 import type { TeamColor, Tournament } from '@/lib/football-types';
+import { teamNameForDisplay } from '@/lib/football-team-labels';
 
 const CARD_WIDTH = 1080;
 const CARD_HEIGHT = 1600;
@@ -169,7 +170,7 @@ export function renderStandingsShareCard(
   context.fillText(allFinished ? 'อันดับหนึ่งของคืนนี้' : 'ผู้นำตารางตอนนี้', 88, 352);
   context.font = `900 47px ${fontFamily}`;
   const leaderText = leaderTeam
-    ? `${leaderTeam.name} ${allFinished ? 'คว้าอันดับ 1' : 'นำอันดับ 1'}`
+    ? `${teamNameForDisplay(leaderTeam)} ${allFinished ? 'คว้าอันดับ 1' : 'นำอันดับ 1'}`
     : 'ยังไม่มีผลการแข่งขัน';
   context.fillText(fitText(context, leaderText, 850), 88, 410);
   if (leaderTeam) {
@@ -249,7 +250,11 @@ export function renderStandingsShareCard(
     context.fillStyle = '#071120';
     context.textAlign = 'left';
     context.font = `900 ${rowHeight < 76 ? 25 : 29}px ${fontFamily}`;
-    context.fillText(fitText(context, team.name, 325), columns.team, center);
+    context.fillText(
+      fitText(context, teamNameForDisplay(team), 325),
+      columns.team,
+      center,
+    );
     context.textAlign = 'center';
     context.font = `800 ${rowHeight < 76 ? 23 : 27}px ${fontFamily}`;
     context.fillText(String(standing.played), columns.played, center);
@@ -302,7 +307,7 @@ export function renderStandingsShareCard(
       context.fillText(
         fitText(
           context,
-          `${scorer.playerName}${team ? ` · ${team.name}` : ''}`,
+          `${scorer.playerName}${team ? ` · ${teamNameForDisplay(team)}` : ''}`,
           650,
         ),
         166,

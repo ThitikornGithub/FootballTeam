@@ -19,6 +19,10 @@ import {
   useContext,
 } from 'react';
 import { Button } from '@/components/ui/button';
+import {
+  TEAM_COLOR_NAMES,
+  teamNameForDisplay,
+} from '@/lib/football-team-labels';
 import type { Team, TeamColor } from '@/lib/football-types';
 
 // A lazily loaded screen whose chunk fails to arrive — a dropped connection, or
@@ -69,16 +73,7 @@ export const COLOR_HEX: Record<TeamColor, string> = {
   purple: '#7a4dcc',
 };
 
-export const COLOR_LABEL: Record<TeamColor, string> = {
-  green: 'เขียว',
-  red: 'แดง',
-  blue: 'น้ำเงิน',
-  yellow: 'เหลือง',
-  white: 'ขาว',
-  black: 'ดำ',
-  orange: 'ส้ม',
-  purple: 'ม่วง',
-};
+export const COLOR_LABEL = TEAM_COLOR_NAMES;
 
 export function TeamShirtIcon({
   color,
@@ -126,7 +121,7 @@ export function TeamBadge({
     <div className="flex min-w-0 items-center gap-2">
       <TeamShirtIcon color={team.color} size={compact ? 'sm' : 'md'} />
       <div className="min-w-0">
-        <p className="truncate font-black">{team.name}</p>
+        <p className="truncate font-black">{teamNameForDisplay(team)}</p>
         {!compact && (
           <p className="text-xs font-semibold text-slate-500">
             {team.players.length} คน

@@ -1,4 +1,5 @@
 import type { Match, Tournament } from './football-types';
+import { teamNameForDisplay } from './football-team-labels';
 
 export const INITIAL_SYNC_RETRY_MS = 3500;
 export const MAX_SYNC_RETRY_MS = 30000;
@@ -96,10 +97,12 @@ export function describeUnsavedChanges(
   remote: Tournament,
   base: Tournament | null,
 ): UnsavedChange[] {
-  const teamName = (teamId: string) =>
-    local.teams.find((team) => team.id === teamId)?.name ??
-    remote.teams.find((team) => team.id === teamId)?.name ??
-    'ทีม';
+  const teamName = (teamId: string) => {
+    const team =
+      local.teams.find((item) => item.id === teamId) ??
+      remote.teams.find((item) => item.id === teamId);
+    return team ? teamNameForDisplay(team) : 'ทีม';
+  };
   const changes: UnsavedChange[] = [];
   for (const match of local.matches) {
     const mine = resultKey(match);

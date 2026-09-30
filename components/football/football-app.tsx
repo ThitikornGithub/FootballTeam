@@ -118,6 +118,10 @@ import {
   updateTournamentSettings,
 } from '@/lib/football-engine';
 import {
+  TEAM_COLOR_NAMES,
+  teamNameForDisplay,
+} from '@/lib/football-team-labels';
+import {
   PLAYER_POSITIONS,
   TEAM_COLORS,
   type Match,
@@ -538,7 +542,7 @@ function formatShareText(tournament: Tournament) {
     const team = tournament.teams.find((item) => item.id === standing.teamId);
     if (!team) return;
     lines.push(
-      `${index + 1}. ${team.name} — ${standing.points} แต้ม (${standing.played} นัด, +/- ${standing.goalDifference > 0 ? '+' : ''}${standing.goalDifference})`,
+      `${index + 1}. ${teamNameForDisplay(team)} — ${standing.points} แต้ม (${standing.played} นัด, +/- ${standing.goalDifference > 0 ? '+' : ''}${standing.goalDifference})`,
     );
   });
   if (topScorers.length) {
@@ -546,7 +550,7 @@ function formatShareText(tournament: Tournament) {
     topScorers.forEach((scorer, index) => {
       const team = tournament.teams.find((item) => item.id === scorer.teamId);
       lines.push(
-        `${index + 1}. ${scorer.playerName}${team ? ` (${team.name})` : ''} — ${scorer.goals} ประตู`,
+        `${index + 1}. ${scorer.playerName}${team ? ` (${teamNameForDisplay(team)})` : ''} — ${scorer.goals} ประตู`,
       );
     });
   }
@@ -565,15 +569,8 @@ function nextMatchAfter(tournament: Tournament, match?: Match) {
     .find((item) => item.status !== 'finished');
 }
 
-function matchTeamLabel(tournament: Tournament, team: Team) {
-  const name = team.name.trim().toLocaleLowerCase();
-  const hasDuplicateName = tournament.teams.some(
-    (item) =>
-      item.id !== team.id && item.name.trim().toLocaleLowerCase() === name,
-  );
-  return hasDuplicateName
-    ? `${COLOR_LABEL[team.color]} · ${team.name}`
-    : team.name;
+function matchTeamLabel(_tournament: Tournament, team: Team) {
+  return teamNameForDisplay(team);
 }
 
 function ScorePicker({
@@ -1112,7 +1109,7 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
               <tr key={standing.teamId} className="border-t border-slate-100">
                 <th
                   scope="row"
-                  aria-label={`อันดับ ${index + 1} ทีม ${team.name}`}
+                  aria-label={`อันดับ ${index + 1} ทีม ${matchTeamLabel(tournament, team)}`}
                   className="px-2 py-3 text-left"
                 >
                   <div className="flex min-w-0 items-center gap-1.5 font-black">
@@ -1120,7 +1117,9 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
                       {index + 1}
                     </span>
                     <TeamShirtIcon color={team.color} size="xs" />
-                    <span className="min-w-0 truncate">{team.name}</span>
+                    <span className="min-w-0 truncate">
+                      {matchTeamLabel(tournament, team)}
+                    </span>
                   </div>
                 </th>
                 <td className="px-1 py-3 font-bold">{standing.played}</td>
@@ -1544,7 +1543,6 @@ function SetupScreen({
   onCancel: () => void;
   onCreate: (value: Tournament) => void;
 }) {
-  const defaultNames = ['Green', 'Red', 'Blue', 'Yellow', 'White', 'Black'];
   const [gameName, setGameName] = useState(
     copyMode && tournament
       ? `${tournament.name} ใหม่`
@@ -1553,7 +1551,6 @@ function SetupScreen({
   const [teamCount, setTeamCount] = useState(tournament?.teams.length ?? 4);
   const [drafts, setDrafts] = useState(() =>
     Array.from({ length: 8 }, (_, i) => ({
-      name: tournament?.teams[i]?.name ?? defaultNames[i] ?? `Team ${i + 1}`,
       color: tournament?.teams[i]?.color ?? TEAM_COLORS[i],
     })),
   );
@@ -1606,17 +1603,16 @@ function SetupScreen({
     });
   }
   function submit() {
-    if (
-      !enough ||
-      !gameName.trim() ||
-      drafts.slice(0, teamCount).some((draft) => !draft.name.trim())
-    )
-      return;
+    if (!enough || !gameName.trim()) return;
     const teams = drafts.slice(0, teamCount).map((draft, index) => {
       const existing = tournament?.teams[index];
       return existing
-        ? { ...existing, name: draft.name.trim(), color: draft.color }
-        : makeTeam(draft.name.trim(), draft.color);
+        ? {
+            ...existing,
+            name: TEAM_COLOR_NAMES[draft.color],
+            color: draft.color,
+          }
+        : makeTeam(TEAM_COLOR_NAMES[draft.color], draft.color);
     });
     onCreate(
       createTournament({
@@ -1675,8 +1671,8 @@ function SetupScreen({
         </section>
         <section className="settings-card">
           <div className="mb-3">
-            <h2 className="section-title">ชื่อทีมและสีเสื้อ</h2>
-            <p className="section-note">ตั้งชื่อและแตะวงกลมสีเพื่อเลือกสีของแต่ละทีม</p>
+            <h2 className="section-title">สีเสื้อทีม</h2>
+            <p className="section-note">เลือกสีเสื้อ ชื่อทีมจะเป็นชื่อสีภาษาอังกฤษ</p>
           </div>
           <div className="space-y-3">
             {drafts.slice(0, teamCount).map((draft, index) => (
@@ -1686,20 +1682,9 @@ function SetupScreen({
               >
                 <div className="flex items-center gap-3">
                   <TeamShirtIcon color={draft.color} size="sm" />
-                  <input
-                    aria-label={`ชื่อทีม ${index + 1}`}
-                    value={draft.name}
-                    onChange={(event) =>
-                      setDrafts((items) =>
-                        items.map((item, i) =>
-                          i === index
-                            ? { ...item, name: event.target.value }
-                            : item,
-                        ),
-                      )
-                    }
-                    className="h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 font-bold outline-none focus:border-[#35a95f]"
-                  />
+                  <span className="min-w-0 flex-1 truncate font-black">
+                    {teamNameForDisplay(draft)}
+                  </span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {TEAM_COLORS.map((color) => (
@@ -1709,7 +1694,12 @@ function SetupScreen({
                       onClick={() =>
                         setDrafts((items) =>
                           items.map((item, i) =>
-                            i === index ? { ...item, color } : item,
+                            i === index
+                              ? {
+                                  ...item,
+                                  color,
+                                }
+                              : item,
                           ),
                         )
                       }
@@ -1749,7 +1739,7 @@ function SetupScreen({
               >
                 {drafts.slice(0, teamCount).map((draft, index) => (
                   <option key={index} value={index}>
-                    {COLOR_LABEL[draft.color]} · {draft.name}
+                    {teamNameForDisplay(draft)}
                   </option>
                 ))}
               </select>
@@ -1770,7 +1760,7 @@ function SetupScreen({
                     value={index}
                     disabled={index === Math.min(firstTeamIndex, teamCount - 1)}
                   >
-                    {COLOR_LABEL[draft.color]} · {draft.name}
+                    {teamNameForDisplay(draft)}
                   </option>
                 ))}
               </select>
@@ -1884,11 +1874,7 @@ function SetupScreen({
         </section>
         <Button
           onClick={submit}
-          disabled={
-            !enough ||
-            !gameName.trim() ||
-            drafts.slice(0, teamCount).some((draft) => !draft.name.trim())
-          }
+          disabled={!enough || !gameName.trim()}
           className="h-14 w-full rounded-2xl bg-[#11823b] text-base font-black"
         >
           <CalendarDays />
@@ -2149,7 +2135,7 @@ function TeamDetailScreen({
   return (
     <>
       <PageHeader
-        title={`ทีม ${team.name}`}
+        title={`ทีม ${teamNameForDisplay(team)}`}
         eyebrow="จัดการผู้เล่น"
         onBack={onBack}
         action={<TeamShirtIcon color={team.color} size="sm" />}
@@ -2158,7 +2144,7 @@ function TeamDetailScreen({
         <section className="flex items-center gap-5 rounded-[24px] border border-slate-200 bg-white p-5">
           <TeamShirtIcon color={team.color} size="lg" />
           <div>
-            <p className="text-2xl font-black">{team.name}</p>
+            <p className="text-2xl font-black">{teamNameForDisplay(team)}</p>
             <p className="text-sm font-bold text-slate-500">
               {team.players.length} คน · พร้อม{' '}
               {team.players.filter((player) => !player.absentToday).length}
@@ -2536,20 +2522,28 @@ function ScheduleScreen({
                           type="button"
                           onClick={() => onOpenMatch(match.id)}
                           aria-label={`เปิดเกม ${match.matchNumber}: ${matchTeamLabel(tournament, teamA)} พบ ${matchTeamLabel(tournament, teamB)}`}
-                          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-1 px-1 text-left min-[370px]:px-2"
+                          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-0.5 px-1 text-left"
                         >
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <TeamShirtIcon color={teamA.color} size="xs" />
-                            <span className="truncate text-sm font-black">
+                          <span className="flex min-w-0 items-center gap-1">
+                            <TeamShirtIcon
+                              color={teamA.color}
+                              size="xs"
+                              className="!h-4 !w-4"
+                            />
+                            <span className="truncate text-xs font-black min-[390px]:text-[13px]">
                               {matchTeamLabel(tournament, teamA)}
                             </span>
                           </span>
                           <span className="text-center text-xs font-bold text-slate-400">
                             vs
                           </span>
-                          <span className="flex min-w-0 items-center gap-1.5">
-                            <TeamShirtIcon color={teamB.color} size="xs" />
-                            <span className="truncate text-sm font-black">
+                          <span className="flex min-w-0 items-center gap-1">
+                            <TeamShirtIcon
+                              color={teamB.color}
+                              size="xs"
+                              className="!h-4 !w-4"
+                            />
+                            <span className="truncate text-xs font-black min-[390px]:text-[13px]">
                               {matchTeamLabel(tournament, teamB)}
                             </span>
                           </span>
@@ -3296,9 +3290,8 @@ function SettingsPairPicker({
     return (
       <span className="flex min-w-0 items-center gap-1.5">
         <TeamShirtIcon color={team.color} size="xs" />
-        <span className="min-w-0 truncate font-black">{team.name}</span>
-        <span className="hidden text-xs font-bold text-slate-400 min-[390px]:inline">
-          {COLOR_LABEL[team.color]}
+        <span className="min-w-0 truncate font-black">
+          {teamNameForDisplay(team)}
         </span>
       </span>
     );
@@ -3403,10 +3396,14 @@ function SettingsPairPicker({
               <span className="min-w-0">คู่แนะนำ</span>
               <span className="flex min-w-0 items-center gap-1">
                 <TeamShirtIcon color={recommendationA.color} size="xs" />
-                <span className="truncate">{recommendationA.name}</span>
+                <span className="truncate">
+                  {teamNameForDisplay(recommendationA)}
+                </span>
                 <span>vs</span>
                 <TeamShirtIcon color={recommendationB.color} size="xs" />
-                <span className="truncate">{recommendationB.name}</span>
+                <span className="truncate">
+                  {teamNameForDisplay(recommendationB)}
+                </span>
               </span>
               <span className="shrink-0">ใช้คู่นี้</span>
             </button>
@@ -3496,7 +3493,7 @@ function settingsSourceSignature(tournament: Tournament) {
     tournament.breakDurationMinutes,
     tournament.startTime,
     tournament.availableTimeMinutes,
-    tournament.teams.map((team) => [team.id, team.color]),
+    tournament.teams.map((team) => [team.id, team.name, team.color]),
     tournament.matches.map((match) => [
       match.id,
       match.status,
@@ -3530,6 +3527,7 @@ function SettingsScreen({
   const [initialDraft] = useState(() => settingsDraftFrom(tournament));
   const [name, setName] = useState(initialDraft.name);
   const [teamColors, setTeamColors] = useState(initialDraft.teamColors);
+  const autoNamedTeamIdsRef = useRef(new Set<string>());
   const selectableTeams = tournament.teams.map((team) => ({
     ...team,
     color: teamColors[team.id] ?? team.color,
@@ -3561,8 +3559,17 @@ function SettingsScreen({
     // Saving trims, so comparing raw text would treat a stray trailing space as
     // an edit and unstick this field from the shared game for good.
     if (name.trim() === seeded.name.trim()) setName(draft.name);
-    if (JSON.stringify(teamColors) === JSON.stringify(seeded.teamColors))
-      setTeamColors(draft.teamColors);
+    setTeamColors((current) =>
+      Object.fromEntries(
+        Object.entries(draft.teamColors).map(([id, color]) => [
+          id,
+          !autoNamedTeamIdsRef.current.has(id) &&
+          current[id] === seeded.teamColors[id]
+            ? color
+            : (current[id] ?? color),
+        ]),
+      ),
+    );
     if (matchMinutes === seeded.matchMinutes)
       setMatchMinutes(draft.matchMinutes);
     if (breakMinutes === seeded.breakMinutes)
@@ -3656,10 +3663,14 @@ function SettingsScreen({
       teams: updated.teams.map((team) => ({
         ...team,
         color: teamColors[team.id] ?? team.color,
+        name: autoNamedTeamIdsRef.current.has(team.id)
+          ? TEAM_COLOR_NAMES[teamColors[team.id] ?? team.color]
+          : team.name,
       })),
     };
     const preferredPairs: Array<[string, string]> = [[firstPairA, firstPairB]];
     if (useSecondPair) preferredPairs.push([secondPairA, secondPairB]);
+    autoNamedTeamIdsRef.current.clear();
     onSave(
       remainingAfterSave > 0
         ? reshuffleUpcomingMatches(updatedWithColors, preferredPairs)
@@ -3733,7 +3744,7 @@ function SettingsScreen({
           <div className="border-t border-slate-100 pt-4">
             <h2 className="section-title">สีเสื้อทีม</h2>
             <p className="section-note">
-              เปลี่ยนเฉพาะสีที่แสดง ประวัติการพบกันยังนับเป็นทีมเดิม
+              ชื่อทีมใช้ชื่อสีภาษาอังกฤษ เปลี่ยนสีแล้วประวัติแข่งยังเป็นทีมเดิม
             </p>
             <div className="mt-3 space-y-2">
               {tournament.teams.map((team) => (
@@ -3746,23 +3757,24 @@ function SettingsScreen({
                     size="sm"
                   />
                   <span className="min-w-0 flex-1 truncate text-sm font-black">
-                    {team.name}
+                    {TEAM_COLOR_NAMES[teamColors[team.id] ?? team.color]}
                   </span>
                   <div className="flex shrink-0 justify-end gap-0.5">
                     {TEAM_COLORS.map((color) => (
                       <button
                         key={color}
                         type="button"
-                        aria-label={`เปลี่ยนสีเสื้อทีม ${team.name} เป็น${COLOR_LABEL[color]}`}
+                        aria-label={`เปลี่ยนสีเสื้อทีม ${teamNameForDisplay(team)} เป็น${COLOR_LABEL[color]}`}
                         aria-pressed={
                           (teamColors[team.id] ?? team.color) === color
                         }
-                        onClick={() =>
+                        onClick={() => {
+                          autoNamedTeamIdsRef.current.add(team.id);
                           setTeamColors((current) => ({
                             ...current,
                             [team.id]: color,
-                          }))
-                        }
+                          }));
+                        }}
                         className={`h-6 w-6 rounded-full border-2 ${(teamColors[team.id] ?? team.color) === color ? 'ring-2 ring-[#11823b] ring-offset-1' : ''}`}
                         style={{
                           background: COLOR_HEX[color],
