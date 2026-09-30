@@ -100,7 +100,9 @@ import {
   extendTournamentByMatches,
   extendTournamentToEndTime,
   finishMatchWithScore,
+  getMatchDisplay,
   makeId,
+  matchScoresInStoredOrder,
   minutesBetween,
   pairMeetingCount,
   recommendUpcomingPairs,
@@ -563,6 +565,17 @@ function nextMatchAfter(tournament: Tournament, match?: Match) {
     .find((item) => item.status !== 'finished');
 }
 
+function matchTeamLabel(tournament: Tournament, team: Team) {
+  const name = team.name.trim().toLocaleLowerCase();
+  const hasDuplicateName = tournament.teams.some(
+    (item) =>
+      item.id !== team.id && item.name.trim().toLocaleLowerCase() === name,
+  );
+  return hasDuplicateName
+    ? `${COLOR_LABEL[team.color]} · ${team.name}`
+    : team.name;
+}
+
 function ScorePicker({
   label,
   color,
@@ -761,7 +774,7 @@ function ScorerEditor({
                     <div className="flex min-w-0 items-center gap-1.5">
                       <TeamShirtIcon color={team.color} size="xs" />
                       <span className="truncate text-sm font-black">
-                        {team.name}
+                        {matchTeamLabel(tournament, team)}
                       </span>
                     </div>
                     <span
@@ -788,7 +801,7 @@ function ScorerEditor({
                         }))
                       }
                       placeholder={side.score > 0 ? 'ชื่อคนยิง' : 'เพิ่มสกอร์ก่อน'}
-                      aria-label={`ชื่อผู้ทำประตูทีม ${team.name}`}
+                      aria-label={`ชื่อผู้ทำประตูทีม ${matchTeamLabel(tournament, team)}`}
                       className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold outline-none focus:border-[#35a95f] disabled:bg-slate-100"
                     />
                     <datalist id={listId}>
@@ -901,15 +914,27 @@ function CurrentMatchControl({
   onOpen: () => void;
   onUpdate: (value: Tournament) => void;
 }) {
-  const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
-  const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
-  const [scoreA, setScoreA] = useState(String(match.teamAScore ?? 0));
-  const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
+  const displayMatch = getMatchDisplay(tournament, match);
+  const displayNext = next ? getMatchDisplay(tournament, next) : undefined;
+  const teamA = tournament.teams.find(
+    (team) => team.id === displayMatch.teamAId,
+  )!;
+  const teamB = tournament.teams.find(
+    (team) => team.id === displayMatch.teamBId,
+  )!;
+  const nextTeamA = tournament.teams.find(
+    (team) => team.id === displayNext?.teamAId,
+  );
+  const nextTeamB = tournament.teams.find(
+    (team) => team.id === displayNext?.teamBId,
+  );
+  const [scoreA, setScoreA] = useState(String(displayMatch.teamAScore ?? 0));
+  const [scoreB, setScoreB] = useState(String(displayMatch.teamBScore ?? 0));
   const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
   const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
   const hasScorerOverflow = [
-    { teamId: match.teamAId, score: normalizedScoreA },
-    { teamId: match.teamBId, score: normalizedScoreB },
+    { teamId: displayMatch.teamAId, score: normalizedScoreA },
+    { teamId: displayMatch.teamBId, score: normalizedScoreB },
   ].some(
     (side) =>
       (match.scorers ?? [])
@@ -919,9 +944,9 @@ function CurrentMatchControl({
 
   /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- a new match always starts from its own score. */
   useEffect(() => {
-    setScoreA(String(match.teamAScore ?? 0));
-    setScoreB(String(match.teamBScore ?? 0));
-  }, [match.id]);
+    setScoreA(String(displayMatch.teamAScore ?? 0));
+    setScoreB(String(displayMatch.teamBScore ?? 0));
+  }, [match.id, displayMatch.teamAId, displayMatch.teamBId]);
   /* oxlint-enable react-hooks/exhaustive-deps */
   useEffect(() => {
     // Every digit typed is saved at once, so a non-empty field already holds
@@ -931,12 +956,12 @@ function CurrentMatchControl({
     // then finishing the match committed the stale number over the other
     // device's goals.
     setScoreA((current) =>
-      current === '' ? current : String(match.teamAScore ?? 0),
+      current === '' ? current : String(displayMatch.teamAScore ?? 0),
     );
     setScoreB((current) =>
-      current === '' ? current : String(match.teamBScore ?? 0),
+      current === '' ? current : String(displayMatch.teamBScore ?? 0),
     );
-  }, [match.teamAScore, match.teamBScore]);
+  }, [displayMatch.teamAScore, displayMatch.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -947,8 +972,12 @@ function CurrentMatchControl({
       setMatchScore(
         tournament,
         match.id,
-        team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
-        team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+        ...matchScoresInStoredOrder(
+          tournament,
+          displayMatch,
+          team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
+          team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+        ),
       ),
     );
   }
@@ -975,13 +1004,13 @@ function CurrentMatchControl({
       </div>
       <div className="grid grid-cols-1 gap-2 min-[370px]:grid-cols-2">
         <ScorePicker
-          label={teamA.name}
+          label={matchTeamLabel(tournament, teamA)}
           color={teamA.color}
           score={scoreA}
           onChange={(value) => updateDraftScore('a', value)}
         />
         <ScorePicker
-          label={teamB.name}
+          label={matchTeamLabel(tournament, teamB)}
           color={teamB.color}
           score={scoreB}
           onChange={(value) => updateDraftScore('b', value)}
@@ -989,7 +1018,7 @@ function CurrentMatchControl({
       </div>
       <ScorerEditor
         tournament={tournament}
-        match={match}
+        match={displayMatch}
         onUpdate={onUpdate}
         teamAScore={normalizedScoreA}
         teamBScore={normalizedScoreB}
@@ -1008,8 +1037,12 @@ function CurrentMatchControl({
               finishMatchWithScore(
                 tournament,
                 match.id,
-                normalizedScoreA,
-                normalizedScoreB,
+                ...matchScoresInStoredOrder(
+                  tournament,
+                  displayMatch,
+                  normalizedScoreA,
+                  normalizedScoreB,
+                ),
               ),
             )
           }
@@ -1024,14 +1057,14 @@ function CurrentMatchControl({
           </p>
         )}
       </div>
-      {next && (
-        <div className="mt-3 flex w-full items-center justify-between border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500">
-          <span>
+      {next && nextTeamA && nextTeamB && (
+        <div className="mt-3 flex w-full flex-wrap items-center justify-between gap-1.5 border-t border-slate-100 pt-3 text-left text-xs font-bold text-slate-500">
+          <span className="shrink-0">
             เกมถัดไป {displayTournamentTime(tournament, next.startTime)}
           </span>
-          <span className="text-slate-800">
-            {tournament.teams.find((team) => team.id === next.teamAId)?.name} vs{' '}
-            {tournament.teams.find((team) => team.id === next.teamBId)?.name}
+          <span className="min-w-0 text-slate-800">
+            {matchTeamLabel(tournament, nextTeamA)} vs{' '}
+            {matchTeamLabel(tournament, nextTeamB)}
           </span>
         </div>
       )}
@@ -2343,6 +2376,12 @@ function ScheduleScreen({
   onUpdate: (value: Tournament) => void;
   onStandings: () => void;
 }) {
+  const pairCount = Math.max(
+    1,
+    (tournament.teams.length * (tournament.teams.length - 1)) / 2,
+  );
+  const setNumber = (match: Match) =>
+    Math.floor((match.matchNumber - 1) / pairCount) + 1;
   const slotMinutes =
     tournament.matchDurationMinutes + tournament.breakDurationMinutes;
   const fieldEndTime = addMinutes(
@@ -2419,15 +2458,23 @@ function ScheduleScreen({
                     }`}
                   >
                     {group.label}
+                    {group.tone === 'current' && current
+                      ? ` · เซ็ต ${setNumber(current)}`
+                      : ''}
                   </TableCell>
                 </TableRow>,
-                ...group.matches.map((match) => {
+                ...group.matches.flatMap((match, index) => {
+                  const displayMatch = getMatchDisplay(tournament, match);
                   const teamA = tournament.teams.find(
-                    (team) => team.id === match.teamAId,
+                    (team) => team.id === displayMatch.teamAId,
                   )!;
                   const teamB = tournament.teams.find(
-                    (team) => team.id === match.teamBId,
+                    (team) => team.id === displayMatch.teamBId,
                   )!;
+                  const startsSet =
+                    group.tone !== 'current' &&
+                    (index === 0 ||
+                      setNumber(group.matches[index - 1]) !== setNumber(match));
                   const matchEndTime = addMinutes(
                     match.startTime,
                     tournament.matchDurationMinutes,
@@ -2438,9 +2485,22 @@ function ScheduleScreen({
                   );
                   const endsNextDay = isNextDayTime(tournament, matchEndTime);
                   const hasScore =
-                    match.teamAScore !== undefined &&
-                    match.teamBScore !== undefined;
-                  return (
+                    displayMatch.teamAScore !== undefined &&
+                    displayMatch.teamBScore !== undefined;
+                  return [
+                    startsSet ? (
+                      <TableRow
+                        key={`set-${group.tone}-${setNumber(match)}`}
+                        className="border-b border-slate-100 bg-white hover:bg-white"
+                      >
+                        <TableCell
+                          colSpan={4}
+                          className="px-3 py-1.5 text-[10px] font-bold text-slate-400"
+                        >
+                          เซ็ต {setNumber(match)}
+                        </TableCell>
+                      </TableRow>
+                    ) : null,
                     <TableRow
                       key={match.id}
                       className={
@@ -2475,13 +2535,13 @@ function ScheduleScreen({
                         <button
                           type="button"
                           onClick={() => onOpenMatch(match.id)}
-                          aria-label={`เปิดเกม ${match.matchNumber}: ${teamA.name} พบ ${teamB.name}`}
+                          aria-label={`เปิดเกม ${match.matchNumber}: ${matchTeamLabel(tournament, teamA)} พบ ${matchTeamLabel(tournament, teamB)}`}
                           className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-1 px-1 text-left min-[370px]:px-2"
                         >
                           <span className="flex min-w-0 items-center gap-1.5">
                             <TeamShirtIcon color={teamA.color} size="xs" />
                             <span className="truncate text-sm font-black">
-                              {teamA.name}
+                              {matchTeamLabel(tournament, teamA)}
                             </span>
                           </span>
                           <span className="text-center text-xs font-bold text-slate-400">
@@ -2490,7 +2550,7 @@ function ScheduleScreen({
                           <span className="flex min-w-0 items-center gap-1.5">
                             <TeamShirtIcon color={teamB.color} size="xs" />
                             <span className="truncate text-sm font-black">
-                              {teamB.name}
+                              {matchTeamLabel(tournament, teamB)}
                             </span>
                           </span>
                         </button>
@@ -2504,7 +2564,8 @@ function ScheduleScreen({
                         >
                           {hasScore ? (
                             <span className="font-black tabular-nums text-[#087632]">
-                              {match.teamAScore}-{match.teamBScore}
+                              {displayMatch.teamAScore}-
+                              {displayMatch.teamBScore}
                             </span>
                           ) : (
                             <span
@@ -2524,8 +2585,8 @@ function ScheduleScreen({
                           <ChevronRight className="h-4 w-4 text-slate-300" />
                         </button>
                       </TableCell>
-                    </TableRow>
-                  );
+                    </TableRow>,
+                  ];
                 }),
               ])}
             </TableBody>
@@ -2579,11 +2640,12 @@ function StandingsScreen({
           {results.length ? (
             <div className="space-y-2">
               {visibleResults.map((match) => {
+                const displayMatch = getMatchDisplay(tournament, match);
                 const teamA = tournament.teams.find(
-                  (team) => team.id === match.teamAId,
+                  (team) => team.id === displayMatch.teamAId,
                 )!;
                 const teamB = tournament.teams.find(
-                  (team) => team.id === match.teamBId,
+                  (team) => team.id === displayMatch.teamBId,
                 )!;
                 return (
                   <div key={match.id} className="rounded-xl bg-slate-50 p-3">
@@ -2592,12 +2654,14 @@ function StandingsScreen({
                     </p>
                     <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                       <span className="truncate text-right font-black">
-                        {teamA.name}
+                        {matchTeamLabel(tournament, teamA)}
                       </span>
                       <span className="rounded-lg bg-white px-3 py-1 text-lg font-black tabular-nums text-[#087632] shadow-sm">
-                        {match.teamAScore} - {match.teamBScore}
+                        {displayMatch.teamAScore} - {displayMatch.teamBScore}
                       </span>
-                      <span className="truncate font-black">{teamB.name}</span>
+                      <span className="truncate font-black">
+                        {matchTeamLabel(tournament, teamB)}
+                      </span>
                     </div>
                   </div>
                 );
@@ -2635,15 +2699,20 @@ function MatchDetailScreen({
   onBack: () => void;
   onUpdate: (value: Tournament) => void;
 }) {
-  const teamA = tournament.teams.find((team) => team.id === match.teamAId)!;
-  const teamB = tournament.teams.find((team) => team.id === match.teamBId)!;
-  const [scoreA, setScoreA] = useState(String(match.teamAScore ?? 0));
-  const [scoreB, setScoreB] = useState(String(match.teamBScore ?? 0));
+  const displayMatch = getMatchDisplay(tournament, match);
+  const teamA = tournament.teams.find(
+    (team) => team.id === displayMatch.teamAId,
+  )!;
+  const teamB = tournament.teams.find(
+    (team) => team.id === displayMatch.teamBId,
+  )!;
+  const [scoreA, setScoreA] = useState(String(displayMatch.teamAScore ?? 0));
+  const [scoreB, setScoreB] = useState(String(displayMatch.teamBScore ?? 0));
   const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
   const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
   const hasScorerOverflow = [
-    { teamId: match.teamAId, score: normalizedScoreA },
-    { teamId: match.teamBId, score: normalizedScoreB },
+    { teamId: displayMatch.teamAId, score: normalizedScoreA },
+    { teamId: displayMatch.teamBId, score: normalizedScoreB },
   ].some(
     (side) =>
       (match.scorers ?? [])
@@ -2653,9 +2722,9 @@ function MatchDetailScreen({
 
   /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- reseed on the match itself; score changes are handled below. */
   useEffect(() => {
-    setScoreA(String(match.teamAScore ?? 0));
-    setScoreB(String(match.teamBScore ?? 0));
-  }, [match.id]);
+    setScoreA(String(displayMatch.teamAScore ?? 0));
+    setScoreB(String(displayMatch.teamBScore ?? 0));
+  }, [match.id, displayMatch.teamAId, displayMatch.teamBId]);
   /* oxlint-enable react-hooks/exhaustive-deps */
   useEffect(() => {
     // A finished match holds its draft until the user confirms it. A live one
@@ -2663,12 +2732,12 @@ function MatchDetailScreen({
     // for a field just cleared to retype — see CurrentMatchControl.
     if (match.status === 'finished') return;
     setScoreA((current) =>
-      current === '' ? current : String(match.teamAScore ?? 0),
+      current === '' ? current : String(displayMatch.teamAScore ?? 0),
     );
     setScoreB((current) =>
-      current === '' ? current : String(match.teamBScore ?? 0),
+      current === '' ? current : String(displayMatch.teamBScore ?? 0),
     );
-  }, [match.status, match.teamAScore, match.teamBScore]);
+  }, [match.status, displayMatch.teamAScore, displayMatch.teamBScore]);
   /* oxlint-enable react/react-compiler */
 
   function updateDraftScore(team: 'a' | 'b', value: string) {
@@ -2679,8 +2748,12 @@ function MatchDetailScreen({
       setMatchScore(
         tournament,
         match.id,
-        team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
-        team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+        ...matchScoresInStoredOrder(
+          tournament,
+          displayMatch,
+          team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
+          team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+        ),
       ),
     );
   }
@@ -2695,14 +2768,18 @@ function MatchDetailScreen({
       <div className="space-y-4 px-4 py-4 pb-8">
         <section className="rounded-[26px] border border-slate-200 bg-white p-5">
           <div className="grid grid-cols-[1fr_42px_1fr] items-center">
-            <div className="flex flex-col items-center">
+            <div className="flex min-w-0 flex-col items-center">
               <TeamShirtIcon color={teamA.color} size="lg" />
-              <p className="mt-1 text-lg font-black">{teamA.name}</p>
+              <p className="mt-1 max-w-full truncate text-lg font-black">
+                {matchTeamLabel(tournament, teamA)}
+              </p>
             </div>
             <span className="text-center font-black text-slate-400">VS</span>
-            <div className="flex flex-col items-center">
+            <div className="flex min-w-0 flex-col items-center">
               <TeamShirtIcon color={teamB.color} size="lg" />
-              <p className="mt-1 text-lg font-black">{teamB.name}</p>
+              <p className="mt-1 max-w-full truncate text-lg font-black">
+                {matchTeamLabel(tournament, teamB)}
+              </p>
             </div>
           </div>
         </section>
@@ -2713,13 +2790,13 @@ function MatchDetailScreen({
           </div>
           <div className="grid grid-cols-1 gap-2 min-[370px]:grid-cols-2">
             <ScorePicker
-              label={teamA.name}
+              label={matchTeamLabel(tournament, teamA)}
               color={teamA.color}
               score={scoreA}
               onChange={(value) => updateDraftScore('a', value)}
             />
             <ScorePicker
-              label={teamB.name}
+              label={matchTeamLabel(tournament, teamB)}
               color={teamB.color}
               score={scoreB}
               onChange={(value) => updateDraftScore('b', value)}
@@ -2727,7 +2804,7 @@ function MatchDetailScreen({
           </div>
           <ScorerEditor
             tournament={tournament}
-            match={match}
+            match={displayMatch}
             onUpdate={onUpdate}
             teamAScore={normalizedScoreA}
             teamBScore={normalizedScoreB}
@@ -2757,8 +2834,12 @@ function MatchDetailScreen({
                 finishMatchWithScore(
                   tournament,
                   match.id,
-                  normalizedScoreA,
-                  normalizedScoreB,
+                  ...matchScoresInStoredOrder(
+                    tournament,
+                    displayMatch,
+                    normalizedScoreA,
+                    normalizedScoreB,
+                  ),
                 ),
               )
             }
@@ -2782,8 +2863,12 @@ function MatchDetailScreen({
                   setMatchScore(
                     tournament,
                     match.id,
-                    normalizedScoreA,
-                    normalizedScoreB,
+                    ...matchScoresInStoredOrder(
+                      tournament,
+                      displayMatch,
+                      normalizedScoreA,
+                      normalizedScoreB,
+                    ),
                   ),
                 )
               }

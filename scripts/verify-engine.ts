@@ -7,6 +7,8 @@ import {
   extendTournamentByMatches,
   extendTournamentToEndTime,
   finishMatchWithScore,
+  getMatchDisplay,
+  matchScoresInStoredOrder,
   minutesBetween,
   pairMeetingCount,
   recommendUpcomingPairs,
@@ -49,6 +51,42 @@ function meetingCounts(matches: Match[]) {
   return [...counts.values()];
 }
 
+function orderedPair(match: Match) {
+  return `${match.teamAId}:${match.teamBId}`;
+}
+
+function assertStablePairOrientations(matches: Match[], label: string) {
+  const firstOrientations = new Map<string, string>();
+  for (const match of matches) {
+    const key = [match.teamAId, match.teamBId].sort().join(':');
+    const first = firstOrientations.get(key);
+    if (first === undefined) firstOrientations.set(key, orderedPair(match));
+    else
+      assert(
+        orderedPair(match) === first,
+        `${label}: repeated pairings must retain their first A/B orientation`,
+      );
+  }
+}
+
+function assertRepeatingOrderedCycle(matches: Match[], label: string) {
+  const openingCycle = matches.slice(0, 6).map(orderedPair);
+  assert(
+    new Set(
+      matches
+        .slice(0, 6)
+        .map((match) => [match.teamAId, match.teamBId].sort().join(':')),
+    ).size === 6,
+    `${label}: the opening cycle must contain all six pairings`,
+  );
+  matches.forEach((match, index) =>
+    assert(
+      orderedPair(match) === openingCycle[index % openingCycle.length],
+      `${label}: match ${index + 1} must repeat the opening cycle's ordered pairing`,
+    ),
+  );
+}
+
 const tournament = createDemoTournament();
 assert(
   tournament.teams.length === 4 && tournament.matches.length === 15,
@@ -65,6 +103,51 @@ const pairKeys = tournament.matches.map((match) =>
 assert(
   new Set(pairKeys.slice(0, 6)).size === 6,
   'Every pair must appear exactly once before the next cycle',
+);
+
+const [greenTeam, redTeam, blueTeam, yellowTeam] = tournament.teams;
+const blueRedOpening = createTournament({
+  name: 'Stable Blue/Red opening',
+  teams: tournament.teams,
+  firstMatchTeamIds: [blueTeam.id, redTeam.id],
+  matchDurationMinutes: 7,
+  breakDurationMinutes: 1,
+  startTime: '19:00',
+  availableTimeMinutes: minutesBetween('19:00', '22:00'),
+});
+assert(
+  blueRedOpening.matches.length === 22 &&
+    blueRedOpening.matches[0].teamAId === blueTeam.id &&
+    blueRedOpening.matches[0].teamBId === redTeam.id &&
+    blueRedOpening.matches.at(-1)?.startTime === '21:48',
+  'The 7+1 minute Blue/Red opening must fill 19:00-22:00 with 22 matches',
+);
+assertRepeatingOrderedCycle(blueRedOpening.matches, 'Blue/Red opening');
+const complementaryOpening = reshuffleUpcomingMatches(blueRedOpening, [
+  [blueTeam.id, redTeam.id],
+  [yellowTeam.id, greenTeam.id],
+]);
+assert(
+  complementaryOpening.matches[1].teamAId === yellowTeam.id &&
+    complementaryOpening.matches[1].teamBId === greenTeam.id,
+  'A hand-picked complementary second pair must retain the selected A/B order',
+);
+assertRepeatingOrderedCycle(
+  complementaryOpening.matches,
+  'Hand-picked complementary opening',
+);
+const openingSnapshot = JSON.stringify(complementaryOpening.matches);
+const extendedOpening = extendTournamentByMatches(complementaryOpening, 5);
+assert(
+  JSON.stringify(
+    extendedOpening.matches.slice(0, complementaryOpening.matches.length),
+  ) === openingSnapshot &&
+    JSON.stringify(complementaryOpening.matches) === openingSnapshot,
+  'Extending the custom opening must preserve every existing match and its input',
+);
+assertRepeatingOrderedCycle(
+  extendedOpening.matches,
+  'Extended complementary opening',
 );
 
 for (let teamCount = 2; teamCount <= 8; teamCount += 1) {
@@ -86,6 +169,8 @@ for (let teamCount = 2; teamCount <= 8; teamCount += 1) {
     `A ${teamCount}-team first cycle must contain every pairing exactly once`,
   );
   let extended = generated;
+  const generatedSnapshot = JSON.stringify(generated.matches);
+  extended = extendTournamentByMatches(extended, pairCount * 2 + 1);
   for (let index = 0; index < 3; index += 1) {
     extended = extendTournamentByMatches(extended, 1);
   }
@@ -93,6 +178,16 @@ for (let teamCount = 2; teamCount <= 8; teamCount += 1) {
   assert(
     Math.max(...extendedCounts) - Math.min(...extendedCounts) <= 1,
     `A ${teamCount}-team schedule must stay balanced after repeated extensions`,
+  );
+  assertStablePairOrientations(
+    extended.matches,
+    `${teamCount}-team repeated extensions`,
+  );
+  assert(
+    JSON.stringify(extended.matches.slice(0, generated.matches.length)) ===
+      generatedSnapshot &&
+      JSON.stringify(generated.matches) === generatedSnapshot,
+    `A ${teamCount}-team extension must preserve its existing match records`,
   );
 }
 
@@ -194,6 +289,190 @@ assert(
     extendedTournament.matches[14].startTime === '21:48',
   'A saved one-cycle schedule must extend to the selected end time',
 );
+
+// A legacy repeat stores Red/Blue although its first meeting was Blue/Red.
+// Use distinct scores, goalkeepers, and team-bound scorers to catch partial swaps.
+const legacyReversedMatch: Match = {
+  ...blueRedOpening.matches[6],
+  teamAId: redTeam.id,
+  teamBId: blueTeam.id,
+  teamAScore: 5,
+  teamBScore: 2,
+  teamAGkPlayerId: redTeam.players[3].id,
+  teamBGkPlayerId: blueTeam.players[2].id,
+  status: 'current',
+  scorers: [
+    {
+      id: 'legacy-red-scorer',
+      teamId: redTeam.id,
+      playerId: redTeam.players[1].id,
+      playerName: redTeam.players[1].name,
+      goals: 5,
+    },
+    {
+      id: 'legacy-blue-scorer',
+      teamId: blueTeam.id,
+      playerId: blueTeam.players[1].id,
+      playerName: blueTeam.players[1].name,
+      goals: 2,
+    },
+  ],
+};
+const legacyReversedTournament = {
+  ...blueRedOpening,
+  availableTimeMinutes: 64,
+  matches: blueRedOpening.matches.slice(0, 8).map((match, index) =>
+    index < 6
+      ? {
+          ...match,
+          status: 'finished' as const,
+          teamAScore: 0,
+          teamBScore: 0,
+        }
+      : index === 6
+        ? legacyReversedMatch
+        : match,
+  ),
+};
+assert(
+  parseTournament(legacyReversedTournament) !== null,
+  'A reversed legacy fixture with existing scores, GKs, and scorers must remain readable',
+);
+const legacyReversedSnapshot = JSON.stringify(legacyReversedTournament);
+const legacyDisplay = getMatchDisplay(
+  legacyReversedTournament,
+  legacyReversedMatch,
+);
+assert(
+  legacyDisplay.teamAId === blueTeam.id &&
+    legacyDisplay.teamBId === redTeam.id &&
+    legacyDisplay.teamAScore === 2 &&
+    legacyDisplay.teamBScore === 5 &&
+    legacyDisplay.teamAGkPlayerId === blueTeam.players[2].id &&
+    legacyDisplay.teamBGkPlayerId === redTeam.players[3].id &&
+    JSON.stringify(legacyDisplay.scorers) ===
+      JSON.stringify(legacyReversedMatch.scorers),
+  'Legacy presentation must move scores and GKs with their team while keeping scorer team IDs intact',
+);
+assertStablePairOrientations(
+  legacyReversedTournament.matches.map((match) =>
+    getMatchDisplay(legacyReversedTournament, match),
+  ),
+  'Legacy presentation',
+);
+assert(
+  matchScoresInStoredOrder(
+    legacyReversedTournament,
+    legacyReversedTournament.matches[0],
+    9,
+    2,
+  ).join(',') === '9,2',
+  'An already aligned match must keep its score order when saving a display draft',
+);
+const legacyDraft = setMatchScore(
+  legacyReversedTournament,
+  legacyDisplay.id,
+  ...matchScoresInStoredOrder(legacyReversedTournament, legacyDisplay, 4, 7),
+);
+assert(
+  legacyDraft.matches[6].teamAScore === 7 &&
+    legacyDraft.matches[6].teamBScore === 4 &&
+    legacyDraft.matches[6].status === 'current' &&
+    calculateStandings(legacyDraft).every((row) => row.goalsFor === 0),
+  'Saving a legacy display draft must score the correct stored teams without counting a live result',
+);
+const legacyFinished = finishMatchWithScore(
+  legacyDraft,
+  legacyDisplay.id,
+  ...matchScoresInStoredOrder(legacyDraft, legacyDisplay, 4, 7),
+);
+assert(
+  legacyFinished.matches[6].teamAId === redTeam.id &&
+    legacyFinished.matches[6].teamBId === blueTeam.id &&
+    legacyFinished.matches[6].teamAScore === 7 &&
+    legacyFinished.matches[6].teamBScore === 4 &&
+    legacyFinished.matches[6].status === 'finished' &&
+    legacyFinished.matches[7].status === 'current' &&
+    calculateStandings(legacyFinished).find((row) => row.teamId === redTeam.id)
+      ?.goalsFor === 7 &&
+    calculateStandings(legacyFinished).find((row) => row.teamId === blueTeam.id)
+      ?.goalsFor === 4,
+  'Ending a reversed legacy live match must award each team its display score and advance play',
+);
+const legacyFinishedDisplay = getMatchDisplay(
+  legacyFinished,
+  legacyFinished.matches[6],
+);
+const legacyEditedResult = setMatchScore(
+  legacyFinished,
+  legacyFinishedDisplay.id,
+  ...matchScoresInStoredOrder(legacyFinished, legacyFinishedDisplay, 8, 3),
+);
+const editedLegacyDisplay = getMatchDisplay(
+  legacyEditedResult,
+  legacyEditedResult.matches[6],
+);
+assert(
+  legacyEditedResult.matches[6].teamAScore === 3 &&
+    legacyEditedResult.matches[6].teamBScore === 8 &&
+    editedLegacyDisplay.teamAScore === 8 &&
+    editedLegacyDisplay.teamBScore === 3 &&
+    editedLegacyDisplay.teamAGkPlayerId === legacyDisplay.teamAGkPlayerId &&
+    editedLegacyDisplay.teamBGkPlayerId === legacyDisplay.teamBGkPlayerId &&
+    JSON.stringify(editedLegacyDisplay.scorers) ===
+      JSON.stringify(legacyDisplay.scorers) &&
+    legacyEditedResult.matches[6].status === 'finished' &&
+    legacyEditedResult.matches[7].status === 'current' &&
+    calculateStandings(legacyEditedResult).find(
+      (row) => row.teamId === blueTeam.id,
+    )?.goalsFor === 8 &&
+    calculateStandings(legacyEditedResult).find(
+      (row) => row.teamId === redTeam.id,
+    )?.goalsFor === 3,
+  'Editing a finished legacy display result must preserve scorer/GK ownership and update the correct standings',
+);
+assert(
+  JSON.stringify(legacyReversedTournament) === legacyReversedSnapshot,
+  'Displaying, drafting, finishing, and editing a legacy match must not rewrite the source tournament',
+);
+const completedLegacyTournament = {
+  ...legacyReversedTournament,
+  matches: legacyReversedTournament.matches.map((match) => ({
+    ...match,
+    status: 'finished' as const,
+    teamAScore: match.teamAScore ?? 0,
+    teamBScore: match.teamBScore ?? 0,
+  })),
+};
+const completedLegacySnapshot = JSON.stringify(
+  completedLegacyTournament.matches,
+);
+const extendedLegacyTournament = extendTournamentByMatches(
+  completedLegacyTournament,
+  5,
+);
+assert(
+  JSON.stringify(
+    extendedLegacyTournament.matches.slice(
+      0,
+      completedLegacyTournament.matches.length,
+    ),
+  ) === completedLegacySnapshot &&
+    JSON.stringify(completedLegacyTournament.matches) ===
+      completedLegacySnapshot,
+  'Extending a legacy game must preserve all stored finished records, including reversed scores and GKs',
+);
+for (const appended of extendedLegacyTournament.matches.slice(8)) {
+  const firstMeeting = completedLegacyTournament.matches.find(
+    (match) =>
+      [match.teamAId, match.teamBId].sort().join(':') ===
+      [appended.teamAId, appended.teamBId].sort().join(':'),
+  );
+  assert(
+    firstMeeting && orderedPair(appended) === orderedPair(firstMeeting),
+    'New legacy-game extensions must use the first meeting orientation rather than the latest reversed record',
+  );
+}
 
 const first = tournament.matches[0];
 const firstTeam = tournament.teams.find((team) => team.id === first.teamAId)!;
@@ -325,6 +604,11 @@ assert(
   'Reshuffling during play must preserve the live match and its goalkeepers',
 );
 assert(
+  JSON.stringify(reshuffledAfterStart.matches.slice(0, 2)) ===
+    JSON.stringify(updatedDuringPlay.matches.slice(0, 2)),
+  'Manual pairing changes must preserve the complete finished and current records, including scorers',
+);
+assert(
   reshuffledAfterStart.matches[2].teamAId === teamOne.id &&
     reshuffledAfterStart.matches[2].teamBId === teamTwo.id &&
     reshuffledAfterStart.matches[3].teamAId === teamThree.id &&
@@ -359,6 +643,44 @@ assert(
   ).size === 6,
   'Choosing the opening pairs must still keep every pairing in the first cycle',
 );
+assertRepeatingOrderedCycle(
+  reshuffledOpening.matches,
+  'Complementary manual opening change',
+);
+const remainingTeams = afterFinish.teams.filter(
+  (team) => team.id !== first.teamAId && team.id !== first.teamBId,
+);
+const reversedManualChoice = reshuffleUpcomingMatches(afterFinish, [
+  [first.teamBId, first.teamAId],
+  [remainingTeams[1].id, remainingTeams[0].id],
+]);
+assert(
+  reversedManualChoice.matches[2].teamAId === first.teamBId &&
+    reversedManualChoice.matches[2].teamBId === first.teamAId &&
+    reversedManualChoice.matches[3].teamAId === remainingTeams[1].id &&
+    reversedManualChoice.matches[3].teamBId === remainingTeams[0].id &&
+    JSON.stringify(reversedManualChoice.matches.slice(0, 2)) ===
+      JSON.stringify(afterFinish.matches.slice(0, 2)),
+  'An explicit manual A/B selection must be respected without changing finished or current records',
+);
+const manuallyChangedCounts = meetingCounts(reversedManualChoice.matches);
+assert(
+  manuallyChangedCounts.length === 6 &&
+    Math.max(...manuallyChangedCounts) - Math.min(...manuallyChangedCounts) <=
+      1,
+  'Manual orientation overrides must retain full pairing coverage and a balanced schedule',
+);
+for (const automatic of reversedManualChoice.matches.slice(4)) {
+  const firstMeeting = reversedManualChoice.matches.find(
+    (match) =>
+      [match.teamAId, match.teamBId].sort().join(':') ===
+      [automatic.teamAId, automatic.teamBId].sort().join(':'),
+  );
+  assert(
+    firstMeeting && orderedPair(automatic) === orderedPair(firstMeeting),
+    'Automatic matches after a manual override must retain the earliest pairing orientation',
+  );
+}
 let afterOneCycle = tournament;
 for (let index = 0; index < 6; index += 1) {
   const current = afterOneCycle.matches.find(
@@ -995,5 +1317,5 @@ for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
 }
 
 console.log(
-  'Engine checks passed: defaults, 2-8 team pairing coverage, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
+  'Engine checks passed: defaults, 2-8 team pairing coverage, stable ordered repeats, legacy display/score/GK ownership, immutable extensions, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
 );

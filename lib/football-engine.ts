@@ -130,6 +130,40 @@ function pairKey(teamAId: string, teamBId: string) {
   return [teamAId, teamBId].sort().join(':');
 }
 
+// Old schedules alternated A/B at every meeting. Keep their stored records
+// intact and present each pairing in the order of its first match, carrying
+// every side-specific value with its team.
+export function getMatchDisplay(tournament: Tournament, match: Match): Match {
+  const key = pairKey(match.teamAId, match.teamBId);
+  const firstMeeting = tournament.matches.find(
+    (item) => pairKey(item.teamAId, item.teamBId) === key,
+  );
+  if (!firstMeeting || firstMeeting.teamAId === match.teamAId) return match;
+  return {
+    ...match,
+    teamAId: match.teamBId,
+    teamBId: match.teamAId,
+    teamAScore: match.teamBScore,
+    teamBScore: match.teamAScore,
+    teamAGkPlayerId: match.teamBGkPlayerId,
+    teamBGkPlayerId: match.teamAGkPlayerId,
+  };
+}
+
+export function matchScoresInStoredOrder(
+  tournament: Tournament,
+  displayMatch: Match,
+  scoreA: number,
+  scoreB: number,
+): [number, number] {
+  const stored = tournament.matches.find(
+    (match) => match.id === displayMatch.id,
+  );
+  return stored && stored.teamAId !== displayMatch.teamAId
+    ? [scoreB, scoreA]
+    : [scoreA, scoreB];
+}
+
 function includesTeam(pair: Pick<Pair, 'teamAId' | 'teamBId'>, teamId: string) {
   return pair.teamAId === teamId || pair.teamBId === teamId;
 }
@@ -147,6 +181,7 @@ function balancedFuturePairs(
     canonicalPairs.map((pair) => [pairKey(pair.teamAId, pair.teamBId), 0]),
   );
   const teamCounts = new Map(teamIds.map((teamId) => [teamId, 0]));
+  const firstPairOrientations = new Map<string, [string, string]>();
   const sequence: Array<Pick<Pair, 'teamAId' | 'teamBId'>> = [];
   const roundsPerCycle =
     teamIds.length % 2 === 0 ? teamIds.length - 1 : teamIds.length;
@@ -154,6 +189,8 @@ function balancedFuturePairs(
   function record(pair: Pick<Pair, 'teamAId' | 'teamBId'>) {
     const key = pairKey(pair.teamAId, pair.teamBId);
     if (!pairCounts.has(key)) return;
+    if (!firstPairOrientations.has(key))
+      firstPairOrientations.set(key, [pair.teamAId, pair.teamBId]);
     pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
     teamCounts.set(pair.teamAId, (teamCounts.get(pair.teamAId) ?? 0) + 1);
     teamCounts.set(pair.teamBId, (teamCounts.get(pair.teamBId) ?? 0) + 1);
@@ -165,11 +202,8 @@ function balancedFuturePairs(
   function appendPair(canonical: Pair, orientation?: [string, string]) {
     const key = pairKey(canonical.teamAId, canonical.teamBId);
     const previousCount = pairCounts.get(key) ?? 0;
-    const useReverse = !orientation && previousCount % 2 === 1;
-    const teamAId =
-      orientation?.[0] ?? (useReverse ? canonical.teamBId : canonical.teamAId);
-    const teamBId =
-      orientation?.[1] ?? (useReverse ? canonical.teamAId : canonical.teamBId);
+    const [teamAId, teamBId] = orientation ??
+      firstPairOrientations.get(key) ?? [canonical.teamAId, canonical.teamBId];
     const pair = {
       teamAId,
       teamBId,
