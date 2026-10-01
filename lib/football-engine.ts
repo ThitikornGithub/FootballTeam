@@ -6,6 +6,7 @@ import type {
   Team,
   Tournament,
 } from './football-types';
+import { balancedPairOrder } from './football-scheduling';
 
 // Must stay in step with the bound parseTournament enforces in football-schema.
 export const MAX_AVAILABLE_TIME_MINUTES = 1440;
@@ -164,10 +165,6 @@ export function matchScoresInStoredOrder(
     : [scoreA, scoreB];
 }
 
-function includesTeam(pair: Pick<Pair, 'teamAId' | 'teamBId'>, teamId: string) {
-  return pair.teamAId === teamId || pair.teamBId === teamId;
-}
-
 function balancedFuturePairs(
   teamIds: string[],
   fixedMatches: Array<Pick<Match, 'teamAId' | 'teamBId'>>,
@@ -180,7 +177,6 @@ function balancedFuturePairs(
   const pairCounts = new Map(
     canonicalPairs.map((pair) => [pairKey(pair.teamAId, pair.teamBId), 0]),
   );
-  const teamCounts = new Map(teamIds.map((teamId) => [teamId, 0]));
   const firstPairOrientations = new Map<string, [string, string]>();
   const sequence: Array<Pick<Pair, 'teamAId' | 'teamBId'>> = [];
   const roundsPerCycle =
@@ -192,8 +188,6 @@ function balancedFuturePairs(
     if (!firstPairOrientations.has(key))
       firstPairOrientations.set(key, [pair.teamAId, pair.teamBId]);
     pairCounts.set(key, (pairCounts.get(key) ?? 0) + 1);
-    teamCounts.set(pair.teamAId, (teamCounts.get(pair.teamAId) ?? 0) + 1);
-    teamCounts.set(pair.teamBId, (teamCounts.get(pair.teamBId) ?? 0) + 1);
     sequence.push(pair);
   }
 
@@ -232,65 +226,13 @@ function balancedFuturePairs(
     appendPair(canonical, [teamAId, teamBId]);
   }
 
-  while (generated.length < matchCount) {
-    const last = sequence.at(-1);
-    const previous = sequence.at(-2);
-    const ranked = canonicalPairs
-      .map((pair, canonicalIndex) => {
-        const teams = [pair.teamAId, pair.teamBId];
-        const threeInARow = teams.filter(
-          (teamId) =>
-            last &&
-            previous &&
-            includesTeam(last, teamId) &&
-            includesTeam(previous, teamId),
-        ).length;
-        const overlapsLast = last
-          ? teams.filter((teamId) => includesTeam(last, teamId)).length
-          : 0;
-        const key = pairKey(pair.teamAId, pair.teamBId);
-        let lastMet = -1;
-        for (let index = sequence.length - 1; index >= 0; index -= 1) {
-          if (
-            pairKey(sequence[index].teamAId, sequence[index].teamBId) === key
-          ) {
-            lastMet = index;
-            break;
-          }
-        }
-        return {
-          pair,
-          canonicalIndex,
-          pairCount: pairCounts.get(key) ?? 0,
-          threeInARow,
-          sinceLastMet: lastMet < 0 ? Infinity : sequence.length - lastMet,
-          overlapsLast,
-          teamLoad:
-            (teamCounts.get(pair.teamAId) ?? 0) +
-            (teamCounts.get(pair.teamBId) ?? 0),
-        };
-      })
-      .sort(
-        // Once every pairing has met the same number of times the counts tie,
-        // and without recency the pair that just finished could be picked
-        // straight back — with four teams, one match later. Prefer the pairing
-        // that has waited longest.
-        (a, b) =>
-          a.pairCount - b.pairCount ||
-          a.threeInARow - b.threeInARow ||
-          (a.sinceLastMet === b.sinceLastMet
-            ? 0
-            : a.sinceLastMet < b.sinceLastMet
-              ? 1
-              : -1) ||
-          a.overlapsLast - b.overlapsLast ||
-          a.teamLoad - b.teamLoad ||
-          a.canonicalIndex - b.canonicalIndex,
-      );
-    const next = ranked[0]?.pair;
-    if (!next) break;
-    appendPair(next);
-  }
+  const plannedOrder = balancedPairOrder(
+    teamIds,
+    canonicalPairs,
+    sequence,
+    matchCount - generated.length,
+  );
+  for (const index of plannedOrder) appendPair(canonicalPairs[index]);
 
   return generated;
 }
@@ -308,13 +250,50 @@ export function recommendUpcomingPairs(
   tournament: Tournament,
   matchCount = 2,
   preferredPairs: Array<[string, string]> = [],
+  remainingMatchCount?: number,
 ): Array<[string, string]> {
+  if (matchCount <= 0) return [];
+  const locked = lockedMatchesForPlanning(tournament);
   return balancedFuturePairs(
     tournament.teams.map((team) => team.id),
-    lockedMatchesForPlanning(tournament),
-    matchCount,
+    locked,
+    Math.max(
+      matchCount,
+      remainingMatchCount ?? tournament.matches.length - locked.length,
+    ),
     preferredPairs,
-  ).map((pair) => [pair.teamAId, pair.teamBId]);
+  )
+    .slice(0, Math.max(0, matchCount))
+    .map((pair) => [pair.teamAId, pair.teamBId]);
+}
+
+/** Display-only grouping: never reorder or modify the stored fixtures. */
+export function scheduleSets(tournament: Tournament) {
+  const pairCount = Math.max(
+    1,
+    (tournament.teams.length * (tournament.teams.length - 1)) / 2,
+  );
+  const groups = new Map<number, Match[]>();
+  for (const match of [...tournament.matches].sort(
+    (a, b) => a.matchNumber - b.matchNumber,
+  )) {
+    const number = Math.floor((match.matchNumber - 1) / pairCount) + 1;
+    const matches = groups.get(number) ?? [];
+    matches.push(match);
+    groups.set(number, matches);
+  }
+  return [...groups].map(([number, matches]) => {
+    const finishedCount = matches.filter(
+      (match) => match.status === 'finished',
+    ).length;
+    return {
+      number,
+      matches,
+      finishedCount,
+      complete: finishedCount === matches.length,
+      hasCurrent: matches.some((match) => match.status === 'current'),
+    };
+  });
 }
 
 export function pairMeetingCount(

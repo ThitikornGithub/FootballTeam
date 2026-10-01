@@ -32,6 +32,7 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -110,6 +111,7 @@ import {
   reopenFinishedMatch,
   reorder,
   scheduleMetrics,
+  scheduleSets,
   scheduleWindowMetrics,
   setMatchScore,
   setMatchScorers,
@@ -2362,44 +2364,31 @@ function ScheduleScreen({
   onUpdate: (value: Tournament) => void;
   onStandings: () => void;
 }) {
-  const pairCount = Math.max(
-    1,
-    (tournament.teams.length * (tournament.teams.length - 1)) / 2,
-  );
-  const setNumber = (match: Match) =>
-    Math.floor((match.matchNumber - 1) / pairCount) + 1;
+  const sets = scheduleSets(tournament);
+  const completedSetNumbers = sets
+    .filter((set) => set.complete)
+    .map((set) => set.number)
+    .join(',');
+  const [expansion, setExpansion] = useState(() => ({
+    completed: completedSetNumbers,
+    open: new Set<number>(),
+  }));
+  if (expansion.completed !== completedSetNumbers) {
+    // A reopened set must auto-collapse again when its last result is saved.
+    const completed = new Set(completedSetNumbers.split(',').map(Number));
+    setExpansion({
+      completed: completedSetNumbers,
+      open: new Set(
+        [...expansion.open].filter((number) => completed.has(number)),
+      ),
+    });
+  }
   const slotMinutes =
     tournament.matchDurationMinutes + tournament.breakDurationMinutes;
   const fieldEndTime = addMinutes(
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
-  const current = tournament.matches.find(
-    (match) => match.status === 'current',
-  );
-  const upcoming = tournament.matches.filter(
-    (match) => match.status === 'upcoming',
-  );
-  const finished = tournament.matches.filter(
-    (match) => match.status === 'finished',
-  );
-  const groups = [
-    {
-      label: 'กำลังแข่ง',
-      matches: current ? [current] : [],
-      tone: 'current' as const,
-    },
-    {
-      label: 'เกมถัดไป',
-      matches: upcoming,
-      tone: 'upcoming' as const,
-    },
-    {
-      label: 'แข่งแล้ว · ล่าสุดอยู่ล่างสุด',
-      matches: finished,
-      tone: 'finished' as const,
-    },
-  ].filter((group) => group.matches.length > 0);
   return (
     <>
       <PageHeader
@@ -2417,175 +2406,212 @@ function ScheduleScreen({
         }
       />
       <div className="space-y-3 px-4 py-4 pb-6">
-        <section className="overflow-hidden rounded-[18px] border border-slate-200 bg-white shadow-sm">
-          <Table>
-            <TableHeader className="bg-slate-50">
-              <TableRow>
-                <TableHead className="w-[44px] px-1 text-center text-[11px]">
-                  แมตช์
-                </TableHead>
-                <TableHead className="w-[58px] px-1.5">เวลา</TableHead>
-                <TableHead>คู่แข่งขัน</TableHead>
-                <TableHead className="w-[52px] pr-2 text-right">ผล</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {groups.flatMap((group) => [
-                <TableRow
-                  key={`group-${group.tone}`}
-                  className="border-0 bg-slate-100/80 hover:bg-slate-100/80"
-                >
-                  <TableCell
-                    colSpan={4}
-                    className={`px-3 py-2 text-[11px] font-black uppercase tracking-wide ${
-                      group.tone === 'current'
-                        ? 'text-[#087632]'
-                        : 'text-slate-500'
-                    }`}
+        <div className="space-y-2">
+          {sets.map((set) => {
+            const expanded = !set.complete || expansion.open.has(set.number);
+            const panelId = `schedule-set-${set.number}`;
+            return (
+              <section
+                key={set.number}
+                aria-label={`เซ็ต ${set.number}`}
+                className="overflow-hidden rounded-lg border border-slate-200 bg-white"
+              >
+                {set.complete ? (
+                  <button
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={panelId}
+                    onClick={() =>
+                      setExpansion((previous) => {
+                        const next = new Set(previous.open);
+                        if (next.has(set.number)) next.delete(set.number);
+                        else next.add(set.number);
+                        return { ...previous, open: next };
+                      })
+                    }
+                    className="flex h-8 w-full items-center justify-between gap-2 bg-slate-50 px-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#11823b]"
                   >
-                    {group.label}
-                    {group.tone === 'current' && current
-                      ? ` · เซ็ต ${setNumber(current)}`
-                      : ''}
-                  </TableCell>
-                </TableRow>,
-                ...group.matches.flatMap((match, index) => {
-                  const displayMatch = getMatchDisplay(tournament, match);
-                  const teamA = tournament.teams.find(
-                    (team) => team.id === displayMatch.teamAId,
-                  )!;
-                  const teamB = tournament.teams.find(
-                    (team) => team.id === displayMatch.teamBId,
-                  )!;
-                  const startsSet =
-                    group.tone !== 'current' &&
-                    (index === 0 ||
-                      setNumber(group.matches[index - 1]) !== setNumber(match));
-                  const matchEndTime = addMinutes(
-                    match.startTime,
-                    tournament.matchDurationMinutes,
-                  );
-                  const startsNextDay = isNextDayTime(
-                    tournament,
-                    match.startTime,
-                  );
-                  const endsNextDay = isNextDayTime(tournament, matchEndTime);
-                  const hasScore =
-                    displayMatch.teamAScore !== undefined &&
-                    displayMatch.teamBScore !== undefined;
-                  return [
-                    startsSet ? (
-                      <TableRow
-                        key={`set-${group.tone}-${setNumber(match)}`}
-                        className="border-b border-slate-100 bg-white hover:bg-white"
-                      >
-                        <TableCell
-                          colSpan={4}
-                          className="px-3 py-1.5 text-[10px] font-bold text-slate-400"
-                        >
-                          เซ็ต {setNumber(match)}
-                        </TableCell>
+                    <span className="flex items-center gap-1.5">
+                      <CircleCheck className="h-3.5 w-3.5 text-[#11823b]" />
+                      เซ็ต {set.number} · จบแล้ว
+                    </span>
+                    <span className="flex items-center gap-1 text-[#087632]">
+                      {expanded ? 'ซ่อนผล' : `ดูผล ${set.matches.length} แมตช์`}
+                      <ChevronRight
+                        className={`h-3.5 w-3.5 ${expanded ? 'rotate-90' : ''}`}
+                      />
+                    </span>
+                  </button>
+                ) : (
+                  <div
+                    className={`flex h-8 items-center justify-between gap-2 px-2.5 text-xs font-bold ${set.hasCurrent ? 'bg-[#e5f5e9] text-[#087632]' : 'bg-slate-50 text-slate-600'}`}
+                  >
+                    <span className="flex items-center gap-2">
+                      เซ็ต {set.number}
+                      <span className="text-[10px]">
+                        {set.hasCurrent ? '● LIVE' : 'รอแข่งขัน'}
+                      </span>
+                    </span>
+                    <span className="tabular-nums">
+                      แข่งแล้ว {set.finishedCount}/{set.matches.length}
+                    </span>
+                  </div>
+                )}
+                <div id={panelId} hidden={!expanded}>
+                  <Table
+                    className="table-fixed"
+                    aria-label={`ตารางเซ็ต ${set.number}`}
+                  >
+                    <TableHeader className="bg-slate-50">
+                      <TableRow>
+                        <TableHead className="h-7 w-[38px] px-1 text-center text-[10px]">
+                          แมตช์
+                        </TableHead>
+                        <TableHead className="h-7 w-[50px] px-1 text-[10px]">
+                          เวลา
+                        </TableHead>
+                        <TableHead className="h-7 px-1 text-[10px]">
+                          คู่แข่งขัน
+                        </TableHead>
+                        <TableHead className="h-7 w-[56px] pr-1 text-right text-[10px]">
+                          ผล
+                        </TableHead>
                       </TableRow>
-                    ) : null,
-                    <TableRow
-                      key={match.id}
-                      className={
-                        match.status === 'current'
-                          ? 'bg-[#eef9f1]'
-                          : match.status === 'finished'
-                            ? 'bg-slate-50/60'
-                            : ''
-                      }
-                    >
-                      <TableCell className="w-[44px] px-1 py-3 text-center align-middle">
-                        <span
-                          className={`inline-flex min-w-8 justify-center rounded-lg px-1.5 py-1 text-xs font-black tabular-nums ${match.status === 'current' ? 'bg-[#11823b] text-white' : 'bg-slate-100 text-slate-600'}`}
-                        >
-                          M{match.matchNumber}
-                        </span>
-                      </TableCell>
-                      <TableCell className="px-1.5 py-3 align-middle text-xs font-black tabular-nums">
-                        <span className="block leading-4">
-                          {match.startTime}
-                        </span>
-                        <span className="block text-[11px] font-bold text-slate-400">
-                          –{matchEndTime}
-                        </span>
-                        {(startsNextDay || endsNextDay) && (
-                          <span className="block text-[9px] font-black leading-3 text-[#087632]">
-                            {startsNextDay ? '+1 วัน' : 'จบ +1 วัน'}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell className="p-0 align-middle">
-                        <button
-                          type="button"
-                          onClick={() => onOpenMatch(match.id)}
-                          aria-label={`เปิดเกม ${match.matchNumber}: ${matchTeamLabel(tournament, teamA)} พบ ${matchTeamLabel(tournament, teamB)}`}
-                          className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-0.5 px-1 text-left"
-                        >
-                          <span className="flex min-w-0 items-center gap-1">
-                            <TeamShirtIcon
-                              color={teamA.color}
-                              size="xs"
-                              className="!h-4 !w-4"
-                            />
-                            <span className="truncate text-xs font-black min-[390px]:text-[13px]">
-                              {matchTeamLabel(tournament, teamA)}
-                            </span>
-                          </span>
-                          <span className="text-center text-xs font-bold text-slate-400">
-                            vs
-                          </span>
-                          <span className="flex min-w-0 items-center gap-1">
-                            <TeamShirtIcon
-                              color={teamB.color}
-                              size="xs"
-                              className="!h-4 !w-4"
-                            />
-                            <span className="truncate text-xs font-black min-[390px]:text-[13px]">
-                              {matchTeamLabel(tournament, teamB)}
-                            </span>
-                          </span>
-                        </button>
-                      </TableCell>
-                      <TableCell className="pr-2 text-right align-middle">
-                        <button
-                          type="button"
-                          onClick={() => onOpenMatch(match.id)}
-                          aria-label={`ดูรายละเอียดเกม ${match.matchNumber}`}
-                          className="inline-flex min-h-10 items-center justify-end gap-1"
-                        >
-                          {hasScore ? (
-                            <span className="font-black tabular-nums text-[#087632]">
-                              {displayMatch.teamAScore}-
-                              {displayMatch.teamBScore}
-                            </span>
-                          ) : (
-                            <span
-                              className={`rounded-full px-2 py-1 text-xs font-black ${
-                                match.status === 'current'
-                                  ? 'bg-[#11823b] text-white'
-                                  : 'bg-slate-100 text-slate-500'
-                              }`}
-                            >
-                              {match.status === 'current'
-                                ? 'LIVE'
+                    </TableHeader>
+                    <TableBody>
+                      {set.matches.map((match) => {
+                        const displayMatch = getMatchDisplay(tournament, match);
+                        const teamA = tournament.teams.find(
+                          (team) => team.id === displayMatch.teamAId,
+                        )!;
+                        const teamB = tournament.teams.find(
+                          (team) => team.id === displayMatch.teamBId,
+                        )!;
+                        const matchEndTime = addMinutes(
+                          match.startTime,
+                          tournament.matchDurationMinutes,
+                        );
+                        const startsNextDay = isNextDayTime(
+                          tournament,
+                          match.startTime,
+                        );
+                        const endsNextDay = isNextDayTime(
+                          tournament,
+                          matchEndTime,
+                        );
+                        const hasScore =
+                          displayMatch.teamAScore !== undefined &&
+                          displayMatch.teamBScore !== undefined;
+                        return (
+                          <TableRow
+                            key={match.id}
+                            className={
+                              match.status === 'current'
+                                ? 'bg-[#eef9f1]'
                                 : match.status === 'finished'
-                                  ? 'จบ'
-                                  : 'รอ'}
-                            </span>
-                          )}
-                          <ChevronRight className="h-4 w-4 text-slate-300" />
-                        </button>
-                      </TableCell>
-                    </TableRow>,
-                  ];
-                }),
-              ])}
-            </TableBody>
-          </Table>
-        </section>
+                                  ? 'bg-slate-50/60'
+                                  : ''
+                            }
+                          >
+                            <TableCell className="px-1 py-1 text-center align-middle">
+                              <span
+                                className={`inline-flex min-w-7 justify-center rounded-md px-1 py-0.5 text-[11px] font-black tabular-nums ${match.status === 'current' ? 'bg-[#11823b] text-white' : 'bg-slate-100 text-slate-600'}`}
+                              >
+                                M{match.matchNumber}
+                              </span>
+                            </TableCell>
+                            <TableCell className="px-1 py-1 align-middle text-xs font-black tabular-nums">
+                              <span className="block leading-4">
+                                {match.startTime}
+                              </span>
+                              <span className="block text-[11px] font-bold text-slate-400">
+                                –{matchEndTime}
+                              </span>
+                              {(startsNextDay || endsNextDay) && (
+                                <span className="block text-[9px] font-black leading-3 text-[#087632]">
+                                  {startsNextDay ? '+1 วัน' : 'จบ +1 วัน'}
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell className="p-0 align-middle">
+                              <button
+                                type="button"
+                                onClick={() => onOpenMatch(match.id)}
+                                aria-label={`เปิดเกม ${match.matchNumber}: ${matchTeamLabel(tournament, teamA)} พบ ${matchTeamLabel(tournament, teamB)}`}
+                                className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-0.5 px-1 text-left"
+                              >
+                                <span className="flex min-w-0 items-center gap-0.5 min-[360px]:gap-1">
+                                  <TeamShirtIcon
+                                    color={teamA.color}
+                                    size="xs"
+                                    className="!h-3.5 !w-3.5 min-[360px]:!h-4 min-[360px]:!w-4"
+                                  />
+                                  <span className="truncate text-[11px] font-black min-[360px]:text-xs min-[390px]:text-[13px]">
+                                    {matchTeamLabel(tournament, teamA)}
+                                  </span>
+                                </span>
+                                <span className="text-center text-xs font-bold text-slate-400">
+                                  vs
+                                </span>
+                                <span className="flex min-w-0 items-center gap-0.5 min-[360px]:gap-1">
+                                  <TeamShirtIcon
+                                    color={teamB.color}
+                                    size="xs"
+                                    className="!h-3.5 !w-3.5 min-[360px]:!h-4 min-[360px]:!w-4"
+                                  />
+                                  <span className="truncate text-[11px] font-black min-[360px]:text-xs min-[390px]:text-[13px]">
+                                    {matchTeamLabel(tournament, teamB)}
+                                  </span>
+                                </span>
+                              </button>
+                            </TableCell>
+                            <TableCell className="p-0 pr-1 text-right align-middle">
+                              <button
+                                type="button"
+                                onClick={() => onOpenMatch(match.id)}
+                                aria-label={`ดูรายละเอียดเกม ${match.matchNumber}`}
+                                className="inline-flex min-h-12 w-full items-center justify-end gap-0.5"
+                              >
+                                <span className="flex flex-col items-center gap-0.5">
+                                  {hasScore ? (
+                                    <span className="text-xs font-black tabular-nums text-[#087632]">
+                                      {displayMatch.teamAScore}-
+                                      {displayMatch.teamBScore}
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                                        match.status === 'current'
+                                          ? 'bg-[#11823b] text-white'
+                                          : 'bg-slate-100 text-slate-500'
+                                      }`}
+                                    >
+                                      {match.status === 'current'
+                                        ? 'LIVE'
+                                        : match.status === 'finished'
+                                          ? 'จบ'
+                                          : 'รอ'}
+                                    </span>
+                                  )}
+                                  {hasScore && match.status === 'current' && (
+                                    <span className="text-[9px] font-black leading-3 text-[#087632]">
+                                      LIVE
+                                    </span>
+                                  )}
+                                </span>
+                                <ChevronRight className="h-3 w-3 shrink-0 text-slate-300" />
+                              </button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </section>
+            );
+          })}
+        </div>
         <Button
           onClick={() => onUpdate(extendTournamentByMatches(tournament, 1))}
           variant="outline"
@@ -3642,12 +3668,25 @@ function SettingsScreen({
     availableMinutes > 0 &&
     resultingCount > 0 &&
     pairSelectionValid;
-  const firstRecommendation =
-    finishedCount > 0 ? recommendUpcomingPairs(tournament, 1)[0] : undefined;
-  const secondRecommendation =
-    finishedCount > 0
-      ? recommendUpcomingPairs(tournament, 2, [[firstPairA, firstPairB]])[1]
-      : undefined;
+  const firstRecommendation = useMemo(
+    () =>
+      finishedCount > 0
+        ? recommendUpcomingPairs(tournament, 1, [], remainingAfterSave)[0]
+        : undefined,
+    [tournament, finishedCount, remainingAfterSave],
+  );
+  const secondRecommendation = useMemo(
+    () =>
+      finishedCount > 0
+        ? recommendUpcomingPairs(
+            tournament,
+            2,
+            [[firstPairA, firstPairB]],
+            remainingAfterSave,
+          )[1]
+        : undefined,
+    [tournament, finishedCount, firstPairA, firstPairB, remainingAfterSave],
+  );
 
   function saveSettings() {
     if (!valid) return;
@@ -5125,6 +5164,7 @@ export default function FootballApp() {
             )}
             {tournament && view === 'schedule' && (
               <ScheduleScreen
+                key={tournament.id}
                 tournament={tournament}
                 onOpenMatch={openMatch}
                 onUpdate={applyTournament}

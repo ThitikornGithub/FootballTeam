@@ -16,6 +16,7 @@ import {
   reorder,
   reshuffleUpcomingMatches,
   scheduleMetrics,
+  scheduleSets,
   scheduleWindowMetrics,
   setMatchScore,
   setMatchScorers,
@@ -159,22 +160,17 @@ function assertStablePairOrientations(matches: Match[], label: string) {
   }
 }
 
-function assertRepeatingOrderedCycle(matches: Match[], label: string) {
-  const openingCycle = matches.slice(0, 6).map(orderedPair);
-  assert(
-    new Set(
-      matches
-        .slice(0, 6)
-        .map((match) => [match.teamAId, match.teamBId].sort().join(':')),
-    ).size === 6,
-    `${label}: the opening cycle must contain all six pairings`,
-  );
-  matches.forEach((match, index) =>
+function assertCompletePairCycles(matches: Match[], label: string) {
+  for (let index = 0; index < matches.length; index += 6) {
+    const cycle = matches.slice(index, index + 6);
     assert(
-      orderedPair(match) === openingCycle[index % openingCycle.length],
-      `${label}: match ${index + 1} must repeat the opening cycle's ordered pairing`,
-    ),
-  );
+      new Set(
+        cycle.map((match) => [match.teamAId, match.teamBId].sort().join(':')),
+      ).size === cycle.length,
+      `${label}: each full set must contain all six pairings without repeats`,
+    );
+  }
+  assertStablePairOrientations(matches, label);
 }
 
 const tournament = createDemoTournament();
@@ -212,7 +208,197 @@ assert(
     blueRedOpening.matches.at(-1)?.startTime === '21:48',
   'The 7+1 minute Blue/Red opening must fill 19:00-22:00 with 22 matches',
 );
-assertRepeatingOrderedCycle(blueRedOpening.matches, 'Blue/Red opening');
+assertCompletePairCycles(blueRedOpening.matches, 'Blue/Red opening');
+
+function teamScheduleBurden(matches: Match[], teamId: string) {
+  let last = -1;
+  let played = 0;
+  let backToBack = 0;
+  let consecutive = 0;
+  let longestRun = 0;
+  let longestRest = 0;
+  matches.forEach((match, index) => {
+    if (match.teamAId !== teamId && match.teamBId !== teamId) return;
+    played += 1;
+    if (last >= 0) {
+      const rest = index - last - 1;
+      longestRest = Math.max(longestRest, rest);
+      if (rest === 0) backToBack += 1;
+    }
+    consecutive = last >= 0 && index === last + 1 ? consecutive + 1 : 1;
+    longestRun = Math.max(longestRun, consecutive);
+    last = index;
+  });
+  return { played, backToBack, longestRun, longestRest };
+}
+
+// Method B can change the sequence between sets while preserving coverage and
+// familiar left/right order. Check every possible four-team opening, not just
+// the default color order. Twenty-two slots should give everyone 11 games.
+for (const first of tournament.teams) {
+  for (const second of tournament.teams) {
+    if (first.id === second.id) continue;
+    const config = {
+      name: 'Method B fairness',
+      teams: tournament.teams,
+      firstMatchTeamIds: [first.id, second.id] as [string, string],
+      matchDurationMinutes: 7,
+      breakDurationMinutes: 1,
+      startTime: '19:00',
+      availableTimeMinutes: 180,
+    };
+    const schedule = createTournament(config);
+    const burden = schedule.teams.map((team) =>
+      teamScheduleBurden(schedule.matches, team.id),
+    );
+    assert(
+      burden.every((team) => team.played === 11),
+      'Method B: every team gets 11 of the 22 games',
+    );
+    assert(
+      burden.every((team) => team.longestRun <= 2),
+      'Method B: no team plays three games in a row',
+    );
+    const consecutiveCounts = burden.map((team) => team.backToBack);
+    assert(
+      Math.max(...consecutiveCounts) - Math.min(...consecutiveCounts) <= 1,
+      'Method B: back-to-back games are shared across all four teams',
+    );
+    assert(
+      burden.every((team) => team.longestRest <= 2),
+      'Method B: nobody waits more than two intervening matches',
+    );
+    assertCompletePairCycles(schedule.matches, 'Method B varied opening');
+    assert(
+      schedule.matches.map(orderedPair).join() ===
+        createTournament(config).matches.map(orderedPair).join(),
+      'Method B: identical settings give deterministic pair order',
+    );
+    const repeatFirstSet = Array.from(
+      { length: 22 },
+      (_, index) => schedule.matches[index % 6],
+    );
+    const oldBurden = schedule.teams.map(
+      (team) => teamScheduleBurden(repeatFirstSet, team.id).backToBack,
+    );
+    assert(
+      Math.max(...consecutiveCounts) < Math.max(...oldBurden),
+      'Method B distributes consecutive games better than repeating its first set',
+    );
+  }
+}
+
+const methodBRecommendations = recommendUpcomingPairs(blueRedOpening, 2, [
+  [blueTeam.id, redTeam.id],
+]);
+assert(
+  methodBRecommendations.map((pair) => pair.join(':')).join() ===
+    blueRedOpening.matches.slice(0, 2).map(orderedPair).join(),
+  'Recommendations must use the same full planning horizon as creation',
+);
+const recoloredOpening = {
+  ...blueRedOpening,
+  teams: blueRedOpening.teams.map((team, index) => ({
+    ...team,
+    color: TEAM_COLORS[(index + 3) % TEAM_COLORS.length],
+  })),
+};
+assert(
+  JSON.stringify(recommendUpcomingPairs(recoloredOpening)) ===
+    JSON.stringify(recommendUpcomingPairs(blueRedOpening)),
+  'Shirt colors must not change fairness or left/right identity',
+);
+
+let groupedGame = blueRedOpening;
+for (let index = 0; index < 12; index += 1)
+  groupedGame = finishMatchWithScore(
+    groupedGame,
+    groupedGame.matches[index].id,
+    2,
+    1,
+  );
+const groupedSnapshot = JSON.stringify(groupedGame);
+const shortenedSettings = updateTournamentSettings(groupedGame, {
+  name: groupedGame.name,
+  startTime: groupedGame.startTime,
+  matchDurationMinutes: 7,
+  breakDurationMinutes: 1,
+  availableTimeMinutes: 17 * 8,
+});
+const replannedShortSchedule = reshuffleUpcomingMatches(shortenedSettings, []);
+assert(
+  recommendUpcomingPairs(groupedGame, 2, [], 4)
+    .map((pair) => pair.join(':'))
+    .join() ===
+    replannedShortSchedule.matches
+      .filter((match) => match.status === 'upcoming')
+      .slice(0, 2)
+      .map(orderedPair)
+      .join(),
+  'Recommendations must consider the edited time window, not the old remaining match count',
+);
+const sets = scheduleSets(groupedGame);
+assert(
+  sets.map((set) => set.matches.length).join() === '6,6,6,4',
+  'The last partial set must count its actual four fixtures',
+);
+assert(
+  sets.map((set) => set.complete).join() === 'true,true,false,false' &&
+    sets[2].hasCurrent,
+  'Only completely finished sets can collapse; LIVE stays in chronological set 3',
+);
+assert(
+  sets
+    .flatMap((set) => set.matches)
+    .map((match) => match.id)
+    .join() === groupedGame.matches.map((match) => match.id).join(),
+  'Grouping must keep completed games above LIVE and upcoming games',
+);
+assert(
+  JSON.stringify(groupedGame) === groupedSnapshot,
+  'Display grouping must not alter saved state',
+);
+const reversedInputSets = scheduleSets({
+  ...groupedGame,
+  matches: [...groupedGame.matches].reverse(),
+});
+assert(
+  reversedInputSets
+    .flatMap((set) => set.matches)
+    .map((match) => match.matchNumber)
+    .join() === blueRedOpening.matches.map((match) => match.matchNumber).join(),
+  'Display groups sort by match number, without relying on status or array order',
+);
+const reopenedSets = scheduleSets(
+  reopenFinishedMatch(groupedGame, groupedGame.matches[0].id),
+);
+assert(
+  !reopenedSets[0].complete &&
+    reopenedSets[0].hasCurrent &&
+    !reopenedSets[2].complete,
+  'Reopening an old result must unfold that set without collapsing unfinished later sets',
+);
+let allFinishedGame = groupedGame;
+for (let index = 12; index < allFinishedGame.matches.length; index += 1)
+  allFinishedGame = finishMatchWithScore(
+    allFinishedGame,
+    allFinishedGame.matches[index].id,
+    0,
+    0,
+  );
+assert(
+  scheduleSets(allFinishedGame).every((set) => set.complete),
+  'A fully finished partial set can collapse too',
+);
+const extendedPartialSets = scheduleSets(
+  extendTournamentByMatches(allFinishedGame, 1),
+);
+assert(
+  extendedPartialSets[3].matches.length === 5 &&
+    !extendedPartialSets[3].complete &&
+    extendedPartialSets[3].hasCurrent,
+  'Adding overtime to a finished partial set must expand it for the new LIVE match',
+);
 const complementaryOpening = reshuffleUpcomingMatches(blueRedOpening, [
   [blueTeam.id, redTeam.id],
   [yellowTeam.id, greenTeam.id],
@@ -222,7 +408,7 @@ assert(
     complementaryOpening.matches[1].teamBId === greenTeam.id,
   'A hand-picked complementary second pair must retain the selected A/B order',
 );
-assertRepeatingOrderedCycle(
+assertCompletePairCycles(
   complementaryOpening.matches,
   'Hand-picked complementary opening',
 );
@@ -235,7 +421,7 @@ assert(
     JSON.stringify(complementaryOpening.matches) === openingSnapshot,
   'Extending the custom opening must preserve every existing match and its input',
 );
-assertRepeatingOrderedCycle(
+assertCompletePairCycles(
   extendedOpening.matches,
   'Extended complementary opening',
 );
@@ -307,7 +493,7 @@ for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
     lastMet.set(key, index);
   });
   assert(
-    shortestGap >= Math.min(pairCount, 6),
+    shortestGap >= Math.min(pairCount, teamCount === 4 ? 4 : 6),
     `${teamCount} teams must not meet the same opponent again after only ${shortestGap} matches`,
   );
 }
@@ -733,7 +919,7 @@ assert(
   ).size === 6,
   'Choosing the opening pairs must still keep every pairing in the first cycle',
 );
-assertRepeatingOrderedCycle(
+assertCompletePairCycles(
   reshuffledOpening.matches,
   'Complementary manual opening change',
 );
@@ -1422,5 +1608,5 @@ for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
 }
 
 console.log(
-  'Engine checks passed: English team/color labels, defaults, 2-8 team pairing coverage, stable ordered repeats, legacy display/score/GK ownership, immutable extensions, recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
+  'Engine checks passed: Method B fairness across every four-team opening, chronological compact sets, English team/color labels, defaults, 2-8 team pairing coverage, stable pair sides, legacy display/score/GK ownership, immutable extensions, full-horizon recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
 );
