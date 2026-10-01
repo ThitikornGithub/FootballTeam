@@ -2468,6 +2468,19 @@ function randomBelow(bound: number) {
   return value % bound;
 }
 
+// Where a mid-transition element is really painting, so a run-down can be cut
+// off without the ball jumping back to where the style says it should be.
+function paintedAngle(node: SVGGElement | null, fallback: number) {
+  const transform = node && window.getComputedStyle(node).transform;
+  if (!transform || transform === 'none') return fallback;
+  try {
+    const matrix = new DOMMatrixReadOnly(transform);
+    return (Math.atan2(matrix.b, matrix.a) * 180) / Math.PI;
+  } catch {
+    return fallback;
+  }
+}
+
 function GoalkeeperWheelDialog({
   tournament,
   onUpdate,
@@ -2503,10 +2516,14 @@ function GoalkeeperWheelDialog({
     start: number;
     base: number;
     ballBase: number;
+    kick: number;
     speed: number;
     frame: number;
   } | null>(null);
   const settleTimerRef = useRef<number | null>(null);
+  // Set while the ball is rolling free, so a press during the run-down can cut
+  // it short and kick on from the speed the ball still has.
+  const runDownRef = useRef<{ cancel: (now: number) => number } | null>(null);
   const locked = Boolean(team?.gkRotationLocked);
 
   const labelFor = (index: number) =>
@@ -2534,7 +2551,7 @@ function GoalkeeperWheelDialog({
   function pickSpot() {
     if (lastRef.current >= 0 && lastRef.current < total) {
       if (randomBelow(1000) < WHEEL_REPEAT_CHANCE * 1000)
-        return lastRef.current;
+        return { index: lastRef.current, fromBag: false };
     }
     if (!bagRef.current.length) {
       const order = Array.from({ length: total }, (_, index) => index);
@@ -2549,7 +2566,7 @@ function GoalkeeperWheelDialog({
       }
       bagRef.current = order;
     }
-    return bagRef.current.shift() ?? 0;
+    return { index: bagRef.current.shift() ?? 0, fromBag: true };
   }
 
   function paintMeter(power: number) {
@@ -2575,10 +2592,16 @@ function GoalkeeperWheelDialog({
   // Holding spins the ball for real and winds it up, so a long hold is a long
   // spin. Every frame carries its own timestamp, so nothing reads the clock
   // while rendering.
-  function startHold() {
-    if (spinning || holdRef.current) return;
+  function startHold(now: number) {
+    if (holdRef.current) return;
+    // Pressing again while the ball is still rolling kicks it on from the
+    // speed it has left, the way a second touch on a rolling ball would,
+    // instead of making the press wait out the run-down.
+    const rolling = runDownRef.current?.cancel(now) ?? 0;
+    const kick = Math.min(WHEEL_TOP_SPEED, Math.max(WHEEL_KICK_SPEED, rolling));
     setWinner(null);
     setSpinning(true);
+    setCoasting(false);
     const base = rotationRef.current;
     const ballBase = ballRotationRef.current;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -2586,7 +2609,8 @@ function GoalkeeperWheelDialog({
         start: -1,
         base,
         ballBase,
-        speed: WHEEL_KICK_SPEED,
+        kick,
+        speed: kick,
         frame: 0,
       };
       return;
@@ -2595,17 +2619,17 @@ function GoalkeeperWheelDialog({
     if (ballRef.current) ballRef.current.style.transition = 'none';
     // Angle comes from how long the finger has been down, not from adding up
     // frames, so a frame the phone skips never costs the ball any ground.
-    const tick = (now: number) => {
+    const tick = (frameTime: number) => {
       const hold = holdRef.current;
       if (!hold) return;
-      if (hold.start < 0) hold.start = now;
-      const held = (now - hold.start) / 1000;
-      const gain = WHEEL_TOP_SPEED - WHEEL_KICK_SPEED;
-      hold.speed = WHEEL_KICK_SPEED + gain * Math.min(1, held / WHEEL_RAMP);
+      if (hold.start < 0) hold.start = frameTime;
+      const held = (frameTime - hold.start) / 1000;
+      const gain = WHEEL_TOP_SPEED - hold.kick;
+      hold.speed = hold.kick + gain * Math.min(1, held / WHEEL_RAMP);
       const travelled =
         held <= WHEEL_RAMP
-          ? WHEEL_KICK_SPEED * held + (gain * held * held) / (2 * WHEEL_RAMP)
-          : WHEEL_KICK_SPEED * WHEEL_RAMP +
+          ? hold.kick * held + (gain * held * held) / (2 * WHEEL_RAMP)
+          : hold.kick * WHEEL_RAMP +
             (gain * WHEEL_RAMP) / 2 +
             WHEEL_TOP_SPEED * (held - WHEEL_RAMP);
       rotationRef.current = hold.base + travelled;
@@ -2618,25 +2642,26 @@ function GoalkeeperWheelDialog({
       start: -1,
       base,
       ballBase,
+      kick,
       // Released before the first frame is still a shot, not a dead stop.
-      speed: WHEEL_KICK_SPEED,
+      speed: kick,
       frame: window.requestAnimationFrame(tick),
     };
   }
 
-  function endHold() {
+  function endHold(now: number) {
     const hold = holdRef.current;
     if (!hold) return;
     if (hold.frame) window.cancelAnimationFrame(hold.frame);
     holdRef.current = null;
     paintMeter(0);
-    coast(hold.speed);
+    coast(hold.speed, now);
   }
 
   // Let go and the ball runs down on its own, starting at exactly the speed it
   // was spinning and losing it at a steady rate until it stops.
-  function coast(speed: number) {
-    const index = pickSpot();
+  function coast(speed: number, releasedAt: number) {
+    const { index, fromBag } = pickSpot();
     const step = 360 / total;
     const reduced = window.matchMedia(
       '(prefers-reduced-motion: reduce)',
@@ -2659,6 +2684,9 @@ function GoalkeeperWheelDialog({
       WHEEL_MAX_COAST,
       (WHEEL_BRAKE_LEAD * travel) / launch,
     );
+    // The speed the run-down leaves at, which the braking curve then sheds at
+    // a steady rate: the one number a cut-off spin has to carry over.
+    const launched = (WHEEL_BRAKE_LEAD * travel) / duration;
     rotationRef.current += travel;
     ballRotationRef.current += travel * WHEEL_ROLL;
     setCoasting(true);
@@ -2670,12 +2698,16 @@ function GoalkeeperWheelDialog({
     paintWheel();
 
     let settled = false;
-    const settle = () => {
-      if (settled) return;
-      settled = true;
+    const clearFallback = () => {
       if (settleTimerRef.current !== null)
         window.clearTimeout(settleTimerRef.current);
       settleTimerRef.current = null;
+    };
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      runDownRef.current = null;
+      clearFallback();
       lastRef.current = index;
       setSpinning(false);
       setCoasting(false);
@@ -2690,6 +2722,31 @@ function GoalkeeperWheelDialog({
     // A phone that sleeps or switches apps mid-spin never delivers that event,
     // and the wheel would sit on "กำลังหมุน" for good.
     settleTimerRef.current = window.setTimeout(settle, duration * 1000 + 300);
+    runDownRef.current = {
+      cancel: (now: number) => {
+        if (settled) return 0;
+        settled = true;
+        runDownRef.current = null;
+        clearFallback();
+        orbitRef.current?.removeEventListener('transitionend', settle);
+        // Pick the ball up exactly where it is being painted, and give the
+        // spot its place in the bag back: this spin never happened.
+        if (fromBag) bagRef.current.unshift(index);
+        rotationRef.current = paintedAngle(
+          orbitRef.current,
+          rotationRef.current,
+        );
+        ballRotationRef.current = paintedAngle(
+          ballRef.current,
+          ballRotationRef.current,
+        );
+        if (orbitRef.current) orbitRef.current.style.transition = 'none';
+        if (ballRef.current) ballRef.current.style.transition = 'none';
+        paintWheel();
+        const left = 1 - (now - releasedAt) / 1000 / duration;
+        return left > 0 ? launched * left : 0;
+      },
+    };
   }
 
   function applyQueue() {
@@ -2782,7 +2839,9 @@ function GoalkeeperWheelDialog({
           </div>
         )}
 
-        <div className="relative overflow-hidden rounded-[22px] border border-[#9dd2ab] bg-[#eef9f1] p-4">
+        {/* Holding is how this is used, so nothing in here may answer a long
+            press with selected text or a callout menu. */}
+        <div className="relative overflow-hidden rounded-[22px] border border-[#9dd2ab] bg-[#eef9f1] p-4 select-none [-webkit-touch-callout:none]">
           <div className="relative mx-auto aspect-square w-[min(72vw,280px)]">
             <svg viewBox="0 0 200 200" className="block h-full w-full">
               <defs>
@@ -2942,51 +3001,53 @@ function GoalkeeperWheelDialog({
 
           <button
             type="button"
-            // Never disabled mid-hold: a disabled button stops sending the
-            // release, and the ball would spin on with nothing to stop it.
-            disabled={coasting}
+            // Never disabled: mid-hold it would stop sending the release and
+            // the ball would spin on with nothing to stop it, and during the
+            // run-down a press would land on a dead button, which the phone
+            // then reads as a long press on its label and selects the text.
             onPointerDown={(event) => {
               event.preventDefault();
-              startHold();
+              startHold(event.timeStamp);
             }}
-            onPointerUp={endHold}
-            onPointerCancel={endHold}
-            onPointerLeave={endHold}
-            className="mt-3 h-13 w-full touch-none rounded-xl bg-[#11823b] font-black text-white active:scale-[.99] disabled:opacity-50"
+            onPointerUp={(event) => endHold(event.timeStamp)}
+            onPointerCancel={(event) => endHold(event.timeStamp)}
+            onPointerLeave={(event) => endHold(event.timeStamp)}
+            className="mt-3 h-13 w-full touch-none rounded-xl bg-[#11823b] font-black text-white select-none active:scale-[.99] [-webkit-touch-callout:none]"
           >
             {coasting
-              ? 'กำลังหมุน…'
+              ? 'กดค้างอีกครั้งเพื่อเตะต่อ'
               : spinning
                 ? 'ปล่อยเพื่อหยุด'
                 : 'กดค้างให้ลูกบอลหมุน'}
           </button>
         </div>
 
-        {winner !== null && (
-          <div className="rounded-2xl bg-slate-50 p-3">
-            <p className="text-xs font-bold text-slate-400">
-              คิว GK ตามเข็มนาฬิกา
-            </p>
-            <ol className="mt-2 flex flex-wrap gap-1.5">
-              {Array.from({ length: total }, (_, position) => {
-                const at = (winner + position) % total;
-                return (
-                  <li
-                    key={at}
-                    className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold"
-                  >
-                    <span
-                      className="h-2.5 w-2.5 shrink-0 rounded-full"
-                      style={{ background: WHEEL_COLORS[at].hex }}
-                    />
-                    <span className="text-slate-400">{position + 1}.</span>
-                    {labelFor(at)}
-                  </li>
-                );
-              })}
-            </ol>
-          </div>
-        )}
+        {/* Here from the start, not only once there is a winner: a block that
+            turns up after the first spin moves the hold button out from under
+            a finger that is coming back for a second go. */}
+        <div className="rounded-2xl bg-slate-50 p-3">
+          <p className="text-xs font-bold text-slate-400">
+            {winner === null ? 'ลำดับที่ยืนรอบวง' : 'คิว GK ตามเข็มนาฬิกา'}
+          </p>
+          <ol className="mt-2 flex flex-wrap gap-1.5">
+            {Array.from({ length: total }, (_, position) => {
+              const at = ((winner ?? 0) + position) % total;
+              return (
+                <li
+                  key={at}
+                  className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold"
+                >
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ background: WHEEL_COLORS[at].hex }}
+                  />
+                  <span className="text-slate-400">{position + 1}.</span>
+                  {labelFor(at)}
+                </li>
+              );
+            })}
+          </ol>
+        </div>
 
         {locked && (
           <p className="text-center text-xs font-bold text-amber-700">
