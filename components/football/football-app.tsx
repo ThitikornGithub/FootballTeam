@@ -1256,6 +1256,7 @@ function HomeScreen({
   refreshing,
   onRefresh,
   onOpenAllGames,
+  onOpenWheel,
 }: {
   tournament: Tournament;
   gameId: string;
@@ -1272,6 +1273,7 @@ function HomeScreen({
   refreshing: boolean;
   onRefresh: () => void;
   onOpenAllGames: () => void;
+  onOpenWheel: () => void;
 }) {
   const [confirmingClose, setConfirmingClose] = useState(false);
   const current =
@@ -1424,6 +1426,14 @@ function HomeScreen({
             คัดลอกลิงก์เกมให้เพื่อน
           </button>
         )}
+        <button
+          type="button"
+          onClick={onOpenWheel}
+          className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-black text-[#087632] shadow-sm active:scale-[.99]"
+        >
+          <Shuffle className="h-4 w-4" />
+          สุ่ม GK ด้วยวงล้อ
+        </button>
         <section>
           <div className="mb-3 flex items-end justify-between">
             <div>
@@ -2362,6 +2372,492 @@ function TeamDetailScreen({
         </section>
       </div>
     </>
+  );
+}
+
+// Standing spots around the circle, the way the group lines up on the grass.
+// These are markers for where someone stands, not the shirt colours.
+const WHEEL_COLORS = [
+  { name: 'เขียว', hex: '#2bd47d', ink: '#062515' },
+  { name: 'แดง', hex: '#ff5f63', ink: '#2b0709' },
+  { name: 'น้ำเงิน', hex: '#5b8dff', ink: '#06112e' },
+  { name: 'เหลือง', hex: '#ffd23f', ink: '#271f00' },
+  { name: 'ส้ม', hex: '#ff9048', ink: '#2a1203' },
+  { name: 'ม่วง', hex: '#a978ff', ink: '#190732' },
+  { name: 'ฟ้า', hex: '#38d7e8', ink: '#032429' },
+  { name: 'ชมพู', hex: '#ff78b4', ink: '#2e0b1d' },
+  { name: 'เทา', hex: '#9aa7b4', ink: '#10171d' },
+  { name: 'ขาว', hex: '#edf1ea', ink: '#141a16' },
+];
+const WHEEL_RING_OUTER = 92;
+const WHEEL_RING_INNER = 72;
+const WHEEL_MAX_HOLD_MS = 1300;
+// The same keeper twice running, now and then. Never is its own kind of wrong.
+const WHEEL_REPEAT_CHANCE = 0.04;
+
+function wheelPoint(angle: number, radius: number) {
+  const radians = ((angle - 90) * Math.PI) / 180;
+  return [100 + radius * Math.cos(radians), 100 + radius * Math.sin(radians)];
+}
+
+function wheelBandPath(index: number, total: number) {
+  const step = 360 / total;
+  const pad = Math.min(1.5, step * 0.055);
+  const from = index * step + pad;
+  const to = (index + 1) * step - pad;
+  const large = to - from > 180 ? 1 : 0;
+  const [ox1, oy1] = wheelPoint(from, WHEEL_RING_OUTER);
+  const [ox2, oy2] = wheelPoint(to, WHEEL_RING_OUTER);
+  const [ix2, iy2] = wheelPoint(to, WHEEL_RING_INNER);
+  const [ix1, iy1] = wheelPoint(from, WHEEL_RING_INNER);
+  return [
+    `M${ox1.toFixed(2)} ${oy1.toFixed(2)}`,
+    `A${WHEEL_RING_OUTER} ${WHEEL_RING_OUTER} 0 ${large} 1 ${ox2.toFixed(2)} ${oy2.toFixed(2)}`,
+    `L${ix2.toFixed(2)} ${iy2.toFixed(2)}`,
+    `A${WHEEL_RING_INNER} ${WHEEL_RING_INNER} 0 ${large} 0 ${ix1.toFixed(2)} ${iy1.toFixed(2)}`,
+    'Z',
+  ].join(' ');
+}
+
+function randomBelow(bound: number) {
+  if (bound <= 1) return 0;
+  // Plain % over the full range would favour the first few spots.
+  const limit = Math.floor(4294967296 / bound) * bound;
+  const slots = new Uint32Array(1);
+  let value = 0;
+  do {
+    crypto.getRandomValues(slots);
+    value = slots[0];
+  } while (value >= limit);
+  return value % bound;
+}
+
+function GoalkeeperWheelDialog({
+  tournament,
+  onUpdate,
+  onClose,
+}: {
+  tournament: Tournament;
+  onUpdate: (value: Tournament) => void;
+  onClose: () => void;
+}) {
+  const [teamId, setTeamId] = useState(tournament.teams[0]?.id ?? '');
+  const team =
+    tournament.teams.find((item) => item.id === teamId) ?? tournament.teams[0];
+  const present = team
+    ? team.players.filter((player) => !player.absentToday).slice(0, 10)
+    : [];
+  const namedPlayers = present.length >= 2;
+  const [standInCount, setStandInCount] = useState(6);
+  const total = Math.min(
+    10,
+    Math.max(2, namedPlayers ? present.length : standInCount),
+  );
+  const [winner, setWinner] = useState<number | null>(null);
+  const [spinning, setSpinning] = useState(false);
+  const orbitRef = useRef<SVGGElement | null>(null);
+  const ballRef = useRef<SVGGElement | null>(null);
+  const meterRef = useRef<SVGCircleElement | null>(null);
+  const rotationRef = useRef(0);
+  const ballRotationRef = useRef(0);
+  const bagRef = useRef<number[]>([]);
+  const lastRef = useRef(-1);
+  const holdRef = useRef<{ start: number; frame: number } | null>(null);
+  const settleTimerRef = useRef<number | null>(null);
+  const locked = Boolean(team?.gkRotationLocked);
+
+  const labelFor = (index: number) =>
+    namedPlayers
+      ? present[index]?.name.trim() || `คนที่ ${index + 1}`
+      : WHEEL_COLORS[index].name;
+
+  /* oxlint-disable react-hooks/exhaustive-deps, react/react-compiler -- a new line-up starts its own draw. */
+  useEffect(() => {
+    setWinner(null);
+    bagRef.current = [];
+    lastRef.current = -1;
+  }, [teamId, total]);
+  /* oxlint-enable react-hooks/exhaustive-deps, react/react-compiler */
+  useEffect(
+    () => () => {
+      if (settleTimerRef.current !== null)
+        window.clearTimeout(settleTimerRef.current);
+      if (holdRef.current) window.cancelAnimationFrame(holdRef.current.frame);
+    },
+    [],
+  );
+
+  function pickSpot() {
+    if (lastRef.current >= 0 && lastRef.current < total) {
+      if (randomBelow(1000) < WHEEL_REPEAT_CHANCE * 1000)
+        return lastRef.current;
+    }
+    if (!bagRef.current.length) {
+      const order = Array.from({ length: total }, (_, index) => index);
+      for (let index = total - 1; index > 0; index -= 1) {
+        const swap = randomBelow(index + 1);
+        [order[index], order[swap]] = [order[swap], order[index]];
+      }
+      // A fresh round never opens with whoever closed the last one.
+      if (total > 1 && order[0] === lastRef.current) {
+        const swap = 1 + randomBelow(total - 1);
+        [order[0], order[swap]] = [order[swap], order[0]];
+      }
+      bagRef.current = order;
+    }
+    return bagRef.current.shift() ?? 0;
+  }
+
+  function paintMeter(power: number) {
+    if (meterRef.current) {
+      meterRef.current.style.opacity = power > 0 ? '1' : '0';
+      meterRef.current.setAttribute(
+        'stroke-dasharray',
+        `${(power * 100).toFixed(1)} 100`,
+      );
+      meterRef.current.setAttribute(
+        'stroke',
+        power > 0.82 ? '#ffd23f' : '#31dd78',
+      );
+    }
+  }
+
+  // The press and every frame carry their own timestamp, so the hold is
+  // measured without reading the clock while rendering.
+  function startHold(start: number) {
+    if (spinning || holdRef.current) return;
+    const tick = (now: number) => {
+      if (!holdRef.current) return;
+      const power = Math.min(1, (now - start) / WHEEL_MAX_HOLD_MS);
+      paintMeter(power);
+      holdRef.current.frame = window.requestAnimationFrame(tick);
+    };
+    holdRef.current = { start, frame: window.requestAnimationFrame(tick) };
+  }
+
+  function endHold(end: number) {
+    const hold = holdRef.current;
+    if (!hold) return;
+    window.cancelAnimationFrame(hold.frame);
+    holdRef.current = null;
+    paintMeter(0);
+    // A quick tap still spins, with the least power behind it.
+    const power = Math.min(
+      1,
+      Math.max(0.12, (end - hold.start) / WHEEL_MAX_HOLD_MS),
+    );
+    spin(power);
+  }
+
+  function spin(power: number) {
+    const index = pickSpot();
+    const step = 360 / total;
+    const reduced = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    ).matches;
+    // Land anywhere inside the winning spot, so the same winner never looks
+    // like the same spin.
+    const jitter = (randomBelow(1000) / 1000 - 0.5) * step * 0.7;
+    const target = index * step + step / 2 + jitter;
+    const current = ((rotationRef.current % 360) + 360) % 360;
+    const turns = 3 + Math.round(power * 4);
+    const travel = turns * 360 + ((target - current + 360) % 360);
+    const duration = 2.9 + power * 1.9;
+    rotationRef.current += travel;
+    ballRotationRef.current += travel * 2.4;
+    setWinner(null);
+    setSpinning(true);
+    const easing = 'cubic-bezier(.08,.74,.12,1)';
+    if (orbitRef.current) {
+      orbitRef.current.style.transition = reduced
+        ? 'none'
+        : `transform ${duration}s ${easing}`;
+      orbitRef.current.style.transform = `rotate(${rotationRef.current}deg)`;
+    }
+    if (ballRef.current) {
+      ballRef.current.style.transition = reduced
+        ? 'none'
+        : `transform ${duration}s ${easing}`;
+      ballRef.current.style.transform = `rotate(${ballRotationRef.current}deg)`;
+    }
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (settleTimerRef.current !== null)
+        window.clearTimeout(settleTimerRef.current);
+      settleTimerRef.current = null;
+      lastRef.current = index;
+      setSpinning(false);
+      setWinner(index);
+      if (navigator.vibrate) navigator.vibrate([12, 40, 24]);
+    };
+    if (reduced || !orbitRef.current) {
+      settle();
+      return;
+    }
+    orbitRef.current.addEventListener('transitionend', settle, { once: true });
+    // A phone that sleeps or switches apps mid-spin never delivers that event,
+    // and the wheel would sit on "กำลังหมุน" for good.
+    settleTimerRef.current = window.setTimeout(settle, duration * 1000 + 300);
+  }
+
+  function applyQueue() {
+    if (winner === null || !team || locked) return;
+    const order = Array.from(
+      { length: total },
+      (_, step) => (winner + step) % total,
+    );
+    const standIns = namedPlayers
+      ? []
+      : order.map((index) => createPlayer(WHEEL_COLORS[index].name));
+    const players = namedPlayers
+      ? team.players
+      : [...team.players, ...standIns];
+    const queue = namedPlayers
+      ? order.map((index) => present[index].id)
+      : standIns.map((player) => player.id);
+    const rotation = [
+      ...queue,
+      ...players.map((player) => player.id).filter((id) => !queue.includes(id)),
+    ];
+    onUpdate(
+      assignGoalkeepers({
+        ...tournament,
+        teams: tournament.teams.map((item) =>
+          item.id === team.id
+            ? {
+                ...item,
+                players,
+                gkRotation: rotation,
+                gkCycleOrders: [rotation],
+              }
+            : item,
+        ),
+      }),
+    );
+    onClose();
+  }
+
+  const step = 360 / total;
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-[26px] bg-white p-4 sm:max-w-md">
+        <DialogHeader className="pr-8 text-left">
+          <DialogTitle className="text-lg font-black text-slate-950">
+            วงล้อเลือก GK
+          </DialogTitle>
+          <DialogDescription className="font-semibold leading-5 text-slate-500">
+            {namedPlayers
+              ? 'กดค้างให้ลูกบอลสะสมแรง ปล่อยแล้วลูกจะวิ่งรอบวง หยุดตรงใครคนนั้นเฝ้าเสาคนแรก'
+              : 'ทีมนี้ยังไม่มีรายชื่อ ให้ทุกคนยืนตามสี แล้วหมุนเลือกคนแรกได้เลย'}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-wrap gap-1.5">
+          {tournament.teams.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setTeamId(item.id)}
+              aria-pressed={item.id === team?.id}
+              disabled={spinning}
+              className={`flex min-h-9 items-center gap-1.5 rounded-xl border px-2.5 text-xs font-black ${
+                item.id === team?.id
+                  ? 'border-[#11823b] bg-[#e5f5e9] text-[#087632]'
+                  : 'border-slate-200 bg-white text-slate-500'
+              }`}
+            >
+              <TeamShirtIcon color={item.color} size="xs" />
+              {teamNameForDisplay(item)}
+            </button>
+          ))}
+        </div>
+
+        {!namedPlayers && (
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-slate-50 p-3">
+            <span className="text-sm font-black">
+              จำนวนคนในวง
+              <span className="block text-xs font-bold text-slate-400">
+                คนที่มาวันนี้
+              </span>
+            </span>
+            <NumberStepper
+              value={standInCount}
+              min={3}
+              max={10}
+              onChange={setStandInCount}
+              suffix="คน"
+            />
+          </div>
+        )}
+
+        <div className="relative overflow-hidden rounded-[24px] bg-[#0a1411] p-4">
+          <div className="relative mx-auto aspect-square w-[min(72vw,280px)]">
+            <svg viewBox="0 0 200 200" className="block h-full w-full">
+              <defs>
+                <radialGradient id="wheelBall" cx="34%" cy="28%" r="78%">
+                  <stop offset="0%" stopColor="#ffffff" />
+                  <stop offset="68%" stopColor="#f1f4ef" />
+                  <stop offset="100%" stopColor="#c9d1c9" />
+                </radialGradient>
+              </defs>
+              {Array.from({ length: total }, (_, index) => {
+                const color = WHEEL_COLORS[index];
+                const [x, y] = wheelPoint(
+                  index * step + step / 2,
+                  (WHEEL_RING_OUTER + WHEEL_RING_INNER) / 2,
+                );
+                const name = labelFor(index);
+                return (
+                  <g
+                    key={index}
+                    style={{
+                      opacity: winner === null || winner === index ? 1 : 0.38,
+                      transition: 'opacity 500ms ease',
+                    }}
+                  >
+                    <path d={wheelBandPath(index, total)} fill={color.hex} />
+                    <text
+                      x={x.toFixed(2)}
+                      y={y.toFixed(2)}
+                      fill={color.ink}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize={total > 8 ? 7.5 : 9}
+                      fontWeight={700}
+                    >
+                      {name.length > 7 ? `${name.slice(0, 6)}…` : name}
+                    </text>
+                  </g>
+                );
+              })}
+              <circle
+                ref={meterRef}
+                cx="100"
+                cy="100"
+                r="57"
+                fill="none"
+                stroke="#31dd78"
+                strokeWidth="3"
+                strokeLinecap="round"
+                pathLength={100}
+                strokeDasharray="0 100"
+                transform="rotate(-90 100 100)"
+                style={{ opacity: 0, transition: 'opacity 240ms ease' }}
+              />
+              <g ref={orbitRef} style={{ transformOrigin: '100px 100px' }}>
+                <g ref={ballRef} style={{ transformOrigin: '100px 44px' }}>
+                  <circle cx="100" cy="44" r="11" fill="url(#wheelBall)" />
+                  <path
+                    d="M100 37.4 L104.9 41 L103 46.8 H97 L95.1 41 Z"
+                    fill="#1b2a22"
+                  />
+                  <path
+                    d="M100 33 L100 37.4 M104.9 41 L109.4 39.6 M103 46.8 L105.6 51.4 M97 46.8 L94.4 51.4 M95.1 41 L90.6 39.6"
+                    stroke="#1b2a22"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    fill="none"
+                  />
+                </g>
+              </g>
+            </svg>
+            <div className="pointer-events-none absolute left-1/2 top-1/2 grid aspect-square w-[48%] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full px-2 text-center">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[.14em] text-[#8ba699]">
+                  {spinning
+                    ? 'กำลังหมุน'
+                    : winner === null
+                      ? 'พร้อมหมุน'
+                      : 'เฝ้าเสาคนแรก'}
+                </p>
+                <p
+                  className="text-base font-black leading-tight break-words"
+                  style={{
+                    color:
+                      winner === null ? '#ecf6ef' : WHEEL_COLORS[winner].hex,
+                  }}
+                >
+                  {spinning
+                    ? '…'
+                    : winner === null
+                      ? 'กดค้างที่ปุ่ม'
+                      : labelFor(winner)}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={spinning}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              startHold(event.timeStamp);
+            }}
+            onPointerUp={(event) => endHold(event.timeStamp)}
+            onPointerCancel={(event) => endHold(event.timeStamp)}
+            onPointerLeave={(event) => endHold(event.timeStamp)}
+            className="mt-3 h-13 w-full touch-none rounded-2xl bg-[#2bd47d] font-black text-[#04150b] active:scale-[.99] disabled:opacity-50"
+          >
+            {spinning ? 'กำลังหมุน…' : 'กดค้างแล้วปล่อย'}
+          </button>
+        </div>
+
+        {winner !== null && (
+          <div className="rounded-2xl bg-slate-50 p-3">
+            <p className="text-xs font-bold text-slate-400">
+              คิว GK ตามเข็มนาฬิกา
+            </p>
+            <ol className="mt-2 flex flex-wrap gap-1.5">
+              {Array.from({ length: total }, (_, position) => {
+                const at = (winner + position) % total;
+                return (
+                  <li
+                    key={at}
+                    className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ background: WHEEL_COLORS[at].hex }}
+                    />
+                    <span className="text-slate-400">{position + 1}.</span>
+                    {labelFor(at)}
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        )}
+
+        {locked && (
+          <p className="text-center text-xs font-bold text-amber-700">
+            คิว GK ของทีมนี้ถูกล็อกอยู่ ปลดล็อกที่หน้าทีมก่อนจึงจะใช้ผลได้
+          </p>
+        )}
+
+        <DialogFooter className="mx-0 mb-0 grid gap-2 border-0 bg-white p-0">
+          <Button
+            type="button"
+            onClick={applyQueue}
+            disabled={winner === null || locked}
+            className="h-12 w-full rounded-xl bg-[#11823b] font-black"
+          >
+            <Check />
+            {namedPlayers ? 'ใช้ลำดับนี้เป็นคิว GK' : 'ใช้ลำดับนี้ และสร้างผู้เล่นตามสี'}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            className="h-10 w-full rounded-xl font-black text-slate-500"
+          >
+            ปิด
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -4347,6 +4843,7 @@ export default function FootballApp() {
   // True for a few seconds after an update from another phone lands.
   const [remoteUpdateVisible, setRemoteUpdateVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [wheelOpen, setWheelOpen] = useState(false);
   // Keyed by the game it was computed for, so switching games never shows a
   // banner that belonged to the previous one while the new list loads.
   const [newerGameState, setNewerGameState] = useState<{
@@ -5456,6 +5953,7 @@ export default function FootballApp() {
                 refreshing={refreshing}
                 onRefresh={() => void refreshNow()}
                 onOpenAllGames={openAllGames}
+                onOpenWheel={() => setWheelOpen(true)}
               />
             )}
             {tournament && view === 'teams' && (
@@ -5551,6 +6049,13 @@ export default function FootballApp() {
           !['setup', 'match-detail', 'share', 'games'].includes(view) && (
             <BottomNavigation active={mainView} onChange={setView} />
           )}
+        {tournament && wheelOpen && (
+          <GoalkeeperWheelDialog
+            tournament={tournament}
+            onUpdate={applyTournament}
+            onClose={() => setWheelOpen(false)}
+          />
+        )}
         {notice && (
           <output className="fixed bottom-24 left-1/2 z-50 flex w-max max-w-[calc(100vw-32px)] -translate-x-1/2 items-center justify-center gap-2 rounded-2xl bg-slate-900 px-4 py-3 text-center text-sm leading-5 font-black break-words whitespace-normal text-white shadow-xl">
             <CircleCheck className="h-4 w-4 shrink-0 text-emerald-400" />
