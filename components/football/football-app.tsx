@@ -2372,19 +2372,20 @@ const WHEEL_RING_INNER = 72;
 const WHEEL_KICK_SPEED = 820;
 const WHEEL_TOP_SPEED = 1440;
 const WHEEL_RAMP = 1.8;
-// The run-down eases off rather than braking evenly: most of the ground goes
-// early and the last stretch creeps, which is how a ball on grass comes to
-// rest. Stopping evenly read as someone hitting pause.
-const WHEEL_COAST_BASE = 1.2;
-const WHEEL_COAST_PER_SPEED = 0.9;
-const WHEEL_MAX_COAST = 2.9;
+// A rolling ball loses speed at a steady rate, so the run-down does too —
+// shedding it quickly at first, as an eased curve does, looked nothing like
+// the speed it was spinning at. Steady braking only reads as gentle if it is
+// given room, hence a run-down of three to four seconds.
+const WHEEL_COAST_BASE = 2.3;
+const WHEEL_COAST_PER_SPEED = 1.3;
+const WHEEL_MAX_COAST = 4.2;
 // A ball rolling the inside of the ring turns far more than it travels.
 const WHEEL_ROLL = 3.4;
-// The cubic form of 1 - (1 - t)³, and the speed it leaves at, as a multiple
-// of its average. Matching the two keeps the run-down starting at exactly
-// the speed the ball was spinning.
-const WHEEL_BRAKE_EASING = 'cubic-bezier(0.333, 1, 0.667, 1)';
-const WHEEL_BRAKE_LEAD = 3;
+// The cubic form of 1 - (1 - t)², which is exactly constant deceleration, and
+// the speed it leaves at as a multiple of its average. Matching the two keeps
+// the run-down starting at exactly the speed the ball was spinning.
+const WHEEL_BRAKE_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
+const WHEEL_BRAKE_LEAD = 2;
 // The same keeper twice running, now and then. Never is its own kind of wrong.
 const WHEEL_REPEAT_CHANCE = 0.04;
 
@@ -2633,8 +2634,7 @@ function GoalkeeperWheelDialog({
   }
 
   // Let go and the ball runs down on its own, starting at exactly the speed it
-  // was spinning and easing off to nothing: quick at first, creeping at the
-  // end, no jolt either side.
+  // was spinning and losing it at a steady rate until it stops.
   function coast(speed: number) {
     const index = pickSpot();
     const step = 360 / total;
