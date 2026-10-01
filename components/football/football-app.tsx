@@ -2366,7 +2366,9 @@ const WHEEL_COLORS = [
 ];
 const WHEEL_RING_OUTER = 92;
 const WHEEL_RING_INNER = 72;
-const WHEEL_MAX_HOLD_MS = 1300;
+// Degrees per second at full tilt, and how fast it gets there.
+const WHEEL_TOP_SPEED = 1080;
+const WHEEL_SPIN_UP = 1500;
 // The same keeper twice running, now and then. Never is its own kind of wrong.
 const WHEEL_REPEAT_CHANCE = 0.04;
 
@@ -2430,6 +2432,7 @@ function GoalkeeperWheelDialog({
   );
   const [winner, setWinner] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
+  const [coasting, setCoasting] = useState(false);
   const orbitRef = useRef<SVGGElement | null>(null);
   const ballRef = useRef<SVGGElement | null>(null);
   const meterRef = useRef<SVGCircleElement | null>(null);
@@ -2437,7 +2440,13 @@ function GoalkeeperWheelDialog({
   const ballRotationRef = useRef(0);
   const bagRef = useRef<number[]>([]);
   const lastRef = useRef(-1);
-  const holdRef = useRef<{ start: number; frame: number } | null>(null);
+  const holdRef = useRef<{
+    start: number;
+    base: number;
+    ballBase: number;
+    speed: number;
+    frame: number;
+  } | null>(null);
   const settleTimerRef = useRef<number | null>(null);
   const locked = Boolean(team?.gkRotationLocked);
 
@@ -2457,7 +2466,8 @@ function GoalkeeperWheelDialog({
     () => () => {
       if (settleTimerRef.current !== null)
         window.clearTimeout(settleTimerRef.current);
-      if (holdRef.current) window.cancelAnimationFrame(holdRef.current.frame);
+      if (holdRef.current?.frame)
+        window.cancelAnimationFrame(holdRef.current.frame);
     },
     [],
   );
@@ -2484,47 +2494,81 @@ function GoalkeeperWheelDialog({
   }
 
   function paintMeter(power: number) {
-    if (meterRef.current) {
-      meterRef.current.style.opacity = power > 0 ? '1' : '0';
-      meterRef.current.setAttribute(
-        'stroke-dasharray',
-        `${(power * 100).toFixed(1)} 100`,
-      );
-      meterRef.current.setAttribute(
-        'stroke',
-        power > 0.82 ? '#f5b71b' : '#11823b',
-      );
-    }
+    if (!meterRef.current) return;
+    meterRef.current.style.opacity = power > 0.02 ? '1' : '0';
+    meterRef.current.setAttribute(
+      'stroke-dasharray',
+      `${(power * 100).toFixed(1)} 100`,
+    );
+    meterRef.current.setAttribute(
+      'stroke',
+      power > 0.92 ? '#f5b71b' : '#11823b',
+    );
   }
 
-  // The press and every frame carry their own timestamp, so the hold is
-  // measured without reading the clock while rendering.
-  function startHold(start: number) {
+  function paintWheel() {
+    if (orbitRef.current)
+      orbitRef.current.style.transform = `rotate(${rotationRef.current}deg)`;
+    if (ballRef.current)
+      ballRef.current.style.transform = `rotate(${ballRotationRef.current}deg)`;
+  }
+
+  // Holding spins the ball for real and winds it up, so a long hold is a long
+  // spin. Every frame carries its own timestamp, so nothing reads the clock
+  // while rendering.
+  function startHold() {
     if (spinning || holdRef.current) return;
+    setWinner(null);
+    setSpinning(true);
+    const base = rotationRef.current;
+    const ballBase = ballRotationRef.current;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      holdRef.current = { start: -1, base, ballBase, speed: 0, frame: 0 };
+      return;
+    }
+    if (orbitRef.current) orbitRef.current.style.transition = 'none';
+    if (ballRef.current) ballRef.current.style.transition = 'none';
+    // Angle comes from how long the finger has been down, not from adding up
+    // frames, so a frame the phone skips never costs the ball any ground.
     const tick = (now: number) => {
-      if (!holdRef.current) return;
-      const power = Math.min(1, (now - start) / WHEEL_MAX_HOLD_MS);
-      paintMeter(power);
-      holdRef.current.frame = window.requestAnimationFrame(tick);
+      const hold = holdRef.current;
+      if (!hold) return;
+      if (hold.start < 0) hold.start = now;
+      const held = (now - hold.start) / 1000;
+      const toTopSpeed = WHEEL_TOP_SPEED / WHEEL_SPIN_UP;
+      hold.speed = Math.min(WHEEL_TOP_SPEED, WHEEL_SPIN_UP * held);
+      const travelled =
+        held <= toTopSpeed
+          ? 0.5 * WHEEL_SPIN_UP * held * held
+          : 0.5 * WHEEL_TOP_SPEED * toTopSpeed +
+            WHEEL_TOP_SPEED * (held - toTopSpeed);
+      rotationRef.current = hold.base + travelled;
+      ballRotationRef.current = hold.ballBase + travelled * 2.4;
+      paintWheel();
+      paintMeter(hold.speed / WHEEL_TOP_SPEED);
+      hold.frame = window.requestAnimationFrame(tick);
     };
-    holdRef.current = { start, frame: window.requestAnimationFrame(tick) };
+    holdRef.current = {
+      start: -1,
+      base,
+      ballBase,
+      speed: 0,
+      frame: window.requestAnimationFrame(tick),
+    };
   }
 
-  function endHold(end: number) {
+  function endHold() {
     const hold = holdRef.current;
     if (!hold) return;
-    window.cancelAnimationFrame(hold.frame);
+    if (hold.frame) window.cancelAnimationFrame(hold.frame);
     holdRef.current = null;
     paintMeter(0);
-    // A quick tap still spins, with the least power behind it.
-    const power = Math.min(
-      1,
-      Math.max(0.12, (end - hold.start) / WHEEL_MAX_HOLD_MS),
-    );
-    spin(power);
+    coast(hold.speed / WHEEL_TOP_SPEED);
   }
 
-  function spin(power: number) {
+  // Let go and the ball runs down to a stop. The faster it was going, the
+  // longer it takes and the further it travels.
+  function coast(power: number) {
     const index = pickSpot();
     const step = 360 / total;
     const reduced = window.matchMedia(
@@ -2535,26 +2579,22 @@ function GoalkeeperWheelDialog({
     const jitter = (randomBelow(1000) / 1000 - 0.5) * step * 0.7;
     const target = index * step + step / 2 + jitter;
     const current = ((rotationRef.current % 360) + 360) % 360;
-    const turns = 3 + Math.round(power * 4);
+    const turns = 1 + Math.round(power * 3);
     const travel = turns * 360 + ((target - current + 360) % 360);
-    const duration = 2.9 + power * 1.9;
+    const duration = 1.9 + power * 2.1;
     rotationRef.current += travel;
     ballRotationRef.current += travel * 2.4;
-    setWinner(null);
-    setSpinning(true);
-    const easing = 'cubic-bezier(.08,.74,.12,1)';
-    if (orbitRef.current) {
+    setCoasting(true);
+    const easing = 'cubic-bezier(.12,.68,.16,1)';
+    if (orbitRef.current)
       orbitRef.current.style.transition = reduced
         ? 'none'
         : `transform ${duration}s ${easing}`;
-      orbitRef.current.style.transform = `rotate(${rotationRef.current}deg)`;
-    }
-    if (ballRef.current) {
+    if (ballRef.current)
       ballRef.current.style.transition = reduced
         ? 'none'
         : `transform ${duration}s ${easing}`;
-      ballRef.current.style.transform = `rotate(${ballRotationRef.current}deg)`;
-    }
+    paintWheel();
     let settled = false;
     const settle = () => {
       if (settled) return;
@@ -2564,6 +2604,7 @@ function GoalkeeperWheelDialog({
       settleTimerRef.current = null;
       lastRef.current = index;
       setSpinning(false);
+      setCoasting(false);
       setWinner(index);
       if (navigator.vibrate) navigator.vibrate([12, 40, 24]);
     };
@@ -2624,8 +2665,8 @@ function GoalkeeperWheelDialog({
           </DialogTitle>
           <DialogDescription className="font-semibold leading-5 text-slate-500">
             {namedPlayers
-              ? 'กดค้างให้ลูกบอลสะสมแรง ปล่อยแล้วลูกจะวิ่งรอบวง หยุดตรงใครคนนั้นเฝ้าเสาคนแรก'
-              : 'ทีมนี้ยังไม่มีรายชื่อ ให้ทุกคนยืนตามสี แล้วหมุนเลือกคนแรกได้เลย'}
+              ? 'กดค้างให้ลูกบอลวิ่งรอบวง ยิ่งกดนานยิ่งเร็ว ปล่อยแล้วจะค่อยๆ ช้าลงจนหยุดตรงคนที่ได้เฝ้าเสาคนแรก'
+              : 'ทีมนี้ยังไม่มีรายชื่อ ให้ทุกคนยืนตามสี แล้วกดค้างให้ลูกบอลวิ่งได้เลย'}
           </DialogDescription>
         </DialogHeader>
 
@@ -2689,19 +2730,25 @@ function GoalkeeperWheelDialog({
                 // flipped to keep every name the right way up.
                 const upright = middle > 90 && middle < 270 ? 180 : 0;
                 const name = labelFor(index);
+                // Before a spin these are the standing spots; afterwards they
+                // are the goalkeeper order, counted from whoever won.
+                const place =
+                  winner === null
+                    ? index + 1
+                    : ((index - winner + total) % total) + 1;
+                const [numberX, numberY] = wheelPoint(middle, 64);
+                const faded = winner !== null && winner !== index;
                 return (
-                  <g
-                    key={index}
-                    style={{
-                      opacity: winner === null || winner === index ? 1 : 0.38,
-                      transition: 'opacity 500ms ease',
-                    }}
-                  >
+                  <g key={index}>
                     <path
                       d={wheelBandPath(index, total)}
                       fill={color.hex}
                       stroke="rgba(15,35,22,.14)"
                       strokeWidth="0.8"
+                      style={{
+                        opacity: faded ? 0.4 : 1,
+                        transition: 'opacity 500ms ease',
+                      }}
                     />
                     <text
                       x={x.toFixed(2)}
@@ -2712,8 +2759,35 @@ function GoalkeeperWheelDialog({
                       fontSize={total > 8 ? 7.5 : 8.5}
                       fontWeight={700}
                       transform={`rotate(${(middle + upright).toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)})`}
+                      style={{
+                        opacity: faded ? 0.5 : 1,
+                        transition: 'opacity 500ms ease',
+                      }}
                     >
                       {name.length > 11 ? `${name.slice(0, 10)}…` : name}
+                    </text>
+                    <circle
+                      cx={numberX.toFixed(2)}
+                      cy={numberY.toFixed(2)}
+                      r="6"
+                      fill={
+                        place === 1 && winner !== null ? '#11823b' : '#ffffff'
+                      }
+                      stroke="rgba(15,35,22,.16)"
+                      strokeWidth="0.8"
+                    />
+                    <text
+                      x={numberX.toFixed(2)}
+                      y={numberY.toFixed(2)}
+                      fill={
+                        place === 1 && winner !== null ? '#ffffff' : '#4b5c52'
+                      }
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fontSize="7"
+                      fontWeight={800}
+                    >
+                      {place}
                     </text>
                   </g>
                 );
@@ -2791,17 +2865,23 @@ function GoalkeeperWheelDialog({
 
           <button
             type="button"
-            disabled={spinning}
+            // Never disabled mid-hold: a disabled button stops sending the
+            // release, and the ball would spin on with nothing to stop it.
+            disabled={coasting}
             onPointerDown={(event) => {
               event.preventDefault();
-              startHold(event.timeStamp);
+              startHold();
             }}
-            onPointerUp={(event) => endHold(event.timeStamp)}
-            onPointerCancel={(event) => endHold(event.timeStamp)}
-            onPointerLeave={(event) => endHold(event.timeStamp)}
+            onPointerUp={endHold}
+            onPointerCancel={endHold}
+            onPointerLeave={endHold}
             className="mt-3 h-13 w-full touch-none rounded-xl bg-[#11823b] font-black text-white active:scale-[.99] disabled:opacity-50"
           >
-            {spinning ? 'กำลังหมุน…' : 'กดค้างแล้วปล่อย'}
+            {coasting
+              ? 'กำลังหมุน…'
+              : spinning
+                ? 'ปล่อยเพื่อหยุด'
+                : 'กดค้างให้ลูกบอลหมุน'}
           </button>
         </div>
 
