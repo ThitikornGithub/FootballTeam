@@ -2372,14 +2372,19 @@ const WHEEL_RING_INNER = 72;
 const WHEEL_KICK_SPEED = 820;
 const WHEEL_TOP_SPEED = 1440;
 const WHEEL_RAMP = 1.8;
-const WHEEL_BRAKE = 600;
-const WHEEL_MAX_COAST = 3;
-const WHEEL_SETTLE_DEGREES = 5;
-const WHEEL_SETTLE_MS = 320;
+// The run-down eases off rather than braking evenly: most of the ground goes
+// early and the last stretch creeps, which is how a ball on grass comes to
+// rest. Stopping evenly read as someone hitting pause.
+const WHEEL_COAST_BASE = 1.2;
+const WHEEL_COAST_PER_SPEED = 0.9;
+const WHEEL_MAX_COAST = 2.9;
 // A ball rolling the inside of the ring turns far more than it travels.
 const WHEEL_ROLL = 3.4;
-// Exactly constant deceleration: the cubic form of 1 - (1 - t)².
-const WHEEL_BRAKE_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
+// The cubic form of 1 - (1 - t)³, and the speed it leaves at, as a multiple
+// of its average. Matching the two keeps the run-down starting at exactly
+// the speed the ball was spinning.
+const WHEEL_BRAKE_EASING = 'cubic-bezier(0.333, 1, 0.667, 1)';
+const WHEEL_BRAKE_LEAD = 3;
 // The same keeper twice running, now and then. Never is its own kind of wrong.
 const WHEEL_REPEAT_CHANCE = 0.04;
 
@@ -2627,10 +2632,9 @@ function GoalkeeperWheelDialog({
     coast(hold.speed);
   }
 
-  // Let go and the ball brakes at a steady rate from the speed it had, so the
-  // run-down starts exactly as fast as the spin was going. It rolls a few
-  // degrees past its spot and rocks back, which is how a ball beds in; ending
-  // dead on the mark read as someone hitting pause.
+  // Let go and the ball runs down on its own, starting at exactly the speed it
+  // was spinning and easing off to nothing: quick at first, creeping at the
+  // end, no jolt either side.
   function coast(speed: number) {
     const index = pickSpot();
     const step = 360 / total;
@@ -2643,22 +2647,26 @@ function GoalkeeperWheelDialog({
     const jitter = (randomBelow(1000) / 1000 - 0.5) * step * 0.6;
     const target = index * step + step / 2 + jitter;
     const current = ((rotationRef.current % 360) + 360) % 360;
-    // How far it would run on its own, then on to the next time that lands on
-    // the winning spot.
-    const freeRun = (launch * launch) / (2 * WHEEL_BRAKE);
+    // Roughly how long this speed deserves to run, turned into the ground it
+    // covers, then on to the next time that lands on the winning spot.
+    const wanted =
+      WHEEL_COAST_BASE +
+      WHEEL_COAST_PER_SPEED * Math.min(1, launch / WHEEL_TOP_SPEED);
+    const freeRun = (launch * wanted) / WHEEL_BRAKE_LEAD;
     const travel =
       freeRun + ((((target - current - freeRun) % 360) + 360) % 360);
-    // Constant braking covers its ground at half the starting speed.
-    const duration = Math.min(WHEEL_MAX_COAST, (2 * travel) / launch);
-    const landing = rotationRef.current + travel;
-    rotationRef.current = landing + WHEEL_SETTLE_DEGREES;
-    ballRotationRef.current += (travel + WHEEL_SETTLE_DEGREES) * WHEEL_ROLL;
+    const duration = Math.min(
+      WHEEL_MAX_COAST,
+      (WHEEL_BRAKE_LEAD * travel) / launch,
+    );
+    rotationRef.current += travel;
+    ballRotationRef.current += travel * WHEEL_ROLL;
     setCoasting(true);
-    const brake = reduced
+    const runDown = reduced
       ? 'none'
       : `transform ${duration.toFixed(2)}s ${WHEEL_BRAKE_EASING}`;
-    if (orbitRef.current) orbitRef.current.style.transition = brake;
-    if (ballRef.current) ballRef.current.style.transition = brake;
+    if (orbitRef.current) orbitRef.current.style.transition = runDown;
+    if (ballRef.current) ballRef.current.style.transition = runDown;
     paintWheel();
 
     let settled = false;
@@ -2674,34 +2682,14 @@ function GoalkeeperWheelDialog({
       setWinner(index);
       if (navigator.vibrate) navigator.vibrate([12, 40, 24]);
     };
-
-    let rocked = false;
-    const rockBack = () => {
-      if (settled || rocked) return;
-      rocked = true;
-      if (settleTimerRef.current !== null)
-        window.clearTimeout(settleTimerRef.current);
-      const ease = `transform ${WHEEL_SETTLE_MS}ms cubic-bezier(0.33, 1, 0.68, 1)`;
-      rotationRef.current = landing;
-      ballRotationRef.current -= WHEEL_SETTLE_DEGREES * WHEEL_ROLL;
-      if (orbitRef.current) orbitRef.current.style.transition = ease;
-      if (ballRef.current) ballRef.current.style.transition = ease;
-      paintWheel();
-      settleTimerRef.current = window.setTimeout(settle, WHEEL_SETTLE_MS + 60);
-    };
-
     if (reduced || !orbitRef.current) {
-      rotationRef.current = landing;
-      paintWheel();
       settle();
       return;
     }
-    orbitRef.current.addEventListener('transitionend', rockBack, {
-      once: true,
-    });
+    orbitRef.current.addEventListener('transitionend', settle, { once: true });
     // A phone that sleeps or switches apps mid-spin never delivers that event,
     // and the wheel would sit on "กำลังหมุน" for good.
-    settleTimerRef.current = window.setTimeout(rockBack, duration * 1000 + 300);
+    settleTimerRef.current = window.setTimeout(settle, duration * 1000 + 300);
   }
 
   function applyQueue() {
