@@ -2,7 +2,6 @@
 
 import {
   CalendarDays,
-  CalendarRange,
   Check,
   ChevronRight,
   CircleAlert,
@@ -1287,22 +1286,12 @@ function HomeScreen({
     tournament.startTime,
     tournament.availableTimeMinutes,
   );
+  // Teams and the schedule already sit in the bottom bar, so these shortcuts
+  // are for what the group reaches for at the pitch instead.
   const actions = [
-    {
-      label: 'ทีม / คิว GK',
-      icon: Users,
-      view: 'teams' as AppView,
-    },
-    {
-      label: 'ตารางแข่ง',
-      icon: CalendarRange,
-      view: 'schedule' as AppView,
-    },
-    {
-      label: 'แชร์',
-      icon: Share2,
-      view: 'share' as AppView,
-    },
+    { label: 'คัดลอกลิงก์', icon: Copy, onPress: onCopyLink },
+    { label: 'สุ่ม GK', icon: Shuffle, onPress: onOpenWheel },
+    { label: 'แชร์ตาราง', icon: Share2, onPress: () => onNavigate('share') },
   ];
   return (
     <>
@@ -1401,10 +1390,11 @@ function HomeScreen({
           </div>
         )}
         <section className="grid grid-cols-3 gap-2">
-          {actions.map(({ label, icon: Icon, view }) => (
+          {actions.map(({ label, icon: Icon, onPress }) => (
             <button
               key={label}
-              onClick={() => onNavigate(view)}
+              type="button"
+              onClick={onPress}
               className="flex min-h-16 items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm active:scale-[.98]"
             >
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]">
@@ -1416,24 +1406,6 @@ function HomeScreen({
             </button>
           ))}
         </section>
-        {gameId && (
-          <button
-            type="button"
-            onClick={onCopyLink}
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-[#9dd2ab] bg-[#eef9f1] text-sm font-black text-[#087632] active:scale-[.99]"
-          >
-            <Copy className="h-4 w-4" />
-            คัดลอกลิงก์เกมให้เพื่อน
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={onOpenWheel}
-          className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm font-black text-[#087632] shadow-sm active:scale-[.99]"
-        >
-          <Shuffle className="h-4 w-4" />
-          สุ่ม GK ด้วยวงล้อ
-        </button>
         <section>
           <div className="mb-3 flex items-end justify-between">
             <div>
@@ -2705,10 +2677,15 @@ function GoalkeeperWheelDialog({
               </defs>
               {Array.from({ length: total }, (_, index) => {
                 const color = WHEEL_COLORS[index];
+                const middle = index * step + step / 2;
                 const [x, y] = wheelPoint(
-                  index * step + step / 2,
+                  middle,
                   (WHEEL_RING_OUTER + WHEEL_RING_INNER) / 2,
                 );
+                // Names follow the ring instead of lying flat across it, so a
+                // long one stays inside its own band, and the lower half is
+                // flipped to keep every name the right way up.
+                const upright = middle > 90 && middle < 270 ? 180 : 0;
                 const name = labelFor(index);
                 return (
                   <g
@@ -2730,10 +2707,11 @@ function GoalkeeperWheelDialog({
                       fill={color.ink}
                       textAnchor="middle"
                       dominantBaseline="central"
-                      fontSize={total > 8 ? 7.5 : 9}
+                      fontSize={total > 8 ? 7.5 : 8.5}
                       fontWeight={700}
+                      transform={`rotate(${(middle + upright).toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)})`}
                     >
-                      {name.length > 7 ? `${name.slice(0, 6)}…` : name}
+                      {name.length > 11 ? `${name.slice(0, 10)}…` : name}
                     </text>
                   </g>
                 );
@@ -2762,15 +2740,23 @@ function GoalkeeperWheelDialog({
                 >
                   <circle cx="100" cy="44" r="11" fill="url(#wheelBall)" />
                   <path
-                    d="M100 37.4 L104.9 41 L103 46.8 H97 L95.1 41 Z"
-                    fill="#1b2a22"
+                    d="M100 39.8 L103.99 42.7 L102.47 47.4 L97.53 47.4 L96.01 42.7 Z"
+                    fill="#1f2b24"
                   />
                   <path
-                    d="M100 33 L100 37.4 M104.9 41 L109.4 39.6 M103 46.8 L105.6 51.4 M97 46.8 L94.4 51.4 M95.1 41 L90.6 39.6"
-                    stroke="#1b2a22"
-                    strokeWidth="1.5"
+                    d="M100 39.8 L100 34.5 M103.99 42.7 L109.03 41.06 M102.47 47.4 L105.59 51.69 M97.53 47.4 L94.41 51.69 M96.01 42.7 L90.97 41.06"
+                    stroke="#1f2b24"
+                    strokeWidth="1.1"
                     strokeLinecap="round"
                     fill="none"
+                  />
+                  <circle
+                    cx="100"
+                    cy="44"
+                    r="11"
+                    fill="none"
+                    stroke="rgba(20,32,25,.35)"
+                    strokeWidth="0.9"
                   />
                 </g>
               </g>
@@ -5899,8 +5885,11 @@ export default function FootballApp() {
       </main>
     );
   return (
-    <main className="h-dvh overflow-hidden bg-[#edf3ee] text-slate-950 sm:h-auto sm:min-h-dvh sm:overflow-visible sm:py-7">
-      <div className="relative mx-auto flex h-full w-full max-w-[480px] flex-col overflow-hidden bg-[#f8faf8] shadow-[0_22px_70px_rgba(15,45,29,.15)] sm:h-auto sm:min-h-[844px] sm:rounded-[32px] sm:border sm:border-white">
+    <main className="h-dvh overflow-hidden bg-[#edf3ee] text-slate-950 sm:grid sm:place-items-center sm:py-7">
+      {/* The card is the scroller on every size. Letting it grow past a desktop
+          window instead left the wheel trapped: the content area holds its
+          overscroll, so hovering the app scrolled nothing at all. */}
+      <div className="relative mx-auto flex h-full w-full max-w-[480px] flex-col overflow-hidden bg-[#f8faf8] shadow-[0_22px_70px_rgba(15,45,29,.15)] sm:h-[min(844px,calc(100dvh-56px))] sm:rounded-[32px] sm:border sm:border-white">
         <RemoteUpdateContext.Provider value={remoteUpdateVisible}>
           <div
             ref={contentScrollRef}
