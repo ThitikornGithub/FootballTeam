@@ -2366,9 +2366,18 @@ const WHEEL_COLORS = [
 ];
 const WHEEL_RING_OUTER = 92;
 const WHEEL_RING_INNER = 72;
-// Degrees per second at full tilt, and how fast it gets there.
+// Degrees per second at full tilt, how fast it gets there, and how hard it
+// brakes once the finger lifts. Braking is constant, the way a rolling ball
+// runs down, and these numbers put a full-speed stop at about two seconds.
 const WHEEL_TOP_SPEED = 1080;
 const WHEEL_SPIN_UP = 1500;
+const WHEEL_BRAKE = 620;
+const WHEEL_NUDGE_SPEED = 430;
+const WHEEL_MAX_COAST = 2.8;
+// A ball rolling the inside of the ring turns far more than it travels.
+const WHEEL_ROLL = 3.4;
+// Exactly constant deceleration: the cubic form of 1 - (1 - t)².
+const WHEEL_BRAKE_EASING = 'cubic-bezier(0.333, 0.667, 0.667, 1)';
 // The same keeper twice running, now and then. Never is its own kind of wrong.
 const WHEEL_REPEAT_CHANCE = 0.04;
 
@@ -2395,6 +2404,48 @@ function wheelBandPath(index: number, total: number) {
     'Z',
   ].join(' ');
 }
+
+// The ball's markings: a pentagon at the centre, five more straddling the
+// edge so only their inner halves show, and the seams between them. Drawn
+// around (0, 0) so the ball can be placed with one translate.
+const WHEEL_BALL_R = 12;
+function ballMarkings() {
+  const corners = (radius: number, turn: number, centre = [0, 0]) =>
+    Array.from({ length: 5 }, (_, index) => {
+      const angle = ((-90 + turn + index * 72) * Math.PI) / 180;
+      return [
+        centre[0] + radius * Math.cos(angle),
+        centre[1] + radius * Math.sin(angle),
+      ];
+    });
+  const path = (points: number[][]) =>
+    `${points
+      .map(
+        ([x, y], index) =>
+          `${index ? 'L' : 'M'}${x.toFixed(2)} ${y.toFixed(2)}`,
+      )
+      .join(' ')} Z`;
+  const middle = corners(4, 0);
+  // Each edge patch sits a little past the rim, so only a cap of it shows and
+  // the seams stop short of it: patches with white between them, not a star.
+  const rim = Array.from({ length: 5 }, (_, index) => {
+    const angle = ((-90 + 36 + index * 72) * Math.PI) / 180;
+    const at = [
+      (WHEEL_BALL_R + 2.1) * Math.cos(angle),
+      (WHEEL_BALL_R + 2.1) * Math.sin(angle),
+    ];
+    return path(corners(4.4, 216 + index * 72, at));
+  });
+  const seams = middle
+    .map(([x, y]) => {
+      const angle = Math.atan2(y, x);
+      const reach = WHEEL_BALL_R - 2.8;
+      return `M${x.toFixed(2)} ${y.toFixed(2)} L${(reach * Math.cos(angle)).toFixed(2)} ${(reach * Math.sin(angle)).toFixed(2)}`;
+    })
+    .join(' ');
+  return { middle: path(middle), rim: rim.join(' '), seams };
+}
+const WHEEL_BALL = ballMarkings();
 
 function randomBelow(bound: number) {
   if (bound <= 1) return 0;
@@ -2543,7 +2594,7 @@ function GoalkeeperWheelDialog({
           : 0.5 * WHEEL_TOP_SPEED * toTopSpeed +
             WHEEL_TOP_SPEED * (held - toTopSpeed);
       rotationRef.current = hold.base + travelled;
-      ballRotationRef.current = hold.ballBase + travelled * 2.4;
+      ballRotationRef.current = hold.ballBase + travelled * WHEEL_ROLL;
       paintWheel();
       paintMeter(hold.speed / WHEEL_TOP_SPEED);
       hold.frame = window.requestAnimationFrame(tick);
@@ -2563,37 +2614,42 @@ function GoalkeeperWheelDialog({
     if (hold.frame) window.cancelAnimationFrame(hold.frame);
     holdRef.current = null;
     paintMeter(0);
-    coast(hold.speed / WHEEL_TOP_SPEED);
+    coast(hold.speed);
   }
 
-  // Let go and the ball runs down to a stop. The faster it was going, the
-  // longer it takes and the further it travels.
-  function coast(power: number) {
+  // Let go and the ball brakes at a steady rate from the speed it had, so the
+  // run-down starts exactly as fast as the spin was going.
+  function coast(speed: number) {
     const index = pickSpot();
     const step = 360 / total;
     const reduced = window.matchMedia(
       '(prefers-reduced-motion: reduce)',
     ).matches;
+    // A tap with no hold still gets a push, or it would crawl to a stop.
+    const launch = Math.max(speed, WHEEL_NUDGE_SPEED);
     // Land anywhere inside the winning spot, so the same winner never looks
     // like the same spin.
     const jitter = (randomBelow(1000) / 1000 - 0.5) * step * 0.7;
     const target = index * step + step / 2 + jitter;
     const current = ((rotationRef.current % 360) + 360) % 360;
-    const turns = 1 + Math.round(power * 3);
-    const travel = turns * 360 + ((target - current + 360) % 360);
-    const duration = 1.9 + power * 2.1;
+    // How far it would run on its own, then on to the next time that lands on
+    // the winning spot.
+    const freeRun = (launch * launch) / (2 * WHEEL_BRAKE);
+    const travel =
+      freeRun + ((((target - current - freeRun) % 360) + 360) % 360);
+    // Constant braking covers its ground at half the starting speed.
+    const duration = Math.min(WHEEL_MAX_COAST, (2 * travel) / launch);
     rotationRef.current += travel;
-    ballRotationRef.current += travel * 2.4;
+    ballRotationRef.current += travel * WHEEL_ROLL;
     setCoasting(true);
-    const easing = 'cubic-bezier(.12,.68,.16,1)';
     if (orbitRef.current)
       orbitRef.current.style.transition = reduced
         ? 'none'
-        : `transform ${duration}s ${easing}`;
+        : `transform ${duration.toFixed(2)}s ${WHEEL_BRAKE_EASING}`;
     if (ballRef.current)
       ballRef.current.style.transition = reduced
         ? 'none'
-        : `transform ${duration}s ${easing}`;
+        : `transform ${duration.toFixed(2)}s ${WHEEL_BRAKE_EASING}`;
     paintWheel();
     let settled = false;
     const settle = () => {
@@ -2712,6 +2768,9 @@ function GoalkeeperWheelDialog({
           <div className="relative mx-auto aspect-square w-[min(72vw,280px)]">
             <svg viewBox="0 0 200 200" className="block h-full w-full">
               <defs>
+                <clipPath id="wheelBallClip">
+                  <circle r={WHEEL_BALL_R} />
+                </clipPath>
                 <radialGradient id="wheelBall" cx="34%" cy="28%" r="78%">
                   <stop offset="0%" stopColor="#ffffff" />
                   <stop offset="68%" stopColor="#f1f4ef" />
@@ -2814,26 +2873,26 @@ function GoalkeeperWheelDialog({
                     filter: 'drop-shadow(0 1px 2px rgba(16,35,25,.35))',
                   }}
                 >
-                  <circle cx="100" cy="44" r="11" fill="url(#wheelBall)" />
-                  <path
-                    d="M100 39.8 L103.99 42.7 L102.47 47.4 L97.53 47.4 L96.01 42.7 Z"
-                    fill="#1f2b24"
-                  />
-                  <path
-                    d="M100 39.8 L100 34.5 M103.99 42.7 L109.03 41.06 M102.47 47.4 L105.59 51.69 M97.53 47.4 L94.41 51.69 M96.01 42.7 L90.97 41.06"
-                    stroke="#1f2b24"
-                    strokeWidth="1.1"
-                    strokeLinecap="round"
-                    fill="none"
-                  />
-                  <circle
-                    cx="100"
-                    cy="44"
-                    r="11"
-                    fill="none"
-                    stroke="rgba(20,32,25,.35)"
-                    strokeWidth="0.9"
-                  />
+                  <g transform="translate(100 44)">
+                    <circle r={WHEEL_BALL_R} fill="url(#wheelBall)" />
+                    <g clipPath="url(#wheelBallClip)" fill="#1f2b24">
+                      <path d={WHEEL_BALL.middle} />
+                      <path d={WHEEL_BALL.rim} />
+                    </g>
+                    <path
+                      d={WHEEL_BALL.seams}
+                      stroke="#1f2b24"
+                      strokeWidth="0.8"
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                    <circle
+                      r={WHEEL_BALL_R}
+                      fill="none"
+                      stroke="rgba(20,32,25,.4)"
+                      strokeWidth="0.9"
+                    />
+                  </g>
                 </g>
               </g>
             </svg>
