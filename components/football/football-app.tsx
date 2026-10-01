@@ -148,6 +148,7 @@ import {
   saveSharedGame,
 } from '@/lib/football-data-api';
 import { parseTournament } from '@/lib/football-schema';
+import { fixtureSelectionChanged } from '@/lib/football-settings';
 import {
   canonicalJson,
   describeUnsavedChanges,
@@ -2353,17 +2354,193 @@ function TeamDetailScreen({
   );
 }
 
+function QuickScoreDialog({
+  tournament,
+  match,
+  onUpdate,
+  onClose,
+  onOpenDetail,
+}: {
+  tournament: Tournament;
+  match: Match;
+  onUpdate: (value: Tournament) => void;
+  onClose: () => void;
+  onOpenDetail: () => void;
+}) {
+  const displayMatch = getMatchDisplay(tournament, match);
+  const teamA = tournament.teams.find(
+    (team) => team.id === displayMatch.teamAId,
+  )!;
+  const teamB = tournament.teams.find(
+    (team) => team.id === displayMatch.teamBId,
+  )!;
+  const [scoreA, setScoreA] = useState(String(displayMatch.teamAScore ?? 0));
+  const [scoreB, setScoreB] = useState(String(displayMatch.teamBScore ?? 0));
+  const previousStatusRef = useRef(match.status);
+  const normalizedScoreA = Number.parseInt(scoreA, 10) || 0;
+  const normalizedScoreB = Number.parseInt(scoreB, 10) || 0;
+  const hasScorerOverflow = [
+    { teamId: displayMatch.teamAId, score: normalizedScoreA },
+    { teamId: displayMatch.teamBId, score: normalizedScoreB },
+  ].some(
+    (side) =>
+      (match.scorers ?? [])
+        .filter((scorer) => scorer.teamId === side.teamId)
+        .reduce((total, scorer) => total + scorer.goals, 0) > side.score,
+  );
+
+  /* oxlint-disable react/react-compiler -- live scores can be changed from another device while the dialog is open. */
+  useEffect(() => {
+    // Live drafts also change on other devices. Follow them unless this field
+    // has just been cleared so the user can type a replacement number.
+    // If another device finishes this match, replace the live draft with its
+    // official result before offering the finished-result edit action.
+    const becameFinished =
+      previousStatusRef.current !== 'finished' && match.status === 'finished';
+    previousStatusRef.current = match.status;
+    if (match.status === 'finished') {
+      if (becameFinished) {
+        setScoreA(String(displayMatch.teamAScore ?? 0));
+        setScoreB(String(displayMatch.teamBScore ?? 0));
+      }
+      return;
+    }
+    setScoreA((current) =>
+      current === '' ? current : String(displayMatch.teamAScore ?? 0),
+    );
+    setScoreB((current) =>
+      current === '' ? current : String(displayMatch.teamBScore ?? 0),
+    );
+  }, [match.status, displayMatch.teamAScore, displayMatch.teamBScore]);
+  /* oxlint-enable react/react-compiler */
+
+  function updateDraftScore(team: 'a' | 'b', value: string) {
+    if (team === 'a') setScoreA(value);
+    else setScoreB(value);
+    if (value === '' || match.status === 'finished') return;
+    onUpdate(
+      setMatchScore(
+        tournament,
+        match.id,
+        ...matchScoresInStoredOrder(
+          tournament,
+          displayMatch,
+          team === 'a' ? Number.parseInt(value, 10) || 0 : normalizedScoreA,
+          team === 'b' ? Number.parseInt(value, 10) || 0 : normalizedScoreB,
+        ),
+      ),
+    );
+  }
+
+  function saveScore() {
+    if (hasScorerOverflow) return;
+    const [storedA, storedB] = matchScoresInStoredOrder(
+      tournament,
+      displayMatch,
+      normalizedScoreA,
+      normalizedScoreB,
+    );
+    if (match.status === 'current') {
+      onUpdate(finishMatchWithScore(tournament, match.id, storedA, storedB));
+    } else if (match.status === 'finished') {
+      onUpdate(setMatchScore(tournament, match.id, storedA, storedB));
+    } else {
+      onUpdate(
+        setMatchStatus(
+          setMatchScore(tournament, match.id, storedA, storedB),
+          match.id,
+          'current',
+        ),
+      );
+      return;
+    }
+    onClose();
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-[24px] bg-white p-4 sm:max-w-md">
+        <DialogHeader className="pr-8 text-left">
+          <DialogTitle className="text-lg font-black text-slate-950">
+            กรอกสกอร์ Match {match.matchNumber}
+          </DialogTitle>
+          <DialogDescription className="font-semibold text-slate-500">
+            {match.status === 'finished'
+              ? 'แก้ผลที่บันทึกไว้ แล้วกดบันทึกสกอร์ใหม่'
+              : match.status === 'current'
+                ? 'สกอร์ระหว่างแข่งเก็บอัตโนมัติ กดจบเกมเมื่อแข่งเสร็จ'
+                : 'ใส่สกอร์และเริ่มแมตช์นี้ หรือเปิดรายละเอียดเพิ่มเติม'}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-1 gap-2 min-[370px]:grid-cols-2">
+          <ScorePicker
+            label={matchTeamLabel(tournament, teamA)}
+            color={teamA.color}
+            score={scoreA}
+            onChange={(value) => updateDraftScore('a', value)}
+          />
+          <ScorePicker
+            label={matchTeamLabel(tournament, teamB)}
+            color={teamB.color}
+            score={scoreB}
+            onChange={(value) => updateDraftScore('b', value)}
+          />
+        </div>
+        {hasScorerOverflow && (
+          <p className="text-xs font-bold text-red-600">
+            ผู้ทำประตูรวมมากกว่าสกอร์ กรุณาแก้ในรายละเอียดแมตช์ก่อนบันทึก
+          </p>
+        )}
+        <DialogFooter className="mx-0 mb-0 grid gap-2 border-0 bg-white p-0">
+          <Button
+            type="button"
+            onClick={saveScore}
+            disabled={hasScorerOverflow}
+            className="h-12 w-full rounded-xl bg-[#11823b] font-black"
+          >
+            {match.status === 'finished'
+              ? 'บันทึกสกอร์ใหม่'
+              : match.status === 'current'
+                ? 'บันทึกผลและจบเกม'
+                : 'เริ่ม Match นี้'}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onOpenDetail}
+            className="h-10 w-full rounded-xl font-black text-[#087632]"
+          >
+            รายละเอียดและผู้ทำประตู
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function ScheduleScreen({
   tournament,
+  gameId,
   onOpenMatch,
   onUpdate,
   onStandings,
+  refreshing,
+  onRefresh,
 }: {
   tournament: Tournament;
+  gameId: string;
   onOpenMatch: (id: string) => void;
   onUpdate: (value: Tournament) => void;
   onStandings: () => void;
+  refreshing: boolean;
+  onRefresh: () => void;
 }) {
+  const [quickScoreMatchId, setQuickScoreMatchId] = useState<string | null>(
+    null,
+  );
+  const quickScoreMatch = tournament.matches.find(
+    (match) => match.id === quickScoreMatchId,
+  );
   const sets = scheduleSets(tournament);
   const completedSetNumbers = sets
     .filter((set) => set.complete)
@@ -2395,14 +2572,30 @@ function ScheduleScreen({
         title="ตารางการแข่งขัน"
         eyebrow={`${tournament.matches.length} แมตช์ · เวลาสนาม ${tournament.startTime}–${displayTournamentTime(tournament, fieldEndTime)}`}
         action={
-          <Button
-            onClick={onStandings}
-            variant="outline"
-            className="h-10 rounded-xl border-[#9dd2ab] px-3 font-black text-[#087632]"
-          >
-            <Trophy className="h-4 w-4" />
-            ตารางคะแนน
-          </Button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {gameId && (
+              <button
+                type="button"
+                onClick={onRefresh}
+                disabled={refreshing}
+                aria-label="ดึงข้อมูลตารางล่าสุด"
+                title="ดึงข้อมูลล่าสุด"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#e1f4e6] text-[#11823b] active:scale-95 disabled:opacity-60"
+              >
+                <RotateCcw
+                  className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`}
+                />
+              </button>
+            )}
+            <Button
+              onClick={onStandings}
+              variant="outline"
+              className="h-10 rounded-xl border-[#9dd2ab] px-2.5 font-black text-[#087632] min-[370px]:px-3"
+            >
+              <Trophy className="h-4 w-4" />
+              ตารางคะแนน
+            </Button>
+          </div>
         }
       />
       <div className="space-y-3 px-4 py-4 pb-6">
@@ -2568,8 +2761,8 @@ function ScheduleScreen({
                             <TableCell className="p-0 pr-1 text-right align-middle">
                               <button
                                 type="button"
-                                onClick={() => onOpenMatch(match.id)}
-                                aria-label={`ดูรายละเอียดเกม ${match.matchNumber}`}
+                                onClick={() => setQuickScoreMatchId(match.id)}
+                                aria-label={`กรอกสกอร์ Match ${match.matchNumber}`}
                                 className="inline-flex min-h-12 w-full items-center justify-end gap-0.5"
                               >
                                 <span className="flex flex-col items-center gap-0.5">
@@ -2622,6 +2815,19 @@ function ScheduleScreen({
           <span className="font-bold text-slate-400">(+{slotMinutes} นาที)</span>
         </Button>
       </div>
+      {quickScoreMatch && (
+        <QuickScoreDialog
+          key={quickScoreMatch.id}
+          tournament={tournament}
+          match={quickScoreMatch}
+          onUpdate={onUpdate}
+          onClose={() => setQuickScoreMatchId(null)}
+          onOpenDetail={() => {
+            setQuickScoreMatchId(null);
+            onOpenMatch(quickScoreMatch.id);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -3464,16 +3670,14 @@ function settingsDraftFrom(tournament: Tournament) {
         : '';
     return Boolean(first && second) && teams(first) === teams(second);
   };
-  // The second pair starts unticked: left alone, saving plans that game the
-  // same way the schedule would anyway. The one exception is a second game
-  // someone already picked by hand before the first result, which stays
-  // ticked so saving an unrelated setting does not quietly replace it.
-  const plannedSecond =
-    finishedCount === 0 && firstQueuedMatch
-      ? recommendUpcomingPairs(tournament, 2, [
-          [firstQueuedMatch.teamAId, firstQueuedMatch.teamBId],
-        ])[1]
-      : undefined;
+  // Show the actual queued fixtures, not a fresh recommendation. Otherwise
+  // opening Settings after play has started appears to change the first two
+  // games even before the user edits anything.
+  const plannedSecond = firstQueuedMatch
+    ? recommendUpcomingPairs(tournament, 2, [
+        [firstQueuedMatch.teamAId, firstQueuedMatch.teamBId],
+      ])[1]
+    : undefined;
   const fallbackTeamA = tournament.teams[0]?.id ?? '';
   const fallbackTeamB = tournament.teams[1]?.id ?? fallbackTeamA;
   return {
@@ -3486,21 +3690,13 @@ function settingsDraftFrom(tournament: Tournament) {
     startTime: tournament.startTime,
     endTime: addMinutes(tournament.startTime, tournament.availableTimeMinutes),
     firstPairA:
-      (finishedCount > 0 ? recommendations[0]?.[0] : undefined) ??
-      firstQueuedMatch?.teamAId ??
-      fallbackTeamA,
+      firstQueuedMatch?.teamAId ?? recommendations[0]?.[0] ?? fallbackTeamA,
     firstPairB:
-      (finishedCount > 0 ? recommendations[0]?.[1] : undefined) ??
-      firstQueuedMatch?.teamBId ??
-      fallbackTeamB,
+      firstQueuedMatch?.teamBId ?? recommendations[0]?.[1] ?? fallbackTeamB,
     secondPairA:
-      (finishedCount > 0 ? recommendations[1]?.[0] : undefined) ??
-      secondQueuedMatch?.teamAId ??
-      fallbackTeamA,
+      secondQueuedMatch?.teamAId ?? recommendations[1]?.[0] ?? fallbackTeamA,
     secondPairB:
-      (finishedCount > 0 ? recommendations[1]?.[1] : undefined) ??
-      secondQueuedMatch?.teamBId ??
-      fallbackTeamB,
+      secondQueuedMatch?.teamBId ?? recommendations[1]?.[1] ?? fallbackTeamB,
     useSecondPair: Boolean(
       secondQueuedMatch &&
       plannedSecond &&
@@ -3709,9 +3905,13 @@ function SettingsScreen({
     };
     const preferredPairs: Array<[string, string]> = [[firstPairA, firstPairB]];
     if (useSecondPair) preferredPairs.push([secondPairA, secondPairB]);
+    const pairSelectionChanged = fixtureSelectionChanged(
+      { firstPairA, firstPairB, secondPairA, secondPairB, useSecondPair },
+      seededDraftRef.current,
+    );
     autoNamedTeamIdsRef.current.clear();
     onSave(
-      remainingAfterSave > 0
+      remainingAfterSave > 0 && pairSelectionChanged
         ? reshuffleUpcomingMatches(updatedWithColors, preferredPairs)
         : updatedWithColors,
     );
@@ -3887,8 +4087,8 @@ function SettingsScreen({
               </h2>
               <p className="section-note">
                 {finishedCount > 0
-                  ? 'เกมที่กำลังแข่งจะไม่เปลี่ยน ระบบจะจัดเกมที่เหลือใหม่ให้ทุกทีมพบกันครบ'
-                  : 'เลือกสีเสื้อของสองทีมแรก แล้วระบบจะจัดเกมที่เหลือให้ทุกทีมพบกันครบ'}
+                  ? 'เปลี่ยนคู่แล้วบันทึกจึงจัดเกมที่เหลือใหม่ เกมที่กำลังแข่งและผลเดิมไม่เปลี่ยน'
+                  : 'เปลี่ยนคู่เปิดสนามแล้วบันทึกจึงจัดคิวใหม่ การแก้ชื่อหรือเวลาอย่างเดียวจะคงคู่เดิม'}
               </p>
             </div>
             {remainingAfterSave > 0 ? (
@@ -5166,9 +5366,12 @@ export default function FootballApp() {
               <ScheduleScreen
                 key={tournament.id}
                 tournament={tournament}
+                gameId={gameId}
                 onOpenMatch={openMatch}
                 onUpdate={applyTournament}
                 onStandings={() => setView('standings')}
+                refreshing={refreshing}
+                onRefresh={() => void refreshNow()}
               />
             )}
             {tournament && view === 'tactics' && (

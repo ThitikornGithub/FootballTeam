@@ -30,6 +30,7 @@ import {
   goalkeeperForTeam,
 } from '../lib/football-tactics';
 import { parseTournament } from '../lib/football-schema';
+import { fixtureSelectionChanged } from '../lib/football-settings';
 import {
   canonicalJson,
   describeUnsavedChanges,
@@ -899,6 +900,61 @@ assert(
       1,
   'Reshuffling must balance every pairing across the complete schedule',
 );
+const selectedFixtures = {
+  firstPairA: reshuffledAfterStart.matches[2].teamAId,
+  firstPairB: reshuffledAfterStart.matches[2].teamBId,
+  secondPairA: reshuffledAfterStart.matches[3].teamAId,
+  secondPairB: reshuffledAfterStart.matches[3].teamBId,
+  useSecondPair: true,
+};
+assert(
+  !fixtureSelectionChanged(selectedFixtures, selectedFixtures) &&
+    fixtureSelectionChanged(
+      { ...selectedFixtures, firstPairA: teamThree.id },
+      selectedFixtures,
+    ) &&
+    fixtureSelectionChanged(
+      { ...selectedFixtures, useSecondPair: false },
+      selectedFixtures,
+    ),
+  'Only changing fixture controls must request a new schedule',
+);
+const renamedWithoutReplanning = updateTournamentSettings(
+  reshuffledAfterStart,
+  {
+    name: 'New friendly match name',
+    matchDurationMinutes: reshuffledAfterStart.matchDurationMinutes,
+    breakDurationMinutes: reshuffledAfterStart.breakDurationMinutes,
+    startTime: reshuffledAfterStart.startTime,
+    availableTimeMinutes: reshuffledAfterStart.availableTimeMinutes,
+  },
+);
+assert(
+  renamedWithoutReplanning.name === 'New friendly match name' &&
+    JSON.stringify(
+      renamedWithoutReplanning.matches.map((match) => [
+        match.id,
+        match.teamAId,
+        match.teamBId,
+        match.status,
+        match.teamAScore,
+        match.teamBScore,
+        match.scorers,
+      ]),
+    ) ===
+      JSON.stringify(
+        reshuffledAfterStart.matches.map((match) => [
+          match.id,
+          match.teamAId,
+          match.teamBId,
+          match.status,
+          match.teamAScore,
+          match.teamBScore,
+          match.scorers,
+        ]),
+      ),
+  'A name-only save must preserve manually selected future fixtures and every stored result',
+);
 const reshuffledOpening = reshuffleUpcomingMatches(tournament, [
   [teamThree.id, teamOne.id],
   [teamTwo.id, teamFour.id],
@@ -1608,5 +1664,5 @@ for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
 }
 
 console.log(
-  'Engine checks passed: Method B fairness across every four-team opening, chronological compact sets, English team/color labels, defaults, 2-8 team pairing coverage, stable pair sides, legacy display/score/GK ownership, immutable extensions, full-horizon recommendations, balanced overtime, opening pairs, future reshuffling, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
+  'Engine checks passed: Method B fairness across every four-team opening, chronological compact sets, English team/color labels, defaults, 2-8 team pairing coverage, stable pair sides, legacy display/score/GK ownership, immutable extensions, full-horizon recommendations, balanced overtime, opening pairs, future reshuffling, name-only settings preserving manual fixtures, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
 );

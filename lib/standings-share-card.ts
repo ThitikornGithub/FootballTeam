@@ -136,7 +136,7 @@ export function renderStandingsShareCard(
   const allFinished =
     tournament.matches.length > 0 &&
     finishedCount === tournament.matches.length;
-  const leader = standings[0];
+  const leader = finishedCount > 0 ? standings[0] : undefined;
   const leaderTeam = tournament.teams.find(
     (team) => team.id === leader?.teamId,
   );
@@ -167,7 +167,15 @@ export function renderStandingsShareCard(
   fillRoundedRect(context, 54, 300, 972, 145, 34, '#0f8d40');
   context.fillStyle = '#ffffff';
   context.font = `700 25px ${fontFamily}`;
-  context.fillText(allFinished ? 'อันดับหนึ่งของคืนนี้' : 'ผู้นำตารางตอนนี้', 88, 352);
+  context.fillText(
+    finishedCount === 0
+      ? 'ก่อนเริ่มการแข่งขัน'
+      : allFinished
+        ? 'อันดับหนึ่งของคืนนี้'
+        : 'ผู้นำตารางตอนนี้',
+    88,
+    352,
+  );
   context.font = `900 47px ${fontFamily}`;
   const leaderText = leaderTeam
     ? `${teamNameForDisplay(leaderTeam)} ${allFinished ? 'คว้าอันดับ 1' : 'นำอันดับ 1'}`
@@ -241,7 +249,8 @@ export function renderStandingsShareCard(
     }
     context.textBaseline = 'middle';
     context.font = `900 ${rowHeight < 76 ? 24 : 28}px ${fontFamily}`;
-    context.fillStyle = index === 0 ? '#11823b' : '#718096';
+    context.fillStyle =
+      finishedCount > 0 && index === 0 ? '#11823b' : '#718096';
     context.textAlign = 'center';
     context.fillText(String(index + 1), columns.rank, center);
 
