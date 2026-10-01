@@ -2376,18 +2376,19 @@ function TeamDetailScreen({
 }
 
 // Standing spots around the circle, the way the group lines up on the grass.
-// These are markers for where someone stands, not the shirt colours.
+// They are places to stand, not teams, but they borrow the app's shirt
+// colours and names so the wheel looks part of the same app.
 const WHEEL_COLORS = [
-  { name: 'เขียว', hex: '#2bd47d', ink: '#062515' },
-  { name: 'แดง', hex: '#ff5f63', ink: '#2b0709' },
-  { name: 'น้ำเงิน', hex: '#5b8dff', ink: '#06112e' },
-  { name: 'เหลือง', hex: '#ffd23f', ink: '#271f00' },
-  { name: 'ส้ม', hex: '#ff9048', ink: '#2a1203' },
-  { name: 'ม่วง', hex: '#a978ff', ink: '#190732' },
-  { name: 'ฟ้า', hex: '#38d7e8', ink: '#032429' },
-  { name: 'ชมพู', hex: '#ff78b4', ink: '#2e0b1d' },
-  { name: 'เทา', hex: '#9aa7b4', ink: '#10171d' },
-  { name: 'ขาว', hex: '#edf1ea', ink: '#141a16' },
+  { name: TEAM_COLOR_NAMES.green, hex: COLOR_HEX.green, ink: '#ffffff' },
+  { name: TEAM_COLOR_NAMES.red, hex: COLOR_HEX.red, ink: '#ffffff' },
+  { name: TEAM_COLOR_NAMES.blue, hex: COLOR_HEX.blue, ink: '#ffffff' },
+  { name: TEAM_COLOR_NAMES.yellow, hex: COLOR_HEX.yellow, ink: '#231a00' },
+  { name: TEAM_COLOR_NAMES.orange, hex: COLOR_HEX.orange, ink: '#2a1203' },
+  { name: TEAM_COLOR_NAMES.purple, hex: COLOR_HEX.purple, ink: '#ffffff' },
+  { name: TEAM_COLOR_NAMES.black, hex: COLOR_HEX.black, ink: '#ffffff' },
+  { name: TEAM_COLOR_NAMES.white, hex: COLOR_HEX.white, ink: '#1d2a22' },
+  { name: 'Pink', hex: '#e2589b', ink: '#ffffff' },
+  { name: 'Teal', hex: '#13a2b2', ink: '#ffffff' },
 ];
 const WHEEL_RING_OUTER = 92;
 const WHEEL_RING_INNER = 72;
@@ -2517,7 +2518,7 @@ function GoalkeeperWheelDialog({
       );
       meterRef.current.setAttribute(
         'stroke',
-        power > 0.82 ? '#ffd23f' : '#31dd78',
+        power > 0.82 ? '#f5b71b' : '#11823b',
       );
     }
   }
@@ -2692,7 +2693,7 @@ function GoalkeeperWheelDialog({
           </div>
         )}
 
-        <div className="relative overflow-hidden rounded-[24px] bg-[#0a1411] p-4">
+        <div className="relative overflow-hidden rounded-[22px] border border-[#9dd2ab] bg-[#eef9f1] p-4">
           <div className="relative mx-auto aspect-square w-[min(72vw,280px)]">
             <svg viewBox="0 0 200 200" className="block h-full w-full">
               <defs>
@@ -2717,7 +2718,12 @@ function GoalkeeperWheelDialog({
                       transition: 'opacity 500ms ease',
                     }}
                   >
-                    <path d={wheelBandPath(index, total)} fill={color.hex} />
+                    <path
+                      d={wheelBandPath(index, total)}
+                      fill={color.hex}
+                      stroke="rgba(15,35,22,.14)"
+                      strokeWidth="0.8"
+                    />
                     <text
                       x={x.toFixed(2)}
                       y={y.toFixed(2)}
@@ -2738,7 +2744,7 @@ function GoalkeeperWheelDialog({
                 cy="100"
                 r="57"
                 fill="none"
-                stroke="#31dd78"
+                stroke="#11823b"
                 strokeWidth="3"
                 strokeLinecap="round"
                 pathLength={100}
@@ -2747,7 +2753,13 @@ function GoalkeeperWheelDialog({
                 style={{ opacity: 0, transition: 'opacity 240ms ease' }}
               />
               <g ref={orbitRef} style={{ transformOrigin: '100px 100px' }}>
-                <g ref={ballRef} style={{ transformOrigin: '100px 44px' }}>
+                <g
+                  ref={ballRef}
+                  style={{
+                    transformOrigin: '100px 44px',
+                    filter: 'drop-shadow(0 1px 2px rgba(16,35,25,.35))',
+                  }}
+                >
                   <circle cx="100" cy="44" r="11" fill="url(#wheelBall)" />
                   <path
                     d="M100 37.4 L104.9 41 L103 46.8 H97 L95.1 41 Z"
@@ -2763,22 +2775,22 @@ function GoalkeeperWheelDialog({
                 </g>
               </g>
             </svg>
-            <div className="pointer-events-none absolute left-1/2 top-1/2 grid aspect-square w-[48%] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full px-2 text-center">
+            <div className="pointer-events-none absolute left-1/2 top-1/2 grid aspect-square w-[48%] -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/70 px-2 text-center">
               <div>
-                <p className="text-[10px] font-black uppercase tracking-[.14em] text-[#8ba699]">
+                <p className="text-[10px] font-black uppercase tracking-[.12em] text-slate-400">
                   {spinning
                     ? 'กำลังหมุน'
                     : winner === null
                       ? 'พร้อมหมุน'
                       : 'เฝ้าเสาคนแรก'}
                 </p>
-                <p
-                  className="text-base font-black leading-tight break-words"
-                  style={{
-                    color:
-                      winner === null ? '#ecf6ef' : WHEEL_COLORS[winner].hex,
-                  }}
-                >
+                <p className="flex items-center justify-center gap-1.5 text-base font-black leading-tight break-words text-slate-900">
+                  {winner !== null && !spinning && (
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10"
+                      style={{ background: WHEEL_COLORS[winner].hex }}
+                    />
+                  )}
                   {spinning
                     ? '…'
                     : winner === null
@@ -2799,7 +2811,7 @@ function GoalkeeperWheelDialog({
             onPointerUp={(event) => endHold(event.timeStamp)}
             onPointerCancel={(event) => endHold(event.timeStamp)}
             onPointerLeave={(event) => endHold(event.timeStamp)}
-            className="mt-3 h-13 w-full touch-none rounded-2xl bg-[#2bd47d] font-black text-[#04150b] active:scale-[.99] disabled:opacity-50"
+            className="mt-3 h-13 w-full touch-none rounded-xl bg-[#11823b] font-black text-white active:scale-[.99] disabled:opacity-50"
           >
             {spinning ? 'กำลังหมุน…' : 'กดค้างแล้วปล่อย'}
           </button>
