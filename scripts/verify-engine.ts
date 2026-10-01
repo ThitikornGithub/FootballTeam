@@ -38,10 +38,11 @@ import {
   newestPendingState,
   syncRetryDelayMs,
 } from '../lib/football-sync';
-import { TEAM_COLORS, type Match } from '../lib/football-types';
+import { TEAM_COLORS, type Match, type TeamColor } from '../lib/football-types';
 import {
   TEAM_COLOR_NAMES,
   teamNameForDisplay,
+  withSwappedTeamColor,
 } from '../lib/football-team-labels';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -1663,6 +1664,45 @@ for (let teamCount = 3; teamCount <= 8; teamCount += 1) {
   }
 }
 
+// A team is named by its shirt colour, so two teams must never share one.
+{
+  const shirts: Array<{ color: TeamColor }> = [
+    { color: 'green' },
+    { color: 'red' },
+    { color: 'blue' },
+  ];
+  const swapped = withSwappedTeamColor(shirts, 0, 'red');
+  assert(
+    swapped[0].color === 'red' &&
+      swapped[1].color === 'green' &&
+      swapped[2].color === 'blue',
+    'Taking a colour another team wears must hand that team the colour being left',
+  );
+  assert(
+    withSwappedTeamColor(shirts, 0, 'green') === shirts,
+    'Re-picking the colour a team already wears must change nothing',
+  );
+  const free = withSwappedTeamColor(shirts, 2, 'white');
+  assert(
+    free[2].color === 'white' &&
+      free[0].color === 'green' &&
+      free[1].color === 'red',
+    'An unused colour must be taken without disturbing the other teams',
+  );
+  const everyShirt: Array<{ color: TeamColor }> = TEAM_COLORS.map((color) => ({
+    color,
+  }));
+  for (let index = 0; index < everyShirt.length; index += 1) {
+    for (const color of TEAM_COLORS) {
+      const next = withSwappedTeamColor(everyShirt, index, color);
+      assert(
+        new Set(next.map((shirt) => shirt.color)).size === next.length,
+        `Swapping shirt ${index} to ${color} must leave every team a different colour`,
+      );
+    }
+  }
+}
+
 console.log(
-  'Engine checks passed: Method B fairness across every four-team opening, chronological compact sets, English team/color labels, defaults, 2-8 team pairing coverage, stable pair sides, legacy display/score/GK ownership, immutable extensions, full-horizon recommendations, balanced overtime, opening pairs, future reshuffling, name-only settings preserving manual fixtures, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, and persisted-state validation.',
+  'Engine checks passed: Method B fairness across every four-team opening, chronological compact sets, English team/color labels, defaults, 2-8 team pairing coverage, stable pair sides, legacy display/score/GK ownership, immutable extensions, full-horizon recommendations, balanced overtime, opening pairs, future reshuffling, name-only settings preserving manual fixtures, player positions, formations, live-score and scorer drafts, Top 3, standings, GK fairness, progress, switching, sync backoff, order-insensitive sync comparison, lost-edit summaries, second-pair default, unique shirt colours, and persisted-state validation.',
 );

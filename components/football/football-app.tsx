@@ -106,6 +106,7 @@ import {
   matchScoresInStoredOrder,
   minutesBetween,
   pairMeetingCount,
+  playerFor,
   recommendUpcomingPairs,
   reshuffleUpcomingMatches,
   reopenFinishedMatch,
@@ -116,12 +117,14 @@ import {
   setMatchScore,
   setMatchScorers,
   setMatchStatus,
+  skipGoalkeeper,
   shuffle,
   updateTournamentSettings,
 } from '@/lib/football-engine';
 import {
   TEAM_COLOR_NAMES,
   teamNameForDisplay,
+  withSwappedTeamColor,
 } from '@/lib/football-team-labels';
 import {
   PLAYER_POSITIONS,
@@ -1024,6 +1027,18 @@ function CurrentMatchControl({
         teamBScore={normalizedScoreB}
         compact
       />
+      {(displayMatch.teamAGkPlayerId || displayMatch.teamBGkPlayerId) && (
+        <p className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-0.5 text-center text-[11px] font-bold text-slate-500">
+          <span className="min-w-0 truncate">
+            GK {matchTeamLabel(tournament, teamA)}:{' '}
+            {playerFor(teamA, displayMatch.teamAGkPlayerId)?.name ?? '—'}
+          </span>
+          <span className="min-w-0 truncate">
+            GK {matchTeamLabel(tournament, teamB)}:{' '}
+            {playerFor(teamB, displayMatch.teamBGkPlayerId)?.name ?? '—'}
+          </span>
+        </p>
+      )}
       <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] font-bold text-slate-500">
         <Cloud className="h-3.5 w-3.5 text-[#11823b]" />
         สกอร์ระหว่างแข่งบันทึกอัตโนมัติ กดจบเกมเมื่อแข่งเสร็จ
@@ -1675,7 +1690,10 @@ function SetupScreen({
         <section className="settings-card">
           <div className="mb-3">
             <h2 className="section-title">สีเสื้อทีม</h2>
-            <p className="section-note">เลือกสีเสื้อ ชื่อทีมจะเป็นชื่อสีภาษาอังกฤษ</p>
+            <p className="section-note">
+              เลือกสีเสื้อ ชื่อทีมจะเป็นชื่อสีภาษาอังกฤษ · เลือกสีที่ทีมอื่นใช้อยู่
+              ระบบจะสลับสีให้สองทีมนั้น
+            </p>
           </div>
           <div className="space-y-3">
             {drafts.slice(0, teamCount).map((draft, index) => (
@@ -1696,14 +1714,7 @@ function SetupScreen({
                       type="button"
                       onClick={() =>
                         setDrafts((items) =>
-                          items.map((item, i) =>
-                            i === index
-                              ? {
-                                  ...item,
-                                  color,
-                                }
-                              : item,
-                          ),
+                          withSwappedTeamColor(items, index, color),
                         )
                       }
                       aria-label={`เลือกสี${COLOR_LABEL[color]}`}
@@ -3028,6 +3039,48 @@ function MatchDetailScreen({
             </div>
           </div>
         </section>
+        {(displayMatch.teamAGkPlayerId || displayMatch.teamBGkPlayerId) && (
+          <section className="settings-card">
+            <div className="mb-3">
+              <h2 className="section-title">ผู้รักษาประตูแมตช์นี้</h2>
+              <p className="section-note">
+                ระบบวนตามคิวของแต่ละทีม · กดข้ามคิวถ้าคนนี้ยังลงเฝ้าเสาไม่ได้
+              </p>
+            </div>
+            <div className="space-y-2">
+              {[
+                { team: teamA, playerId: displayMatch.teamAGkPlayerId },
+                { team: teamB, playerId: displayMatch.teamBGkPlayerId },
+              ].map((side) => (
+                <div
+                  key={side.team.id}
+                  className="flex min-w-0 items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2"
+                >
+                  <TeamShirtIcon color={side.team.color} size="xs" />
+                  <span className="min-w-0 flex-1 truncate text-sm font-black">
+                    {playerFor(side.team, side.playerId)?.name ??
+                      'ยังไม่มีผู้เล่นที่มาวันนี้'}
+                  </span>
+                  {match.status !== 'finished' && side.playerId && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        onUpdate(
+                          skipGoalkeeper(tournament, match.id, side.team.id),
+                        )
+                      }
+                      className="h-9 shrink-0 rounded-xl px-3 text-xs font-black"
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      ข้ามคิว
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
         <section className="settings-card">
           <div className="mb-4 text-center">
             <h2 className="section-title">บันทึกสกอร์</h2>
@@ -3051,9 +3104,28 @@ function MatchDetailScreen({
             tournament={tournament}
             match={displayMatch}
             onUpdate={onUpdate}
-            teamAScore={normalizedScoreA}
-            teamBScore={normalizedScoreB}
+            // Scorers save as they are entered, while a finished match holds
+            // its score until it is confirmed. Measuring against the typed
+            // number let someone leave with more goals credited than the
+            // result shows, and the top scorers then counted them.
+            teamAScore={
+              match.status === 'finished'
+                ? (displayMatch.teamAScore ?? 0)
+                : normalizedScoreA
+            }
+            teamBScore={
+              match.status === 'finished'
+                ? (displayMatch.teamBScore ?? 0)
+                : normalizedScoreB
+            }
           />
+          {match.status === 'finished' &&
+            (normalizedScoreA !== (displayMatch.teamAScore ?? 0) ||
+              normalizedScoreB !== (displayMatch.teamBScore ?? 0)) && (
+              <p className="mt-2 text-center text-[11px] font-bold text-amber-700">
+                กดบันทึกสกอร์ใหม่ก่อน แล้วค่อยเพิ่มผู้ทำประตูให้ตรงกับสกอร์
+              </p>
+            )}
           {match.status !== 'finished' && (
             <p className="mt-2 flex items-center justify-center gap-1.5 text-center text-[11px] font-bold text-slate-500">
               <Cloud className="h-3.5 w-3.5 text-[#11823b]" />
@@ -4002,7 +4074,8 @@ function SettingsScreen({
           <div className="border-t border-slate-100 pt-4">
             <h2 className="section-title">สีเสื้อทีม</h2>
             <p className="section-note">
-              ชื่อทีมใช้ชื่อสีภาษาอังกฤษ เปลี่ยนสีแล้วประวัติแข่งยังเป็นทีมเดิม
+              ชื่อทีมใช้ชื่อสีภาษาอังกฤษ เปลี่ยนสีแล้วประวัติแข่งยังเป็นทีมเดิม · เลือกสีที่ทีมอื่นใช้อยู่
+              ระบบจะสลับสีให้สองทีมนั้น
             </p>
             <div className="mt-3 space-y-2">
               {tournament.teams.map((team) => (
@@ -4027,11 +4100,29 @@ function SettingsScreen({
                           (teamColors[team.id] ?? team.color) === color
                         }
                         onClick={() => {
-                          autoNamedTeamIdsRef.current.add(team.id);
-                          setTeamColors((current) => ({
-                            ...current,
-                            [team.id]: color,
+                          const current = tournament.teams.map((item) => ({
+                            id: item.id,
+                            color: teamColors[item.id] ?? item.color,
                           }));
+                          const index = current.findIndex(
+                            (item) => item.id === team.id,
+                          );
+                          const next = withSwappedTeamColor(
+                            current,
+                            index,
+                            color,
+                          );
+                          if (next === current) return;
+                          // Both sides of a swap are renamed by their colour.
+                          next.forEach((item, position) => {
+                            if (item.color !== current[position].color)
+                              autoNamedTeamIdsRef.current.add(item.id);
+                          });
+                          setTeamColors(
+                            Object.fromEntries(
+                              next.map((item) => [item.id, item.color]),
+                            ),
+                          );
                         }}
                         className={`h-6 w-6 rounded-full border-2 ${(teamColors[team.id] ?? team.color) === color ? 'ring-2 ring-[#11823b] ring-offset-1' : ''}`}
                         style={{
