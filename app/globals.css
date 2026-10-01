@@ -61,6 +61,7 @@
 }
 html {
   background: #edf3ee;
+  overscroll-behavior-y: none;
 }
 body {
   margin: 0;
@@ -72,6 +73,13 @@ body {
     BlinkMacSystemFont,
     'Noto Sans Thai',
     sans-serif;
+}
+@media (max-width: 639px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 button {
   cursor: pointer;

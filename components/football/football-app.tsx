@@ -2367,6 +2367,7 @@ function QuickScoreDialog({
   onClose: () => void;
   onOpenDetail: () => void;
 }) {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const displayMatch = getMatchDisplay(tournament, match);
   const teamA = tournament.teams.find(
     (team) => team.id === displayMatch.teamAId,
@@ -2459,7 +2460,11 @@ function QuickScoreDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-[24px] bg-white p-4 sm:max-w-md">
+      <DialogContent
+        ref={dialogRef}
+        initialFocus={dialogRef}
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-[24px] bg-white p-4 sm:max-w-md"
+      >
         <DialogHeader className="pr-8 text-left">
           <DialogTitle className="text-lg font-black text-slate-950">
             กรอกสกอร์ Match {match.matchNumber}
@@ -2706,31 +2711,45 @@ function ScheduleScreen({
                                   : ''
                             }
                           >
-                            <TableCell className="px-1 py-1 text-center align-middle">
-                              <span
-                                className={`inline-flex min-w-7 justify-center rounded-md px-1 py-0.5 text-[11px] font-black tabular-nums ${match.status === 'current' ? 'bg-[#11823b] text-white' : 'bg-slate-100 text-slate-600'}`}
+                            <TableCell className="p-0 text-center align-middle">
+                              <button
+                                type="button"
+                                onClick={() => onOpenMatch(match.id)}
+                                aria-label={`เปิดรายละเอียด Match ${match.matchNumber}`}
+                                className="grid min-h-12 w-full place-items-center focus-visible:outline-2 focus-visible:outline-[#11823b]"
                               >
-                                M{match.matchNumber}
-                              </span>
-                            </TableCell>
-                            <TableCell className="px-1 py-1 align-middle text-xs font-black tabular-nums">
-                              <span className="block leading-4">
-                                {match.startTime}
-                              </span>
-                              <span className="block text-[11px] font-bold text-slate-400">
-                                –{matchEndTime}
-                              </span>
-                              {(startsNextDay || endsNextDay) && (
-                                <span className="block text-[9px] font-black leading-3 text-[#087632]">
-                                  {startsNextDay ? '+1 วัน' : 'จบ +1 วัน'}
+                                <span
+                                  className={`inline-flex min-w-7 justify-center rounded-md px-1 py-0.5 text-[11px] font-black tabular-nums ${match.status === 'current' ? 'bg-[#11823b] text-white' : 'bg-slate-100 text-slate-600'}`}
+                                >
+                                  M{match.matchNumber}
                                 </span>
-                              )}
+                              </button>
+                            </TableCell>
+                            <TableCell className="p-0 align-middle text-xs font-black tabular-nums">
+                              <button
+                                type="button"
+                                onClick={() => onOpenMatch(match.id)}
+                                aria-label={`เปิดรายละเอียด Match ${match.matchNumber} เวลา ${match.startTime} ถึง ${matchEndTime}`}
+                                className="min-h-12 w-full px-1 text-left focus-visible:outline-2 focus-visible:outline-[#11823b]"
+                              >
+                                <span className="block leading-4">
+                                  {match.startTime}
+                                </span>
+                                <span className="block text-[11px] font-bold text-slate-400">
+                                  –{matchEndTime}
+                                </span>
+                                {(startsNextDay || endsNextDay) && (
+                                  <span className="block text-[9px] font-black leading-3 text-[#087632]">
+                                    {startsNextDay ? '+1 วัน' : 'จบ +1 วัน'}
+                                  </span>
+                                )}
+                              </button>
                             </TableCell>
                             <TableCell className="p-0 align-middle">
                               <button
                                 type="button"
-                                onClick={() => onOpenMatch(match.id)}
-                                aria-label={`เปิดเกม ${match.matchNumber}: ${matchTeamLabel(tournament, teamA)} พบ ${matchTeamLabel(tournament, teamB)}`}
+                                onClick={() => setQuickScoreMatchId(match.id)}
+                                aria-label={`กรอกสกอร์ Match ${match.matchNumber}: ${matchTeamLabel(tournament, teamA)} พบ ${matchTeamLabel(tournament, teamB)}`}
                                 className="grid min-h-12 w-full grid-cols-[minmax(0,1fr)_16px_minmax(0,1fr)] items-center gap-0.5 px-1 text-left"
                               >
                                 <span className="flex min-w-0 items-center gap-0.5 min-[360px]:gap-1">
@@ -4244,6 +4263,7 @@ export default function FootballApp() {
     game: FootballGameSummary | null;
   } | null>(null);
   const tournamentRef = useRef<Tournament | null>(null);
+  const contentScrollRef = useRef<HTMLDivElement>(null);
   const gameIdRef = useRef('');
   // canonicalJson of the last copy known to be in the database.
   const lastRemoteStateRef = useRef('');
@@ -4810,9 +4830,10 @@ export default function FootballApp() {
     return () => window.clearTimeout(timer);
   }, [notice]);
   useEffect(() => {
-    // Main screens share one document scroll container. Reset it when the
-    // destination changes so a long schedule cannot open Home or Settings in
-    // the middle of the page.
+    // The mobile app shell has its own scroll container so the bottom menu
+    // stays visible and tappable in standalone iOS mode.
+    contentScrollRef.current?.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    // Desktop layouts can still scroll the document.
     window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
   }, [view]);
   useEffect(() => {
@@ -5278,10 +5299,13 @@ export default function FootballApp() {
       </main>
     );
   return (
-    <main className="min-h-dvh bg-[#edf3ee] text-slate-950 sm:py-7">
-      <div className="relative mx-auto flex min-h-dvh w-full max-w-[480px] flex-col bg-[#f8faf8] shadow-[0_22px_70px_rgba(15,45,29,.15)] sm:min-h-[844px] sm:overflow-hidden sm:rounded-[32px] sm:border sm:border-white">
+    <main className="h-dvh overflow-hidden bg-[#edf3ee] text-slate-950 sm:h-auto sm:min-h-dvh sm:overflow-visible sm:py-7">
+      <div className="relative mx-auto flex h-full w-full max-w-[480px] flex-col overflow-hidden bg-[#f8faf8] shadow-[0_22px_70px_rgba(15,45,29,.15)] sm:h-auto sm:min-h-[844px] sm:rounded-[32px] sm:border sm:border-white">
         <RemoteUpdateContext.Provider value={remoteUpdateVisible}>
-          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none">
+          <div
+            ref={contentScrollRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-none"
+          >
             {!tournament && !['setup', 'games'].includes(view) && (
               <>
                 <PageHeader

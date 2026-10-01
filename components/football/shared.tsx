@@ -210,7 +210,7 @@ export function BottomNavigation({
   return (
     <nav
       aria-label="เมนูหลัก"
-      className="sticky bottom-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/95 px-1 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur"
+      className="relative z-40 grid shrink-0 grid-cols-5 border-t border-slate-200 bg-white/95 px-1 pb-[max(8px,env(safe-area-inset-bottom))] pt-2 backdrop-blur"
     >
       {navItems.map(({ view, label, icon: Icon }) => (
         <button
