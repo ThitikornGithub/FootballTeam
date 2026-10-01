@@ -1290,7 +1290,7 @@ function HomeScreen({
   // are for what the group reaches for at the pitch instead.
   const actions = [
     { label: 'คัดลอกลิงก์', icon: Copy, onPress: onCopyLink },
-    { label: 'สุ่ม GK', icon: Shuffle, onPress: onOpenWheel },
+    { label: 'สุ่ม GK ด้วยวงล้อ', icon: Shuffle, onPress: onOpenWheel },
     { label: 'แชร์ตาราง', icon: Share2, onPress: () => onNavigate('share') },
   ];
   return (
@@ -1395,12 +1395,14 @@ function HomeScreen({
               key={label}
               type="button"
               onClick={onPress}
-              className="flex min-h-16 items-center gap-2 rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm active:scale-[.98]"
+              // Stacked, so a two-word label keeps the full width of the tile
+              // and Thai never breaks in the middle of a word.
+              className="flex min-h-[78px] flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-white p-2 text-center shadow-sm active:scale-[.98]"
             >
               <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[#e5f5e9] text-[#087632]">
                 <Icon className="h-4 w-4" />
               </span>
-              <span className="min-w-0 flex-1 text-xs leading-4 font-black">
+              <span className="min-w-0 text-xs leading-4 font-black">
                 {label}
               </span>
             </button>
