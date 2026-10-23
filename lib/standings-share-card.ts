@@ -214,11 +214,13 @@ export function renderStandingsShareCard(
   const columns = {
     rank: 87,
     team: 151,
-    played: 563,
-    won: 654,
-    drawn: 733,
-    lost: 812,
-    difference: 900,
+    played: 520,
+    won: 586,
+    drawn: 652,
+    lost: 718,
+    goalsFor: 784,
+    goalsAgainst: 850,
+    difference: 916,
     points: 987,
   };
   context.font = `800 22px ${fontFamily}`;
@@ -231,6 +233,8 @@ export function renderStandingsShareCard(
   context.fillText('ช', columns.won, tableY + 45);
   context.fillText('ส', columns.drawn, tableY + 45);
   context.fillText('พ', columns.lost, tableY + 45);
+  context.fillText('F', columns.goalsFor, tableY + 45);
+  context.fillText('A', columns.goalsAgainst, tableY + 45);
   context.fillText('+/-', columns.difference, tableY + 45);
   context.fillText('แต้ม', columns.points, tableY + 45);
 
@@ -270,6 +274,12 @@ export function renderStandingsShareCard(
     context.fillText(String(standing.won), columns.won, center);
     context.fillText(String(standing.drawn), columns.drawn, center);
     context.fillText(String(standing.lost), columns.lost, center);
+    context.fillText(String(standing.goalsFor), columns.goalsFor, center);
+    context.fillText(
+      String(standing.goalsAgainst),
+      columns.goalsAgainst,
+      center,
+    );
     context.fillText(
       `${standing.goalDifference > 0 ? '+' : ''}${standing.goalDifference}`,
       columns.difference,

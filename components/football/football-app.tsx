@@ -1092,13 +1092,15 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
     <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
       <table className="w-full table-fixed text-center text-xs sm:text-sm">
         <colgroup>
-          <col className="w-[42%]" />
+          <col className="w-[34%]" />
+          <col className="w-[9%]" />
+          <col className="w-[6%]" />
+          <col className="w-[6%]" />
+          <col className="w-[6%]" />
+          <col className="w-[7%]" />
+          <col className="w-[7%]" />
           <col className="w-[10%]" />
-          <col className="w-[7%]" />
-          <col className="w-[7%]" />
-          <col className="w-[7%]" />
-          <col className="w-[11%]" />
-          <col className="w-[16%]" />
+          <col className="w-[15%]" />
         </colgroup>
         <thead className="bg-[#e5f5e9] text-[#087632]">
           <tr>
@@ -1112,6 +1114,20 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
             </th>
             <th title="แพ้" className="border-l border-emerald-100 px-0 py-3">
               พ
+            </th>
+            <th
+              title="ประตูที่ยิงได้"
+              aria-label="F ประตูที่ยิงได้"
+              className="border-l border-emerald-100 px-0 py-3"
+            >
+              F
+            </th>
+            <th
+              title="ประตูที่เสีย"
+              aria-label="A ประตูที่เสีย"
+              className="border-l border-emerald-100 px-0 py-3"
+            >
+              A
             </th>
             <th className="px-1 py-3">+/-</th>
             <th className="px-2 py-3">แต้ม</th>
@@ -1127,13 +1143,17 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
                 <th
                   scope="row"
                   aria-label={`อันดับ ${index + 1} ทีม ${matchTeamLabel(tournament, team)}`}
-                  className="px-2 py-3 text-left"
+                  className="px-1 py-3 text-left min-[360px]:px-2"
                 >
-                  <div className="flex min-w-0 items-center gap-1.5 font-black">
+                  <div className="flex min-w-0 items-center gap-1 font-black min-[380px]:gap-1.5">
                     <span className="w-4 shrink-0 text-center text-slate-400">
                       {index + 1}
                     </span>
-                    <TeamShirtIcon color={team.color} size="xs" />
+                    <TeamShirtIcon
+                      color={team.color}
+                      size="xs"
+                      className="max-[359px]:!h-5 max-[359px]:!w-5"
+                    />
                     <span className="min-w-0 truncate">
                       {matchTeamLabel(tournament, team)}
                     </span>
@@ -1149,6 +1169,12 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
                 <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
                   {standing.lost}
                 </td>
+                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                  {standing.goalsFor}
+                </td>
+                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                  {standing.goalsAgainst}
+                </td>
                 <td className="px-1 py-3 font-bold">
                   {standing.goalDifference > 0 ? '+' : ''}
                   {standing.goalDifference}
@@ -1161,6 +1187,9 @@ function StandingsTable({ tournament }: { tournament: Tournament }) {
           })}
         </tbody>
       </table>
+      <p className="border-t border-slate-100 px-2 py-1 text-right text-[10px] font-semibold text-slate-500">
+        F ยิงได้ · A เสีย
+      </p>
     </section>
   );
 }
@@ -4044,7 +4073,7 @@ function ShareScreen({
         <section className="overflow-hidden rounded-[26px] border border-slate-200 bg-white p-2 shadow-sm">
           <canvas
             ref={canvasRef}
-            aria-label={`รูปตารางคะแนน ${tournament.name}`}
+            aria-label={`รูปตารางคะแนน ${tournament.name} พร้อม F ประตูที่ยิงได้ และ A ประตูที่เสีย`}
             className="block h-auto w-full rounded-[20px] bg-[#f4f8f5]"
           >
             รูปตารางคะแนน {tournament.name}
