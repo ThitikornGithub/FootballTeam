@@ -242,7 +242,7 @@ test('remote deletion keeps unsent data recoverable even when local backup fails
   );
   expect(api.games.size).toBe(0);
   expect(
-    api.calls.filter((call) => call.name === 'create_football_game'),
+    api.calls.filter((call) => call.name.startsWith('create_football_game')),
   ).toHaveLength(0);
 });
 

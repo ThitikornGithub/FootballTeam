@@ -142,9 +142,12 @@ export async function createSharedGame(
   tournament: Tournament,
   dateCode: string,
 ) {
-  const value = await callRpc<unknown>('create_football_game', {
+  const value = await callRpc<unknown>('create_football_game_v2', {
     p_state: tournament,
     p_date_code: dateCode,
+    // The local draft retains this ID through edits, failed attempts and
+    // reloads. A deliberate new/copy setup gets a new draft ID.
+    p_request_id: tournament.id,
   });
   const game = parseStoredGame(value);
   if (!game) throw new Error('ฐานข้อมูลไม่ได้ส่งเกมที่สร้างกลับมา');

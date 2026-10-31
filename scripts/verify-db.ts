@@ -11,6 +11,10 @@ const migration = readFileSync(
   'db/migrations/20261031_data_integrity.sql',
   'utf8',
 );
+const createMigration = readFileSync(
+  'db/migrations/20261031_idempotent_create.sql',
+  'utf8',
+);
 const state = makeGame().state;
 state.tactics = {
   teamAId: state.teams[0].id,
@@ -78,6 +82,7 @@ try {
     'select * from public.football_games order by id',
   );
   await db.exec(migration);
+  await db.exec(createMigration);
   assert.deepEqual(
     (await db.query('select * from public.football_games order by id')).rows,
     before.rows,
@@ -298,8 +303,113 @@ try {
     /not a valid tournament/,
   );
   await db.exec('reset role');
+
+  const createOnce = async (
+    requestId: string | null,
+    value: unknown = state,
+    date = '20261102',
+  ) => {
+    const result = await db.query<{
+      game: { id: string; state: typeof state; revision: number };
+    }>('select public.create_football_game_v2($1::jsonb,$2,$3) game', [
+      json(value),
+      date,
+      requestId,
+    ]);
+    return result.rows[0].game;
+  };
+  await db.exec('set role anonymous');
+  const once = await createOnce('draft-first');
+  assert.equal(once.id, 'game20261102-1');
+  const replay = await createOnce(
+    'draft-first',
+    { ...state, name: 'Unsent local edit' },
+    '20261103',
+  );
+  assert.deepEqual(
+    replay,
+    once,
+    'A replay after midnight returns the original game and does not overwrite it',
+  );
+  const repeats = await Promise.all(
+    Array.from({ length: 8 }, () => createOnce('draft-first')),
+  );
+  assert(repeats.every((game) => game.id === once.id && game.revision === 1));
+  const secondDraft = await createOnce('draft-second');
+  assert.equal(
+    secondDraft.id,
+    'game20261102-2',
+    'A distinct draft with identical settings is still a new game',
+  );
+  const edited = { ...once.state, name: 'Saved from another phone' };
+  edited.matches = edited.matches.map((match, index) =>
+    index === 0 ? { ...match, teamAScore: 2, teamBScore: 1 } : match,
+  );
+  await db.query('select public.save_football_game_v2($1,$2::jsonb,1)', [
+    once.id,
+    json(edited),
+  ]);
+  const latestReplay = await createOnce('draft-first');
+  assert.equal(latestReplay.revision, 2, 'Replay returns the latest revision');
+  assert.deepEqual(
+    latestReplay.state,
+    edited,
+    'Replay never replaces scores, fixtures or GK order',
+  );
+  await db.query('select public.delete_football_game($1)', [once.id]);
+  await assert.rejects(createOnce('draft-first'), /was deleted/);
+  for (const key of [null, '', '   ', 'x'.repeat(201)])
+    await assert.rejects(createOnce(key), /invalid create request id/);
+  await assert.rejects(
+    createOnce('invalid-state', changed('teams.0.color', 'unsupported')),
+    /not a valid tournament/,
+  );
+  assert.equal(
+    (await createOnce('invalid-state')).id,
+    'game20261102-3',
+    'Failed creation rolls back receipt and counter',
+  );
+  await assert.rejects(
+    db.query('select * from public.football_game_create_requests'),
+    /permission denied/,
+  );
+  await assert.rejects(
+    db.query(
+      "delete from public.football_game_create_requests where request_id='draft-first'",
+    ),
+    /permission denied/,
+  );
+  await db.exec('reset role');
+  const beforeReapply = (
+    await db.query('select * from public.football_games order by id')
+  ).rows;
+  const receiptsBefore = (
+    await db.query(
+      'select * from public.football_game_create_requests order by request_id',
+    )
+  ).rows;
+  await db.exec(createMigration);
+  assert.deepEqual(
+    (await db.query('select * from public.football_games order by id')).rows,
+    beforeReapply,
+  );
+  assert.deepEqual(
+    (
+      await db.query(
+        'select * from public.football_game_create_requests order by request_id',
+      )
+    ).rows,
+    receiptsBefore,
+  );
+  await assert.rejects(
+    createOnce('draft-first'),
+    /was deleted/,
+    'Reapply retains deleted-game receipts',
+  );
+  assert.deepEqual(await createOnce('draft-second'), secondDraft);
+  assert.equal((await createOnce('after-reapply')).id, 'game20261102-4');
   console.log(
-    `PostgreSQL checks passed: ${invalid.length} invalid-state cases, legacy compatibility, all formations, immutable game/queue data, non-reusable IDs, migration reapply and anonymous RPC grants (in-memory only).`,
+    `PostgreSQL checks passed: ${invalid.length} invalid-state cases, legacy compatibility, all formations, immutable game/queue data, non-reusable IDs, idempotent create/replay/delete/rollback, migration reapply and anonymous RPC grants (in-memory only).`,
   );
 } finally {
   await db.close();

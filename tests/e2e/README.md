@@ -41,6 +41,7 @@ npm run test:e2e:report
 ## Coverage
 
 - Home, allgames และ deep link ผ่าน redirect
+- สร้างเกมสำเร็จแต่คำตอบหายแล้ว retry/reload ได้เกมเดิม; เก็บสกอร์ที่แก้ก่อน retry/ระหว่างรอ, กดสองครั้งสร้างเกมเดียว, เคารพ revision ใหม่จากอีกเครื่อง, ไม่สร้างเกมที่ถูกลบกลับมา และ copy settings สร้างเกมใหม่ด้วยเลขคำขอใหม่ได้ กรณี storage ใช้ไม่ได้ทดสอบ retry ในแท็บเดิม
 - Popup สกอร์ไม่เลือกข้อความเอง, draft อยู่หลัง reload, จบแมตช์แล้วเลื่อนไปคู่ถัดไป, F/A และแต้มตรงทีม
 - แก้สกอร์ระหว่าง save ค้างแล้วยังคงค่าล่าสุด
 - Save ล้มเหลวรอ backoff และ retry ด้วยค่าล่าสุด
@@ -57,7 +58,7 @@ npm run test:e2e:report
 
 ## Results and remaining scope
 
-ผลรอบ 31 ตุลาคม: 24 เคสผ่านตามปกติ ไม่มี expected failures; ย้าย `known-issues.spec.ts` เป็น `data-integrity.spec.ts` แล้ว เพิ่ม `routing.spec.ts` สำหรับกรณี storage ถูกบล็อก ส่วน pure assertions ของ `validPagesPath` ใน `scripts/verify-engine.ts` ตรวจทั้ง local root และ production base path `/FootballTeam`
+ผลรอบ 31 ตุลาคม: 30 เคสผ่านตามปกติ ไม่มี expected failures; เพิ่ม `create-game.spec.ts` 6 เคสสำหรับ create/retry ส่วนบั๊กเดิมอยู่ใน `data-integrity.spec.ts` และ `routing.spec.ts` สำหรับ storage ถูกบล็อก Pure assertions ของ `validPagesPath` ใน `scripts/verify-engine.ts` ตรวจทั้ง local root และ production base path `/FootballTeam`
 
 ```bash
 # เฉพาะข้อมูลและ routing

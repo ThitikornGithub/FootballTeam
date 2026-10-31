@@ -70,6 +70,10 @@ export class MockFootballApi {
   readonly blockedRequests: string[] = [];
   offline = false;
   failSaves = false;
+  dropNextCreateResponse = false;
+  private readonly creationRequests = new Map<string, string>();
+  private readonly gameCounters = new Map<string, number>();
+  private nextCreateGate: ReturnType<typeof gate> | undefined;
   private nextSaveGate: ReturnType<typeof gate> | undefined;
   private gates: ReturnType<typeof gate>[] = [];
 
@@ -94,6 +98,13 @@ export class MockFootballApi {
   holdNextSave() {
     const pending = gate();
     this.nextSaveGate = pending;
+    this.gates.push(pending);
+    return { release: pending.resolve };
+  }
+
+  holdNextCreateResponse() {
+    const pending = gate();
+    this.nextCreateGate = pending;
     this.gates.push(pending);
     return { release: pending.resolve };
   }
@@ -182,15 +193,56 @@ export class MockFootballApi {
       this.games.set(id, game);
       return json({ ...game, conflict: false });
     }
-    if (name === 'create_football_game') {
+    if (name === 'create_football_game_v2' || name === 'create_football_game') {
       if (typeof body.p_date_code !== 'string')
         return json({ message: 'Invalid mock date code' }, 400);
-      const game = makeGame(`game${body.p_date_code}-${this.games.size + 1}`);
+      const key =
+        name === 'create_football_game_v2' ? body.p_request_id : undefined;
+      if (
+        name === 'create_football_game_v2' &&
+        (typeof key !== 'string' || !key.trim() || key.length > 200)
+      )
+        return json(
+          { code: '22023', message: 'invalid create request id' },
+          400,
+        );
+      const existingId =
+        typeof key === 'string' ? this.creationRequests.get(key) : undefined;
+      if (existingId) {
+        const existing = this.games.get(existingId);
+        return existing
+          ? json(existing)
+          : json(
+              {
+                code: 'P0002',
+                message: 'game from this create request was deleted',
+              },
+              404,
+            );
+      }
+      const date = body.p_date_code;
+      const number =
+        Math.max(
+          this.gameCounters.get(date) ?? 0,
+          ...[...this.games.keys()]
+            .filter((id) => id.startsWith(`game${date}-`))
+            .map((id) => Number(id.split('-').pop())),
+        ) + 1;
+      this.gameCounters.set(date, number);
+      const game = makeGame(`game${date}-${number}`);
       game.state = {
         ...(structuredClone(body.p_state) as Tournament),
         id: game.id,
       };
       this.games.set(game.id, game);
+      if (typeof key === 'string') this.creationRequests.set(key, game.id);
+      const pending = this.nextCreateGate;
+      this.nextCreateGate = undefined;
+      if (pending) await pending.promise;
+      if (this.dropNextCreateResponse) {
+        this.dropNextCreateResponse = false;
+        return route.abort('connectionreset');
+      }
       return json(game);
     }
     if (name === 'delete_football_game') return json(this.games.delete(id));

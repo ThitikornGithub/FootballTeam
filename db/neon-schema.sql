@@ -1,5 +1,7 @@
 -- Baseline bootstrap. Also apply migrations/20261031_data_integrity.sql for
--- strict persisted-state validation and non-reusable game IDs (see db/README.md).
+-- strict persisted-state validation and non-reusable game IDs, then
+-- migrations/20261031_idempotent_create.sql for retry-safe creation.
+-- See db/README.md for the migration order and deployment boundary.
 begin;
 
 create or replace function public.football_jsonb_int_in_range(

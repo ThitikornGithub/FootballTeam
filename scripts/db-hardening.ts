@@ -6,9 +6,14 @@ import { parseTournament } from '../lib/football-schema';
 
 // Explicit operational command, never imported by the app, build or tests.
 const apply = process.argv.includes('--apply');
-if (process.argv.slice(2).some((arg) => arg !== '--apply'))
+const idempotentCreate = process.argv.includes('--idempotent-create');
+if (
+  process.argv
+    .slice(2)
+    .some((arg) => !['--apply', '--idempotent-create'].includes(arg))
+)
   throw new Error(
-    'Only --apply is supported; omitting it performs a read-only check.',
+    'Supported: --apply, --idempotent-create; omitting --apply performs a read-only check.',
   );
 const connection =
   process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
@@ -66,7 +71,11 @@ const snapshotSql = `select jsonb_build_object(
   'fingerprint', (select md5(coalesce(jsonb_agg(jsonb_build_array(id,revision,state,created_at,updated_at) order by id)::text,'[]')) from public.football_games),
   'counterInstalled', to_regclass('public.football_game_counters') is not null,
   'allocatorUsesCounter', position('football_game_counters' in pg_get_functiondef('public.create_football_game(jsonb,text)'::regprocedure)) > 0,
-  'strictValidator', position('football_string_fields' in pg_get_functiondef('public.football_state_is_valid(jsonb)'::regprocedure)) > 0
+  'strictValidator', position('football_string_fields' in pg_get_functiondef('public.football_state_is_valid(jsonb)'::regprocedure)) > 0,
+  'createV2Installed', to_regprocedure('public.create_football_game_v2(jsonb,text,text)') is not null,
+  'requestTableInstalled', to_regclass('public.football_game_create_requests') is not null,
+  'createV2Granted', coalesce(has_function_privilege('anonymous',to_regprocedure('public.create_football_game_v2(jsonb,text,text)'),'EXECUTE'),false),
+  'requestTablePrivate', case when to_regclass('public.football_game_create_requests') is null then false else not has_table_privilege('anonymous',to_regclass('public.football_game_create_requests'),'SELECT,INSERT,UPDATE,DELETE') end
 );`;
 type Snapshot = {
   database: string;
@@ -75,6 +84,10 @@ type Snapshot = {
   counterInstalled: boolean;
   allocatorUsesCounter: boolean;
   strictValidator: boolean;
+  createV2Installed: boolean;
+  requestTableInstalled: boolean;
+  createV2Granted: boolean;
+  requestTablePrivate: boolean;
 };
 const before = JSON.parse(query(snapshotSql)) as Snapshot;
 if (before.database !== 'neondb') throw new Error('Unexpected database.');
@@ -84,6 +97,15 @@ const invalid = before.games
 if (invalid.length)
   throw new Error(
     `Aborting: existing games are not readable by this app: ${invalid.join(', ')}`,
+  );
+if (
+  idempotentCreate &&
+  (!before.strictValidator ||
+    !before.counterInstalled ||
+    !before.allocatorUsesCounter)
+)
+  throw new Error(
+    'Install and verify data-integrity hardening before the idempotent-create migration.',
   );
 if (!apply) {
   console.log(
@@ -95,6 +117,14 @@ if (!apply) {
         strictValidator: before.strictValidator,
         counterInstalled: before.counterInstalled,
         allocatorUsesCounter: before.allocatorUsesCounter,
+        ...(idempotentCreate
+          ? {
+              createV2Installed: before.createV2Installed,
+              requestTableInstalled: before.requestTableInstalled,
+              createV2Granted: before.createV2Granted,
+              requestTablePrivate: before.requestTablePrivate,
+            }
+          : {}),
       },
       null,
       2,
@@ -104,18 +134,20 @@ if (!apply) {
   const definitions = JSON.parse(
     query(`select jsonb_agg(pg_get_functiondef(oid))
     from pg_proc where pronamespace='public'::regnamespace
-    and proname in ('football_state_is_valid','football_jsonb_int_in_range','create_football_game');`),
+    and proname in ('football_state_is_valid','football_jsonb_int_in_range','create_football_game','create_football_game_v2');`),
   ) as string[];
   const backupDir = resolve('outputs/db-backups');
   await mkdir(backupDir, { recursive: true });
   const backupPath = resolve(
     backupDir,
-    `${new Date().toISOString().replaceAll(/[:.]/g, '-')}-before-hardening.sql`,
+    `${new Date().toISOString().replaceAll(/[:.]/g, '-')}-before-${idempotentCreate ? 'idempotent-create' : 'hardening'}.sql`,
   );
   // Generated DDL backup contains no game records or connection credentials.
   await writeFile(backupPath, definitions.join('\n\n'), { mode: 0o600 });
   const sql = await readFile(
-    'db/migrations/20261031_data_integrity.sql',
+    idempotentCreate
+      ? 'db/migrations/20261031_idempotent_create.sql'
+      : 'db/migrations/20261031_data_integrity.sql',
     'utf8',
   );
   query(sql, false); // One atomic transaction; 5s lock timeout; old game checksum checked inside SQL.
@@ -128,6 +160,16 @@ if (!apply) {
     throw new Error(
       'Migration completed but verification failed. Inspect the installed definitions.',
     );
+  if (
+    idempotentCreate &&
+    (!after.createV2Installed ||
+      !after.requestTableInstalled ||
+      !after.createV2Granted ||
+      !after.requestTablePrivate)
+  )
+    throw new Error(
+      'Idempotent-create migration verification failed. Inspect definitions and grants.',
+    );
   console.log(
     JSON.stringify(
       {
@@ -139,6 +181,14 @@ if (!apply) {
         snapshotUnchanged: before.fingerprint === after.fingerprint,
         strictValidator: after.strictValidator,
         allocatorUsesCounter: after.allocatorUsesCounter,
+        ...(idempotentCreate
+          ? {
+              createV2Installed: after.createV2Installed,
+              requestTableInstalled: after.requestTableInstalled,
+              createV2Granted: after.createV2Granted,
+              requestTablePrivate: after.requestTablePrivate,
+            }
+          : {}),
         ddlBackup: backupPath,
       },
       null,

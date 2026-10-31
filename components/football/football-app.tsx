@@ -5866,6 +5866,8 @@ export default function FootballApp() {
     setTournament(value);
   }
   async function publishTournament(value: Tournament, message: string) {
+    // React may not have disabled/replaced the button before a second tap.
+    if (publishSessionRef.current === syncSessionRef.current) return;
     setRemoteDeletedGameId('');
     syncSessionRef.current += 1;
     const publishSession = syncSessionRef.current;
@@ -5884,46 +5886,50 @@ export default function FootballApp() {
     setSelectedTeamId(value.teams[0]?.id ?? '');
     setView('home');
     window.history.replaceState({}, '', gamePath());
+    // Persist the draft identity before sending anything, not in a later
+    // effect: after a lost response/reload its retry must carry the same ID.
+    const draftBackedUp = writeLocalBackup(value);
+    setBackupProblem(
+      draftBackedUp ? null : { gameId: '', session: publishSession },
+    );
     try {
       const game = await createSharedGame(value, bangkokDateCode());
       if (publishSession !== syncSessionRef.current) return;
       publishSessionRef.current = null;
-      // A slow first request can take seconds, and a score or name typed in
-      // that time is newer than what was sent. Replacing it with the created
-      // copy silently threw it away.
-      const editedMeanwhile =
-        tournamentRef.current && tournamentRef.current !== value
-          ? tournamentRef.current
-          : null;
+      // Include edits made before retrying as well as during this request.
+      // A replay can return a game another phone has since edited; its newer
+      // revision must win through the existing conflict-resolution path.
+      const localValue = extendTournamentToEndTime({
+        ...(tournamentRef.current ?? value),
+        id: game.id,
+      });
       const storedValue = extendTournamentToEndTime(game.state);
-      lastRemoteStateRef.current = canonicalJson(storedValue);
-      remoteRevisionRef.current = game.revision;
       gameIdRef.current = game.id;
       setGameId(game.id);
       // The draft slot only guarded the game until the database had it. Left
       // behind, the start screen offered it as an unsaved game, and saving it
       // from there created the same game a second time.
       clearLocalBackup();
-      if (editedMeanwhile) {
-        const localValue = extendTournamentToEndTime({
-          ...editedMeanwhile,
-          id: game.id,
-        });
-        tournamentRef.current = localValue;
-        queuedStateRef.current = localValue;
-        dirtyRef.current = true;
-        setTournament(localValue);
-        writeLocalBackup(localValue, game.id, true, currentSyncBase());
-        setSyncStatus('saving');
-      } else {
-        setTournament(storedValue);
-        tournamentRef.current = storedValue;
-        writeLocalBackup(storedValue, game.id, false, currentSyncBase());
-        setSyncStatus('saved');
-      }
+      settleWithRemote(
+        { ...game, state: storedValue },
+        localValue,
+        // Revision 1 is still the creation snapshot; no other edit is lost
+        // by applying our draft. Later revisions need explicit conflict info.
+        game.revision === 1
+          ? { revision: 1, state: canonicalJson(storedValue) }
+          : null,
+      );
+      const pendingLocal = tournamentRef.current;
+      const pendingBackedUp =
+        !dirtyRef.current ||
+        !pendingLocal ||
+        writeLocalBackup(pendingLocal, game.id, true, currentSyncBase());
+      setBackupProblem(
+        pendingBackedUp ? null : { gameId: game.id, session: publishSession },
+      );
       window.history.pushState({}, '', gamePath(game.id));
       setNotice(`${message} · แชร์ลิงก์นี้ให้เพื่อนได้เลย`);
-    } catch {
+    } catch (error) {
       if (publishSession !== syncSessionRef.current) return;
       publishSessionRef.current = null;
       const backedUp = writeLocalBackup(tournamentRef.current ?? value);
@@ -5932,9 +5938,12 @@ export default function FootballApp() {
       );
       setSyncStatus('local');
       setNotice(
-        backedUp
-          ? `${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`
-          : 'ยังสร้างเกมและสำรองในเครื่องไม่สำเร็จ กรุณาเปิดหน้านี้ไว้',
+        blockingSyncNotice(error) ||
+          (error instanceof GameNotFoundError
+            ? 'เกมจากคำขอนี้ถูกลบแล้ว หากต้องการเกมใหม่ให้กดสร้างตารางใหม่'
+            : backedUp
+              ? `${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`
+              : 'ยังสร้างเกมและสำรองในเครื่องไม่สำเร็จ กรุณาเปิดหน้านี้ไว้'),
       );
     }
   }

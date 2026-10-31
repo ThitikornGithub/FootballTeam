@@ -1,11 +1,14 @@
 # FootballTeam — Project Handoff
 
 อัปเดตล่าสุด: 31 ตุลาคม 2026
-ขอบเขตรอบล่าสุด: แก้ remote deletion, deep-link routing เมื่อ storage ใช้ไม่ได้, dependency ที่มีช่องโหว่ในช่วงเวอร์ชันที่เข้ากันได้ และ F/A สามหลักบนจอเล็ก ตามงานข้อ 1, 2, 4, 5 งานข้อ 3 (ป้องกันสร้างเกมซ้ำเมื่อคำตอบ create สูญหาย) ยังไม่รวมในรอบนี้ ไม่ต้องติดตั้ง migration ใหม่
+ขอบเขตรอบล่าสุด: แก้ข้อ 3 ป้องกันสร้างเกมซ้ำเมื่อ DB สร้างสำเร็จแต่คำตอบหาย โดยเพิ่ม `create_football_game_v2` และ receipt table ผ่าน `20261031_idempotent_create.sql` ต้องติดตั้ง migration ก่อน client ใหม่ ส่วน remote deletion/routing/dependency/F-A เป็นงานที่เสร็จในรอบก่อนหน้า
 การจัดคิวแบบ B, การจับคู่/สลับทีม, สูตรคะแนน และลำดับ GK ไม่ถูกแก้
 ขอบเขต network ของ E2E: เปิด server ที่ `http://localhost:3210` เท่านั้น ทุก Neon RPC ตอบจาก memory fixture; host ภายนอกถูกบล็อก, ปิด service worker และ external DNS/preconnect ของ Chromium ใช้ browser profile ใหม่แต่ละ test ไม่ใช้ข้อมูลเกมจริงหรือเขียน Neon ส่วนคำสั่ง `db:check-hardening`/`db:apply-hardening` เป็น operational commands แยกต่างหาก ดู `db/README.md`
-ผลตรวจรอบ 31 ตุลาคมล่าสุด: browser 24 ordinary passes ไม่มี expected failures; รวม remote deletion ขณะมี pending edits/backup เต็ม, blocked storage routing, ตัวเลขสามหลักบนจอ 320px/เลื่อนตารางเมื่อสี่หลัก และการยืนยันว่าเปลี่ยนชื่อ/สีเสื้อแล้ว matches และลำดับผู้เล่น/GK ตรงเดิม SQL ใน PGlite ผ่าน 37 กรณีผิดรูป, legacy compatibility, formations, ID หลังลบ/นำเข้า/รันซ้ำ, revision conflict และ anonymous RPC permissions
+ผลตรวจรอบ 31 ตุลาคมล่าสุด: browser 30 ordinary passes ไม่มี expected failures; เพิ่ม create/retry 6 เคส ครอบคลุม lost response, reload/draft scores, double tap, newer remote revision, deleted-game replay, identical-settings copy และ blocked storage ในแท็บเดิม SQL ใน PGlite ผ่าน 37 กรณีผิดรูป, legacy/formations, ID allocation, revision conflict, anonymous permissions และ idempotent replay/rollback/reapply โดยเกม/คะแนน/คิวเดิมคงอยู่
 Neon migration วันที่ 31 ตุลาคมติดตั้งสำเร็จแล้ว: strict validator และ counter allocator ทำงาน เกมเดิมทั้ง 3 เกมอ่านได้ครบ และ fingerprint ของ records ก่อน/หลังตรงกันทุกเกม มี DDL backup ใน ignored `outputs/db-backups/`; ไม่ได้เขียนทับ state, scores, fixtures, GK order หรือ revisions ของเกมเดิม ผล engine checks, lint, TypeScript, Oxfmt และ local GitHub Pages production build ผ่านด้วย
+Idempotent-create migration ติดตั้งสำเร็จแล้วด้วย `db:apply-create`: gameCount ยัง 3, snapshotUnchanged=true, v2/grant/private receipts ผ่านการตรวจ ไม่มีการสร้างเกมตัวอย่างใน production เก็บ DDL ก่อนติดตั้งไว้ที่ ignored `outputs/db-backups/2026-10-31T07-58-11-070Z-before-idempotent-create.sql`
+ก่อน deploy ต้อง refresh Neon Data API schema ผ่าน CLI แล้วให้ `npm run db:check-create-api` ผ่านด้วย SQL NOTIFY อย่างเดียวไม่พอในรอบนี้; ถ้า CLI session เป็น invalid_grant ให้ login ใหม่ตาม `db/README.md` การติดตั้ง PostgreSQL สำเร็จยังไม่ยืนยันว่า Data API เห็น RPC ใหม่ และห้าม fallback ไป legacy create เพื่อเลี่ยงปัญหานี้
+สถานะ rollout ณ จบรอบนี้: DB ติดตั้งแล้ว แต่ Data API ยังคืน PGRST202 สำหรับ v2 และ Neon CLI session หมดอายุ จึงเตรียม client บน branch `codex/idempotent-game-creation` โดย production ยังเป็น `21c8083` รอผู้ใช้ login CLI แล้ว refresh schema/ให้ API probe ผ่านก่อน merge และ push main ตรวจหลัง migration แล้ว API เดิมยังอ่าน 3 เกมได้ครบ (revision 31/1/28) ไม่มีการเปลี่ยนข้อมูลเกมจริง
 Known-issue tests เดิมเปลี่ยนเป็น regression tests ปกติใน `tests/e2e/data-integrity.spec.ts` แล้ว; routing เพิ่มใน `tests/e2e/routing.spec.ts`
 Static Pages artifact smoke รอบล่าสุดใช้ base path `/FootballTeam` กับ generated game/allgames entry และ 404 script จริง เมื่อ storage ถูกบล็อกยังคืน clean URL/query/hash ได้ ตรวจตัวเลข/ชื่อทีมที่ 320/360/390/480px ไม่ล้น ไม่พบ pageerror; ทุก RPC ตอบจาก mock รูป OG สร้างครบ 565 หน้า/48 รูปจากรายการเกม 3 เกมโดยอ่าน Neon เท่านั้น การกู้ pending state หลัง remote delete ทดสอบ reload ต่อได้และไม่สร้างเกมใหม่อัตโนมัติ
 ผลตรวจรอบ 30 ตุลาคม: `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` จบด้วย exit 0 โดย JSON report แยกเป็น 12 ordinary passes, 3 expected failures และ 0 unexpected results; รันยืนยันสองรอบผ่านตรงกัน `npm test`, lint, TypeScript, Oxfmt และ local GitHub Pages static build ผ่านด้วย ไม่มีการแก้ไข application source หรือ deploy
@@ -127,7 +130,8 @@ Neon เป็น source of truth สำหรับเกมที่มี Gam
 
 RPC ที่ browser เรียกได้:
 
-- `create_football_game`
+- `create_football_game_v2` (client ปัจจุบัน; ใช้ draft ID เป็น `p_request_id`)
+- `create_football_game` (เก็บไว้ให้แท็บเวอร์ชันเก่า)
 - `get_football_game`
 - `save_football_game_v2` (optimistic revision check)
 - `list_football_games`
@@ -149,8 +153,9 @@ RPC ที่ browser เรียกได้:
 12. รายการเกมมี mutation version และ request token แยกกัน คำตอบจาก list request ที่เริ่มก่อนการลบจึงไม่สามารถนำเกมที่ลบแล้วกลับเข้า cache หรือ UI ได้
 13. ทั้ง success และ failure ของ background poll ตรวจ Game ID และ sync session ก่อนเปลี่ยนสถานะ จึงไม่ทำให้เกมใหม่ขึ้น error จาก request ของเกมเก่า
 14. เมื่อ get คืน null หรือ save คืน PostgreSQL `P0002`/HTTP 404 จะยืนยันว่าเกมถูกลบ: invalidate session/cache, ยกเลิก retry, หยุดแก้ไขและแสดงข้อความถาวร โดยไม่ตีความ timeout/503 เป็นการลบ เก็บ pending backup เดิมและสำเนาใน memory; ผู้ใช้เปิดข้อมูลที่ยังไม่บันทึกเป็นเกมร่างได้โดยยังไม่สร้างเกมใหม่อัตโนมัติ หาก storage เต็มจะแจ้งให้เปิดร่างก่อนปิดหน้า
+15. การสร้างเกมเขียน draft ลง backup ก่อนส่ง RPC และใช้ draft ID เดิมแม้ retry/reload ข้ามวัน; DB ล็อกตาม request ID และบันทึก game/counter/receipt ใน transaction เดียว เมื่อ replay จะคืน game/revision ล่าสุดโดยไม่เขียนทับ payload ถ้า revision ยัง 1 จะส่ง local edits ต่อด้วย CAS เดิม แต่หากอีกเครื่องแก้จน revision เพิ่มจะยึด remote และแสดง lost-edit summary การสร้างใหม่/copy settings มี draft ID ใหม่จึงไม่ถูก deduplicate ทิ้ง เก็บ receipt หลังลบเกมเพื่อให้ replay ได้ P0002 แทนการสร้างคืน; ไม่มี retention cleanup สำหรับ receipts และไม่เก็บสำเนา state ในตารางนี้
 
-Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql`, `db/migrations/20260909_remove_legacy_save.sql` และ `db/migrations/20261031_data_integrity.sql`; legacy RPC ที่ไม่มี revision check ถูกลบแล้ว ส่วน migration วันที่ 31 เพิ่ม strict validator และ counter allocator ที่ไม่ใช้ ID ซ้ำ รอบ remote deletion/routing/UI/dependency ไม่ต้องเปลี่ยน DB เพิ่ม
+Migrations อยู่ใน `db/migrations/20260906_sync_integrity.sql`, `db/migrations/20260909_remove_legacy_save.sql`, `db/migrations/20261031_data_integrity.sql` และ `db/migrations/20261031_idempotent_create.sql`; legacy save ที่ไม่มี revision check ถูกลบแล้ว ส่วน create ตัวเก่ายังอยู่เพื่อให้แท็บเก่าทำงานระหว่าง rollout ตัวใหม่ไม่มี fallback ไป legacy create เมื่อเจอ error เพื่อไม่กลับมาสร้างซ้ำ ขั้นตอนตรวจ/ติดตั้ง create ใช้ `npm run db:check-create`/`npm run db:apply-create` ตาม `db/README.md`; workflow deploy ไม่ apply SQL เอง
 
 ## 6. URL และ routing
 
@@ -288,15 +293,14 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 
 ## 11. Recommended next work order
 
-| งานที่ยังเหลือ                                                   | แนวทาง                                                                                                | สถานะ                            |
-| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
-| ข้อ 3: create สำเร็จใน DB แต่ response หาย แล้วกดซ้ำกลายเป็นสองเกม | ให้ draft เดียวกันใช้ request ID เดิม และ RPC คืนเกมเดิมเมื่อ retry; ต้องออกแบบ migration/retention และทดสอบก่อน | อธิบายให้ผู้ใช้แล้ว ยังไม่อนุมัติให้ทำในรอบนี้ |
-| Dependency ของ CLI ยังมี 6 audit entries ระดับกลาง/ต่ำ           | รอ upstream ที่แก้หรือแยก CSS ที่ใช้จริงออกจาก CLI อย่างมีการตรวจหน้าตา; ไม่ใช้ audit fix --force โดยไม่ทดสอบ       | คงเหลือ ไม่ใช่ 0 vulnerabilities    |
-| เกมเก่าที่ยังไม่ปิดแสดงเป็นกำลังแข่ง                                  | ออกแบบสถานะจบทั้งวัน/ป้ายเกมเก่าแยกจาก current match                                                       | ยังไม่ทำ                           |
-| iPhone Add to Home Screen, touch และ native share            | ทดสอบบนอุปกรณ์จริง พร้อมกลับเข้าแอปหลังพักเครื่อง                                                               | ยังไม่ยืนยันจาก real device          |
-| CI ก่อน deploy                                                | เพิ่ม engine/DB/browser checks เป็น gate โดยแยกจากข้อมูลจริง                                                | ยังไม่ทำ                           |
-| HTTP 200 สำหรับทุก deep path                                   | พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ                                                           | ข้อจำกัด GitHub Pages              |
-| ใช้นอกกลุ่มเพื่อน                                                 | เพิ่ม rate limit/authentication ตามขอบเขตใหม่                                                            | ยังไม่อยู่ใน requirement             |
+| งานที่ยังเหลือ                                         | แนวทาง                                                                                          | สถานะ                         |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------- |
+| Dependency ของ CLI ยังมี 6 audit entries ระดับกลาง/ต่ำ | รอ upstream ที่แก้หรือแยก CSS ที่ใช้จริงออกจาก CLI อย่างมีการตรวจหน้าตา; ไม่ใช้ audit fix --force โดยไม่ทดสอบ | คงเหลือ ไม่ใช่ 0 vulnerabilities |
+| เกมเก่าที่ยังไม่ปิดแสดงเป็นกำลังแข่ง                        | ออกแบบสถานะจบทั้งวัน/ป้ายเกมเก่าแยกจาก current match                                                 | ยังไม่ทำ                        |
+| iPhone Add to Home Screen, touch และ native share  | ทดสอบบนอุปกรณ์จริง พร้อมกลับเข้าแอปหลังพักเครื่อง                                                         | ยังไม่ยืนยันจาก real device       |
+| CI ก่อน deploy                                      | เพิ่ม engine/DB/browser checks เป็น gate โดยแยกจากข้อมูลจริง                                          | ยังไม่ทำ                        |
+| HTTP 200 สำหรับทุก deep path                         | พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ                                                     | ข้อจำกัด GitHub Pages           |
+| ใช้นอกกลุ่มเพื่อน                                       | เพิ่ม rate limit/authentication ตามขอบเขตใหม่                                                      | ยังไม่อยู่ใน requirement          |
 
 ## 12. Rules for the next agent
 

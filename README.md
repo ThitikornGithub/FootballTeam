@@ -41,7 +41,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ ดูขอบเขตการทดสอบและการป้องกันเครือข่ายใน [tests/e2e/README.md](./tests/e2e/README.md) รอบล่าสุดผ่าน 24 เคส ไม่มี expected failures
+หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ ดูขอบเขตการทดสอบและการป้องกันเครือข่ายใน [tests/e2e/README.md](./tests/e2e/README.md) รอบล่าสุดผ่าน 30 เคส ไม่มี expected failures
 
 การทดสอบ SQL ใช้ PostgreSQL ในหน่วยความจำผ่าน `npm run test:db` และไม่เชื่อมต่อ Neon ดูขั้นตอนตรวจ/ติดตั้ง migration จริงใน [db/README.md](./db/README.md)
 
@@ -62,6 +62,7 @@ npm run test:e2e
 - แชร์รูปตารางคะแนนผ่าน Web Share API ดาวน์โหลด PNG หรือคัดลอกข้อความ; ก่อนมีผลแข่งจะไม่แสดงทีมใดเป็นผู้นำ
 - หน้ารวมเกมทั้งหมดที่ `/FootballTeam/allgames` พร้อมเปิดและลบเกม โดยป้องกันคำขอเก่าดึงผู้ใช้กลับเข้าเกมหลังจากกด Back
 - เก็บ state ของเกมใน Neon Postgres ผ่าน Neon Data API พร้อม revision conflict protection; LocalStorage เป็นเพียง backup โดยเก็บเกมที่ซิงก์แล้วล่าสุดไม่เกิน 12 เกม และไม่ลบ backup ที่ยังรอซิงก์
+- การสร้างเกมใช้เลขคำขอประจำร่างผ่าน `create_football_game_v2`: ถ้า DB สร้างแล้วแต่คำตอบหาย การลองซ้ำจะคืนเกมเดิม การสร้างใหม่จากการตั้งค่าเดิมยังเป็นอีกเกมหนึ่งได้ ต้องติดตั้ง `20261031_idempotent_create.sql` ก่อน deploy client ใหม่นี้ตาม [db/README.md](./db/README.md)
 - ป้องกันผลลัพธ์รายการเกมเก่าทำให้เกมที่ลบแล้วกลับมาแสดงชั่วคราว
 - เมื่อยืนยันว่าเกมถูกลบจากอีกเครื่อง จะหยุดแก้ไข/บันทึกและแสดงข้อความถาวร พร้อมเก็บ pending backup และให้เปิดข้อมูลที่ยังไม่บันทึกเป็นเกมร่างได้
 - เปิด game/allgames path ได้แม้ browser storage ถูกบล็อก โดยใช้ redirect hint ชั่วคราวแล้วคืน URL เดิม
