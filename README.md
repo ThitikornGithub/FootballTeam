@@ -23,6 +23,7 @@ npm run dev
 
 ```bash
 npm test
+npm run test:db
 npm run lint
 ./node_modules/.bin/tsc --noEmit
 GITHUB_PAGES=true \
@@ -30,6 +31,19 @@ NEXT_PUBLIC_BASE_PATH=/FootballTeam \
 NEXT_PUBLIC_SITE_URL=https://thitikorngithub.github.io \
 npm run build
 ```
+
+## Local browser tests
+
+เพิ่มชุดทดสอบด้วยข้อมูลจำลองที่เปิดแอปเฉพาะ `localhost:3210` และบล็อกเครือข่ายภายนอก ทุก RPC ของ Neon ตอบจากข้อมูลในหน่วยความจำ ไม่มีการใช้ข้อมูลเกมจริงหรือ deploy อัตโนมัติ
+
+```bash
+npx playwright install chromium
+npm run test:e2e
+```
+
+หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ ดูขอบเขตการทดสอบ การป้องกันเครือข่าย และ expected failures ของบั๊กที่ยังไม่ได้แก้ใน [tests/e2e/README.md](./tests/e2e/README.md)
+
+การทดสอบ SQL ใช้ PostgreSQL ในหน่วยความจำผ่าน `npm run test:db` และไม่เชื่อมต่อ Neon ดูขั้นตอนตรวจ/ติดตั้ง migration จริงใน [db/README.md](./db/README.md)
 
 ## Main features
 

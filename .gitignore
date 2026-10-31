@@ -11,6 +11,9 @@
 # testing
 /coverage
 /.playwright-mcp/
+/test-results/
+/playwright-report/
+/blob-report/
 
 # next.js
 /.next/

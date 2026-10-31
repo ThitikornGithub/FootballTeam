@@ -340,13 +340,15 @@ function writeLocalBackup(
         localStorage.removeItem(STORAGE_GAME_ID_KEY);
         localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
       }
-      return;
+      return true;
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tournament));
     localStorage.removeItem(STORAGE_GAME_ID_KEY);
     localStorage.removeItem(STORAGE_PENDING_SYNC_KEY);
+    return true;
   } catch {
     // Neon remains the source of truth when browser storage is unavailable.
+    return false;
   }
 }
 
@@ -5090,6 +5092,10 @@ export default function FootballApp() {
   // True for a few seconds after an update from another phone lands.
   const [remoteUpdateVisible, setRemoteUpdateVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [backupProblem, setBackupProblem] = useState<{
+    gameId: string;
+    session: number;
+  } | null>(null);
   const [wheelOpen, setWheelOpen] = useState(false);
   // Keyed by the game it was computed for, so switching games never shows a
   // banner that belonged to the previous one while the new list loads.
@@ -5383,10 +5389,23 @@ export default function FootballApp() {
       } else {
         queuedStateRef.current = latestPending;
         dirtyRef.current = true;
-        writeLocalBackup(latestPending, targetGameId, true, currentSyncBase());
+        const backedUp = writeLocalBackup(
+          latestPending,
+          targetGameId,
+          true,
+          currentSyncBase(),
+        );
+        setBackupProblem(
+          backedUp ? null : { gameId: targetGameId, session: requestSession },
+        );
         const blockingNotice = blockingSyncNotice(error);
         setSyncStatus('error');
-        setNotice(blockingNotice || 'ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง');
+        setNotice(
+          blockingNotice ||
+            (backedUp
+              ? 'ยังซิงก์ไม่ได้ แต่ข้อมูลสำรองอยู่ในเครื่อง'
+              : 'ยังซิงก์ไม่ได้ และสำรองในเครื่องไม่สำเร็จ กรุณาเปิดหน้านี้ไว้'),
+        );
         if (!blockingNotice && !options.keepalive)
           scheduleSyncRetry(targetGameId);
       }
@@ -5776,11 +5795,16 @@ export default function FootballApp() {
       queuedStateRef.current = null;
       dirtyRef.current = false;
     }
-    writeLocalBackup(
+    const backedUp = writeLocalBackup(
       value,
       targetGameId,
       hasUnsavedRemoteState,
       currentSyncBase(),
+    );
+    setBackupProblem(
+      !backedUp && (hasUnsavedRemoteState || !targetGameId)
+        ? { gameId: targetGameId, session: syncSessionRef.current }
+        : null,
     );
     setSyncStatus(
       hasUnsavedRemoteState
@@ -5855,8 +5879,16 @@ export default function FootballApp() {
     } catch {
       if (publishSession !== syncSessionRef.current) return;
       publishSessionRef.current = null;
+      const backedUp = writeLocalBackup(tournamentRef.current ?? value);
+      setBackupProblem(
+        backedUp ? null : { gameId: '', session: publishSession },
+      );
       setSyncStatus('local');
-      setNotice(`${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`);
+      setNotice(
+        backedUp
+          ? `${message}ในเครื่อง แต่ยังสร้างลิงก์ไม่ได้`
+          : 'ยังสร้างเกมและสำรองในเครื่องไม่สำเร็จ กรุณาเปิดหน้านี้ไว้',
+      );
     }
   }
   function loadDemo() {
@@ -6144,6 +6176,17 @@ export default function FootballApp() {
             ref={contentScrollRef}
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-none"
           >
+            {backupProblem?.gameId === gameId &&
+              backupProblem.session === syncSessionRef.current &&
+              syncStatus !== 'saved' && (
+                <p
+                  role="alert"
+                  className="mx-4 mt-3 rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700"
+                >
+                  สำรองข้อมูลที่แก้ในเครื่องไม่สำเร็จ กรุณาเปิดหน้านี้ไว้จนขึ้น “บันทึกแล้ว”
+                  ก่อนปิดหน้า
+                </p>
+              )}
             {!tournament && !['setup', 'games'].includes(view) && (
               <>
                 <PageHeader

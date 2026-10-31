@@ -1,10 +1,15 @@
 # FootballTeam — Project Handoff
 
-อัปเดตล่าสุด: 23 ตุลาคม 2026
-ขอบเขตรอบล่าสุด: เพิ่ม F (ประตูที่ยิงได้) และ A (ประตูที่เสีย) ในตารางคะแนนบนเว็บและรูปแชร์ โดยใช้ `goalsFor`/`goalsAgainst` ที่คำนวณจากผลแมตช์อยู่แล้ว ไม่เปลี่ยนสูตรคะแนนหรือโครงสร้าง DB; ผลตรวจ Neon, deployment และ dependency audit ด้านล่างเป็นข้อมูลย้อนหลัง ไม่ใช่การยืนยัน production รอบนี้
-การเปลี่ยนรอบนี้ไม่แก้ข้อมูลเกมใน Neon และไม่ต้องทำ DB migration; `.playwright-mcp/` เป็นไฟล์ QA ที่ถูก ignore แล้ว ตรวจสถานะ commit และ deployment จริงจาก Git/GitHub Actions แยกจากผลทดสอบ local ด้านล่าง
-ผลตรวจรอบล่าสุด: `npm test`, `npm run lint`, TypeScript, Oxfmt และ GitHub Pages static build (Node 24, prerender 2 routes) ผ่าน; build รอบแรกติด sandbox `listen EPERM 127.0.0.1` แล้ว rerun ในบริบทที่เปิด loopback ได้จนผ่าน
-Browser QA รอบล่าสุด: ใช้ local app กับ demo ใน browser context แยก (ไม่เขียน production) ที่ 320/360/390/480px ตรวจว่าตารางมี F/A, ชื่อทีมไม่ถูกตัด, ไม่มี horizontal overflow; รูปแชร์ขนาด 1080×1600 แสดง F/A ตรงช่องและไม่ชนคอลัมน์อื่น ไม่ได้ทดสอบการบันทึกสกอร์ตัวอย่างผ่าน UI เพราะเครื่องมือปฏิเสธการทดสอบที่อาจเขียน Neon และไม่ได้แก้ข้อมูลเกมจริง
+อัปเดตล่าสุด: 31 ตุลาคม 2026
+ขอบเขตรอบล่าสุด: แก้บั๊กระดับสูง 3 ข้อ ได้แก่ DB validator ที่รับ state ซึ่ง client อ่านไม่ได้, การใช้ Game ID ซ้ำหลังลบ และข้อความยืนยัน backup ที่เขียนไม่สำเร็จ เพิ่ม migration `20261031_data_integrity.sql`, ชุดทดสอบ PostgreSQL ในหน่วยความจำ และรวม browser suite ที่เตรียมไว้รอบ 30 ตุลาคม
+การจัดคิวแบบ B, การจับคู่/สลับทีม, สูตรคะแนน และลำดับ GK ไม่ถูกแก้ โค้ด frontend เปลี่ยนเฉพาะผลลัพธ์การสำรองและคำเตือนที่แสดงเมื่อ storage เขียนไม่ได้ ตราบใดที่ยังมีข้อมูลรอออนไลน์ คำเตือนจะไม่หายพร้อม toast
+ขอบเขต network ของ E2E: เปิด server ที่ `http://localhost:3210` เท่านั้น ทุก Neon RPC ตอบจาก memory fixture; host ภายนอกถูกบล็อก, ปิด service worker และ external DNS/preconnect ของ Chromium ใช้ browser profile ใหม่แต่ละ test ไม่ใช้ข้อมูลเกมจริงหรือเขียน Neon ส่วนคำสั่ง `db:check-hardening`/`db:apply-hardening` เป็น operational commands แยกต่างหาก ดู `db/README.md`
+ผลตรวจรอบ 31 ตุลาคม: browser 15 ordinary passes + 2 expected failures ไม่มี unexpected result; เพิ่มการยืนยันว่าเปลี่ยนชื่อ/สีเสื้อแล้ว matches และลำดับผู้เล่น/GK ตรงเดิม SQL ใน PGlite ผ่าน 37 กรณีผิดรูป, legacy compatibility, formations, ID หลังลบ/นำเข้า/รันซ้ำ, revision conflict และ anonymous RPC permissions
+Neon migration วันที่ 31 ตุลาคมติดตั้งสำเร็จแล้ว: strict validator และ counter allocator ทำงาน เกมเดิมทั้ง 3 เกมอ่านได้ครบ และ fingerprint ของ records ก่อน/หลังตรงกันทุกเกม มี DDL backup ใน ignored `outputs/db-backups/`; ไม่ได้เขียนทับ state, scores, fixtures, GK order หรือ revisions ของเกมเดิม ผล engine checks, lint, TypeScript, Oxfmt และ local GitHub Pages production build ผ่านด้วย
+Known-issue tests ที่ยังไม่แก้มี 2 ข้อ: remote deletion ยังขึ้น saved และ F/A สามหลักล้นจอ 320px หากแก้บั๊กแล้วจะเป็น unexpected pass จนกว่าเอา `test.fail()` ออก ส่วน backup เป็น regression test ปกติแล้ว
+ผลตรวจรอบ 30 ตุลาคม: `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` จบด้วย exit 0 โดย JSON report แยกเป็น 12 ordinary passes, 3 expected failures และ 0 unexpected results; รันยืนยันสองรอบผ่านตรงกัน `npm test`, lint, TypeScript, Oxfmt และ local GitHub Pages static build ผ่านด้วย ไม่มีการแก้ไข application source หรือ deploy
+ผลตรวจรอบ 23 ตุลาคม: `npm test`, `npm run lint`, TypeScript, Oxfmt และ GitHub Pages static build (Node 24, prerender 2 routes) ผ่าน; build รอบแรกติด sandbox `listen EPERM 127.0.0.1` แล้ว rerun ในบริบทที่เปิด loopback ได้จนผ่าน
+Browser QA รอบ 23 ตุลาคม: ใช้ local app กับ demo ใน browser context แยก (ไม่เขียน production) ที่ 320/360/390/480px ตรวจว่าตารางมี F/A, ชื่อทีมไม่ถูกตัด, ไม่มี horizontal overflow; รูปแชร์ขนาด 1080×1600 แสดง F/A ตรงช่องและไม่ชนคอลัมน์อื่น ไม่ได้ทดสอบการบันทึกสกอร์ตัวอย่างผ่าน UI เพราะเครื่องมือปฏิเสธการทดสอบที่อาจเขียน Neon และไม่ได้แก้ข้อมูลเกมจริง
 Browser QA รอบก่อนหน้า: ใช้ local app กับ demo ใน browser context แยก (ไม่เขียน production) ที่ 320/390/480px ตรวจว่ากดเสื้อ/ชื่อทีม/ช่องผลเปิด popup, เลขแมตช์และเวลาเปิดรายละเอียด, popup โฟกัสตัวกล่องแทน input จึงไม่เลือกเลข 0 เอง, หน้าเลื่อนเฉพาะเนื้อหาและเมนูล่างยังอยู่ใน viewport/รับการกด, เปลี่ยนหน้ากลับ Home แล้วเริ่มเลื่อนจากด้านบน, ไม่พบ horizontal overflow หรือ pageerror; ยังต้องทดสอบอาการ Add to Home Screen บน iPhone จริงหลัง deploy
 Browser QA รอบก่อนหน้า: ใช้ local app กับ demo และ mock Neon ทุก RPC (ไม่เขียน production) ทดสอบ popup กรอก/จบ M1, แก้ผลจบ 1-0 เป็น 2-0, เก็บสกอร์ LIVE ของ M2 แล้วปิด/เปิด popup, ทางเข้ารายละเอียดผู้ทำประตู, เปลี่ยนคู่ใน Settings แล้วแก้เฉพาะชื่อโดยคิวทั้ง 15 แมตช์ไม่เปลี่ยน, ปุ่ม refresh เรียก get ล่าสุดและรับ revision/name ใหม่, รูปแชร์ก่อนมีผลแข่งแสดง “ยังไม่มีผลการแข่งขัน” แทนชื่อผู้นำ; popup ไม่ล้นจอที่ 320/390/480px ยังไม่ได้ทดสอบ touch และ share sheet บนเครื่องจริงหรือ production หลัง push
 Browser QA รอบก่อนหน้า 1 ตุลาคม: context แยก + mock Neon ทุก request ที่ 320/390/480px ไม่มี horizontal overflow หรือตัดชื่อสี หัวเซ็ตสูง 32px เท่ากัน; ตรวจสกอร์ LIVE 99–99, เปิดผลเก่า/ยกเลิกผล/จบใหม่แล้วพับกลับ, แก้ผล legacy ที่สลับ A/B บันทึกให้ถูกทีม, เซ็ตท้าย 4 แมตช์พับได้, เพิ่ม M23–M25 แล้วเปิดเซ็ตที่ยังไม่จบและสร้างเซ็ต 5 ถูกต้อง ไม่พบ pageerror ใน flow legacy/overtime; ไม่ได้ทดสอบ touch บนเครื่องจริงหรือ production
@@ -84,6 +89,7 @@ Technology:
 | `lib/demo-data.ts`                      | ข้อมูลตัวอย่าง 4 ทีม                                                                                      |
 | `db/neon-schema.sql`                    | table, RPC functions และ grants ของ Neon                                                                  |
 | `scripts/verify-engine.ts`              | engine smoke checks                                                                                       |
+| `tests/e2e/` และ `playwright.config.ts` | local browser regression tests, in-memory RPC และ external network guard; คู่มืออยู่ใน `tests/e2e/README.md` |
 | `scripts/generate-game-share-pages.tsx` | สร้าง static game share/OG pages และ static entry สำหรับ `/allgames`                                      |
 | `scripts/github-pages-404.html`         | redirect deep path ของ GitHub Pages กลับเข้า SPA                                                          |
 | `.github/workflows/deploy-pages.yml`    | build และ deploy ทุกครั้งที่ push `main`                                                                  |
@@ -226,7 +232,7 @@ Automated checks ที่ผ่าน:
 - Local backup retention วันที่ 9 กันยายน: ล้างเฉพาะ backup ที่ซิงก์แล้วซึ่งเกิน 12 เกม และรักษาทุก backup ที่ยังรอซิงก์
 - Neon production ยืนยันว่า legacy `save_football_game(text,jsonb)` ถูกลบแล้ว และเกมทั้ง 4 รายการยังโหลดผ่าน runtime schema
 
-ยังไม่มี browser/E2E suite ที่ commit อยู่ใน repository; smoke scripts รอบ audit เป็น ad-hoc และไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
+รอบ 30–31 ตุลาคมเพิ่ม browser/E2E suite แบบ local และ PostgreSQL ในหน่วยความจำแล้ว การทดสอบก่อนหน้านี้เป็น ad-hoc; ทั้งสองแบบไม่ได้แทนการทดสอบ touch/share sheet บนอุปกรณ์จริง
 
 ## 10. Resolved findings และ known limitations
 
@@ -271,7 +277,7 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 ข้อจำกัดที่ยังตั้งใจคงไว้:
 
 - GitHub Pages ไม่มี server-side rewrite จริง จึงอาจตอบ 404 ชั่วครู่เมื่อเปิด game path ที่อยู่นอกชุด static pages ซึ่ง workflow เตรียมย้อนหลัง 1 วันและล่วงหน้า 45 วัน วันละ 12 Game ID; game ที่มีอยู่ใน Neon จะถูกสร้าง static page ทุกครั้งที่ deploy/nightly run
-- ยังไม่มี automated browser/E2E suite ที่รันซ้ำผ่าน npm; รอบนี้มี browser fixture QA แบบ manual ผ่าน local + mock Neon ตามรายการต้นเอกสารแล้ว ยังต้องตรวจ touch/native share บนอุปกรณ์จริงและ production หลัง deploy
+- มี automated browser/E2E suite ผ่าน `npm run test:e2e` ใน local แล้ว; ตรวจเฉพาะ browser กับ mock contract ไม่ยืนยัน SQL/permissions ของ Neon, HTTP status ของ Pages หรือ touch/native share บนเครื่องจริง และยังไม่ได้เพิ่ม suite นี้ใน CI
 - แอปเปิดให้ทุกคนที่มีลิงก์แก้ไขและลบได้ตาม requirement กลุ่มเล็ก จึงไม่เหมาะกับข้อมูลสำคัญ
 - Backup ใน localStorage เป็นเพียง fallback; ระบบเก็บรายการที่ซิงก์แล้วล่าสุด 12 เกมเพื่อไม่ให้พื้นที่ browser โตไม่จำกัด แต่ข้อมูลหลักของเกมที่มี Game ID ยังคงอยู่ใน Neon
 - Local staging ที่ใช้ Neon Data API ต้องใช้ origin ที่อนุญาตใน Neon CORS; ปัจจุบัน `http://localhost:3000` ใช้ได้ ส่วน port อื่น เช่น 3100 ต้องเพิ่ม origin ก่อนจึงจะทดสอบการโหลด DB ได้
@@ -280,7 +286,7 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 
 ## 11. Recommended next work order
 
-1. เพิ่ม browser/E2E contract tests สำหรับ score, sync conflict, reconnect และ deep link
+1. แก้ known issues ที่เหลือตามลำดับความสำคัญและเปลี่ยน expected failures เป็น regression tests ปกติ; พิจารณารัน suite ใน CI แยกจาก deployment เมื่อพร้อม
 2. พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ HTTP 200 สำหรับทุก game path และ preview bot
 3. เพิ่ม rate limit/authentication หากนำไปใช้นอกกลุ่มเพื่อน
 
