@@ -64,7 +64,7 @@ npm run test:e2e:report
 
 ผลรอบ 31 ตุลาคม: 35 เคสผ่านตามปกติ (Chromium 32 + WebKit mobile 3) ไม่มี expected failures; เพิ่ม `game-age.spec.ts` และ `mobile-webkit.spec.ts` ส่วน `create-game.spec.ts` 6 เคสตรวจ create/retry และบั๊กเดิมอยู่ใน `data-integrity.spec.ts`/`routing.spec.ts` Pure assertions ของ `validPagesPath` ใน `scripts/verify-engine.ts` ตรวจทั้ง local root และ production base path `/FootballTeam`
 
-WebKit จำลองไม่ใช่เครื่อง iPhone จริง การลาก marker ใช้ pointer/mouse ใน engine WebKit และตรวจ touch-action ส่วนเมนู/popup ใช้ touch tap ไม่ได้ยืนยัน native keyboard, ล็อกจอจริง หรือ share sheet ดู [REAL_DEVICE_CHECKLIST.md](./REAL_DEVICE_CHECKLIST.md) ซึ่งยังคงสถานะ “ยังไม่ตรวจ”
+WebKit จำลองไม่ใช่เครื่อง iPhone จริง การลาก marker ใช้ pointer/mouse ใน engine WebKit และตรวจ touch-action ส่วนเมนู/popup ใช้ touch tap ไม่ได้ยืนยัน native keyboard, ล็อกจอจริง หรือ share sheet ผู้ใช้รายงานหลังลองทดสอบว่าโดยรวมใช้งานได้ในวันที่ 31 ตุลาคม 2026 โดยไม่ได้ระบุรุ่น/iOSหรือผลรายข้อ บันทึกแยกเป็น user-reported result ใน [REAL_DEVICE_CHECKLIST.md](./REAL_DEVICE_CHECKLIST.md)
 
 ```bash
 # เฉพาะข้อมูลและ routing

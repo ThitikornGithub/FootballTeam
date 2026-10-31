@@ -74,7 +74,7 @@ GitHub Actions รัน lint/typecheck, engine, DB ในหน่วยคว�
 
 ผล `npm audit` ล่าสุด 31 ตุลาคม: **0 vulnerabilities** ถอดแพ็กเกจ CLI `shadcn` ที่ไม่ได้ใช้ตอนรันแอป และเก็บ CSS เดิมแบบ verbatim พร้อม MIT license ใน `app/vendor/shadcn-tailwind.css` แทน ไม่มีการอัปเดต CSS/เปลี่ยนหน้าตาไปพร้อมกัน หากเพิ่ม UI components ในอนาคต ให้ตรวจ generator แยกก่อน ไม่เพิ่ม CLI กลับเข้า runtime โดยอัตโนมัติ
 
-การตรวจบน iPhone จริงยังแยกจากผล WebKit จำลอง ดู [รายการตรวจบนเครื่องจริง](./tests/e2e/REAL_DEVICE_CHECKLIST.md) GitHub Pages ยังอาจตอบ 404 ก่อน redirect สำหรับ URL นอกชุด static pages; ไม่มีการย้าย hosting หรือเพิ่มระบบ login ในรอบนี้
+ผู้ใช้รายงานหลังลองทดสอบวันที่ 31 ตุลาคม 2026 ว่าโดยรวมใช้งานได้ โดยยังไม่ได้ระบุรุ่นอุปกรณ์/iOSหรือผลแยกรายข้อ บันทึกผลตอบรับนี้แยกจาก WebKit จำลองใน [รายการตรวจบนเครื่องจริง](./tests/e2e/REAL_DEVICE_CHECKLIST.md) และ [เอกสารส่งต่องาน](./PROJECT_HANDOFF.md) ส่วน GitHub Pages ยังอาจตอบ 404 ก่อน redirect สำหรับ URL นอกชุด static pages; ระบบ login/rate limit ยังพักไว้ตามคำขอ
 
 แอปไม่มีหน้า login ตาม requirement ปัจจุบัน ผู้ใช้ที่เข้าถึงเว็บสามารถแก้ไขและลบเกมได้ โปรดอ่านข้อจำกัดและ known risks ใน `PROJECT_HANDOFF.md` ก่อนเปลี่ยน persistence หรือ security model
 

@@ -7,6 +7,7 @@
 ผลตรวจรอบ 31 ตุลาคมล่าสุด: browser 35 ordinary passes (Chromium 32 + WebKit mobile 3) ไม่มี expected failures รวม create/retry, sync, เกมเก่า/ข้ามเที่ยงคืน, mobile navigation/popup/resume/drag/share image SQL ใน PGlite ผ่าน 37 กรณีผิดรูปและ compatibility/idempotent-create checks เดิม ผล npm audit แบบเต็มเป็น 0 vulnerabilities
 Workflow checks รัน lint/typecheck, engine, DB ใน RAM และ browser tests ก่อน build; build/deploy ต้องรอ checks ผ่าน PR รัน checks อย่างเดียว รายงาน failures เก็บ 7 วัน หลัง normalize/generate Pages ต้องผ่าน `check:pages` ซึ่งตรวจทุก game entry, allgames/latest, 404 fallback เมื่อ storage ใช้ไม่ได้, OG files และ asset base path แบบ offline
 License ของ vendor CSS เก็บทั้ง header และ `public/licenses/shadcn.txt` ซึ่งถูกคัดลอกไปกับเว็บ มี artifact check บังคับให้ไฟล์ notice อยู่ใน output เพื่อไม่ให้การย่อ CSS ทำให้ notice หาย
+ผลตอบรับหลัง deploy วันที่ 31 ตุลาคม: ผู้ใช้รายงานว่าลองทดสอบแล้วทุกอย่างดูโอเค ไม่มีปัญหาที่แจ้งกลับมา รับเป็น user-reported mobile acceptance ตามรายการที่ส่งให้ ไม่ใช่การตรวจอุปกรณ์โดย agent และยังไม่มีรุ่น/iOS/ผลรายข้อ ดู `tests/e2e/REAL_DEVICE_CHECKLIST.md` จึงไม่จัดการทดสอบมือถือภาพรวมเป็นงานติดขัดที่ต้องหยุดใช้งานต่อ
 Neon migration วันที่ 31 ตุลาคมติดตั้งสำเร็จแล้ว: strict validator และ counter allocator ทำงาน เกมเดิมทั้ง 3 เกมอ่านได้ครบ และ fingerprint ของ records ก่อน/หลังตรงกันทุกเกม มี DDL backup ใน ignored `outputs/db-backups/`; ไม่ได้เขียนทับ state, scores, fixtures, GK order หรือ revisions ของเกมเดิม ผล engine checks, lint, TypeScript, Oxfmt และ local GitHub Pages production build ผ่านด้วย
 Idempotent-create migration ติดตั้งสำเร็จแล้วด้วย `db:apply-create`: gameCount ยัง 3, snapshotUnchanged=true, v2/grant/private receipts ผ่านการตรวจ ไม่มีการสร้างเกมตัวอย่างใน production เก็บ DDL ก่อนติดตั้งไว้ที่ ignored `outputs/db-backups/2026-10-31T07-58-11-070Z-before-idempotent-create.sql`
 ก่อน deploy ต้อง refresh Neon Data API schema ผ่าน CLI แล้วให้ `npm run db:check-create-api` ผ่านด้วย SQL NOTIFY อย่างเดียวไม่พอในรอบนี้; ถ้า CLI session เป็น invalid_grant ให้ login ใหม่ตาม `db/README.md` การติดตั้ง PostgreSQL สำเร็จยังไม่ยืนยันว่า Data API เห็น RPC ใหม่ และห้าม fallback ไป legacy create เพื่อเลี่ยงปัญหานี้
@@ -297,11 +298,10 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 
 ## 11. Recommended next work order
 
-| งานที่ยังเหลือ                                        | แนวทาง                                                                                 | สถานะ                                |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------ |
-| iPhone Add to Home Screen, touch และ native share | ทำ REAL_DEVICE_CHECKLIST บนเครื่องจริง; WebKit 3 เคสจำลองผ่านแล้ว                           | ยังไม่ยืนยันจาก real device              |
-| HTTP 200 สำหรับทุก deep path                        | artifact checks ป้องกันไฟล์/redirect เสีย แต่ URL นอกชุด static pages ยังอาจ 404 ก่อน redirect | ข้อจำกัด GitHub Pages; ไม่เปลี่ยน hosting |
-| ใช้นอกกลุ่มเพื่อน                                      | auth/rate limit พักตามคำขอผู้ใช้                                                           | ยังไม่ทำ                               |
+| งานที่ยังเหลือ                 | แนวทาง                                                                                 | สถานะ                                |
+| -------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------ |
+| HTTP 200 สำหรับทุก deep path | artifact checks ป้องกันไฟล์/redirect เสีย แต่ URL นอกชุด static pages ยังอาจ 404 ก่อน redirect | ข้อจำกัด GitHub Pages; ไม่เปลี่ยน hosting |
+| ใช้นอกกลุ่มเพื่อน               | auth/rate limit พักตามคำขอผู้ใช้                                                           | ยังไม่ทำ                               |
 
 ## 12. Rules for the next agent
 
