@@ -26,6 +26,12 @@ assert(
   scripts > 0 && styles > 0,
   'Pages HTML must link scripts and styles with the production base path',
 );
+const license = await readFile(join(root, 'licenses/shadcn.txt'), 'utf8');
+assert(
+  license.includes('MIT License') &&
+    license.includes('Copyright (c) 2023 shadcn'),
+  'Published CSS must include its upstream license',
+);
 
 function checkRedirect(html: string, path: string) {
   let target = '';
