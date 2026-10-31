@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
   schedule:
     # 01:17 Asia/Bangkok. Future game URLs are prepared 45 days ahead.
     - cron: '17 18 * * *'
@@ -15,11 +18,51 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  group: pages-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'production' }}
   cancel-in-progress: false
 
 jobs:
+  checks:
+    name: Tests before release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint and types
+        run: |
+          npm run lint
+          npx tsc --noEmit
+      - name: Engine and in-memory PostgreSQL checks
+        run: |
+          npm test
+          npm run test:db
+      - name: Install test browsers
+        run: npx playwright install --with-deps chromium webkit
+      - name: Browser regression tests (mock API only)
+        run: npm run test:e2e
+      - name: Retain failure reports
+        if: failure()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: browser-failure-${{ github.run_id }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   build:
+    needs: checks
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -49,6 +92,9 @@ jobs:
 
       - name: Generate game share pages from Neon
         run: npm run generate:game-shares
+
+      - name: Check generated Pages routes and assets
+        run: npm run check:pages
 
       - name: Setup Pages
         uses: actions/configure-pages@v6

@@ -1,6 +1,6 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@import 'shadcn/tailwind.css';
+@import './vendor/shadcn-tailwind.css';
 
 @custom-variant dark (&:is(.dark *));
 
@@ -67,12 +67,8 @@ body {
   margin: 0;
   background: var(--background);
   font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Noto Sans Thai',
-    sans-serif;
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Noto Sans Thai', sans-serif;
 }
 @media (max-width: 639px) {
   html,

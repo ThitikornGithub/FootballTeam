@@ -32,6 +32,7 @@ import {
 import { parseTournament } from '../lib/football-schema';
 import { fixtureSelectionChanged } from '../lib/football-settings';
 import { validPagesPath } from '../lib/football-pages-path';
+import { isOlderOpenGame } from '../lib/football-game-age';
 import {
   canonicalJson,
   describeUnsavedChanges,
@@ -49,6 +50,54 @@ import {
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
+
+const ageExample = {
+  createdAt: '2026-10-30T12:00:00Z',
+  startTime: '19:00',
+  availableTimeMinutes: 180,
+};
+const nextMorning = Date.parse('2026-10-31T02:00:00Z');
+assert(
+  isOlderOpenGame(ageExample, nextMorning),
+  'Yesterday unclosed game gets an age hint',
+);
+assert(
+  !isOlderOpenGame(
+    { ...ageExample, closedAt: '2026-10-30T15:00:00Z' },
+    nextMorning,
+  ),
+  'Closed games are not pending',
+);
+assert(
+  !isOlderOpenGame({ ...ageExample, closed: true }, nextMorning),
+  'Closed summaries are not pending',
+);
+assert(
+  !isOlderOpenGame(ageExample, Date.parse('2026-10-30T16:00:00Z')),
+  'Same Bangkok day is not old',
+);
+assert(
+  !isOlderOpenGame(
+    { ...ageExample, startTime: '23:00' },
+    Date.parse('2026-10-30T18:00:00Z'),
+  ),
+  'Overnight game stays live before its scheduled end',
+);
+assert(
+  isOlderOpenGame(
+    { ...ageExample, startTime: '23:00' },
+    Date.parse('2026-10-30T19:01:00Z'),
+  ),
+  'Overnight game may become pending after its end',
+);
+assert(
+  !isOlderOpenGame({ createdAt: 'invalid' }, nextMorning),
+  'Invalid legacy date never gets a misleading age hint',
+);
+assert(
+  !isOlderOpenGame({ createdAt: '2026-11-02T12:00:00Z' }, nextMorning),
+  'Future creation dates are not old',
+);
 
 for (const base of ['', '/FootballTeam']) {
   for (const route of ['game20260906-2', 'allgames', 'latest/']) {

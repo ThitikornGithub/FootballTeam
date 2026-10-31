@@ -1,10 +1,11 @@
 # FootballTeam — Project Handoff
 
 อัปเดตล่าสุด: 31 ตุลาคม 2026
-ขอบเขตรอบล่าสุด: แก้ข้อ 3 ป้องกันสร้างเกมซ้ำเมื่อ DB สร้างสำเร็จแต่คำตอบหาย โดยเพิ่ม `create_football_game_v2` และ receipt table ผ่าน `20261031_idempotent_create.sql` ต้องติดตั้ง migration ก่อน client ใหม่ ส่วน remote deletion/routing/dependency/F-A เป็นงานที่เสร็จในรอบก่อนหน้า
+ขอบเขตรอบล่าสุด: เพิ่ม checks ก่อน deploy, WebKit มือถือจำลอง, ป้ายเกมเก่าที่ไม่ปิด, artifact checks สำหรับ Pages และถอด CLI shadcn ส่วนเกินเพื่อแก้ audit ที่คงเหลือ ไม่เปลี่ยน DB/วิธีจัดคิว และพัก auth/rate limit ตามผู้ใช้ขอ ส่วน idempotent create และ migration เป็นงานที่ปล่อยสำเร็จรอบก่อนหน้า
 การจัดคิวแบบ B, การจับคู่/สลับทีม, สูตรคะแนน และลำดับ GK ไม่ถูกแก้
 ขอบเขต network ของ E2E: เปิด server ที่ `http://localhost:3210` เท่านั้น ทุก Neon RPC ตอบจาก memory fixture; host ภายนอกถูกบล็อก, ปิด service worker และ external DNS/preconnect ของ Chromium ใช้ browser profile ใหม่แต่ละ test ไม่ใช้ข้อมูลเกมจริงหรือเขียน Neon ส่วนคำสั่ง `db:check-hardening`/`db:apply-hardening` เป็น operational commands แยกต่างหาก ดู `db/README.md`
-ผลตรวจรอบ 31 ตุลาคมล่าสุด: browser 30 ordinary passes ไม่มี expected failures; เพิ่ม create/retry 6 เคส ครอบคลุม lost response, reload/draft scores, double tap, newer remote revision, deleted-game replay, identical-settings copy และ blocked storage ในแท็บเดิม SQL ใน PGlite ผ่าน 37 กรณีผิดรูป, legacy/formations, ID allocation, revision conflict, anonymous permissions และ idempotent replay/rollback/reapply โดยเกม/คะแนน/คิวเดิมคงอยู่
+ผลตรวจรอบ 31 ตุลาคมล่าสุด: browser 35 ordinary passes (Chromium 32 + WebKit mobile 3) ไม่มี expected failures รวม create/retry, sync, เกมเก่า/ข้ามเที่ยงคืน, mobile navigation/popup/resume/drag/share image SQL ใน PGlite ผ่าน 37 กรณีผิดรูปและ compatibility/idempotent-create checks เดิม ผล npm audit แบบเต็มเป็น 0 vulnerabilities
+Workflow checks รัน lint/typecheck, engine, DB ใน RAM และ browser tests ก่อน build; build/deploy ต้องรอ checks ผ่าน PR รัน checks อย่างเดียว รายงาน failures เก็บ 7 วัน หลัง normalize/generate Pages ต้องผ่าน `check:pages` ซึ่งตรวจทุก game entry, allgames/latest, 404 fallback เมื่อ storage ใช้ไม่ได้, OG files และ asset base path แบบ offline
 Neon migration วันที่ 31 ตุลาคมติดตั้งสำเร็จแล้ว: strict validator และ counter allocator ทำงาน เกมเดิมทั้ง 3 เกมอ่านได้ครบ และ fingerprint ของ records ก่อน/หลังตรงกันทุกเกม มี DDL backup ใน ignored `outputs/db-backups/`; ไม่ได้เขียนทับ state, scores, fixtures, GK order หรือ revisions ของเกมเดิม ผล engine checks, lint, TypeScript, Oxfmt และ local GitHub Pages production build ผ่านด้วย
 Idempotent-create migration ติดตั้งสำเร็จแล้วด้วย `db:apply-create`: gameCount ยัง 3, snapshotUnchanged=true, v2/grant/private receipts ผ่านการตรวจ ไม่มีการสร้างเกมตัวอย่างใน production เก็บ DDL ก่อนติดตั้งไว้ที่ ignored `outputs/db-backups/2026-10-31T07-58-11-070Z-before-idempotent-create.sql`
 ก่อน deploy ต้อง refresh Neon Data API schema ผ่าน CLI แล้วให้ `npm run db:check-create-api` ผ่านด้วย SQL NOTIFY อย่างเดียวไม่พอในรอบนี้; ถ้า CLI session เป็น invalid_grant ให้ login ใหม่ตาม `db/README.md` การติดตั้ง PostgreSQL สำเร็จยังไม่ยืนยันว่า Data API เห็น RPC ใหม่ และห้าม fallback ไป legacy create เพื่อเลี่ยงปัญหานี้
@@ -228,7 +229,7 @@ Automated checks ที่ผ่าน:
 - TypeScript `--noEmit`
 - Engine smoke checks: defaults, round-robin repeats, time window, score, scorers/Top 3, standings, overtime, GK fairness, tactics formation และ reopen match
 - GitHub Pages production build ด้วย Node 24 ในรอบ audit นี้
-- Dependency audit รอบ 31 ตุลาคม: จาก 28 รายการเหลือ 6 รายการ (0 critical/high, 4 moderate, 2 low) หลังใช้ Vinext 1.0.0, Vite 8.3.5, Cloudflare plugin 1.66.0, Wrangler 4.154.0, Workers Types 5.20261023.1, Oxfmt 0.75.0, Satori 0.63.2, Sharp 0.35.5, shadcn 4.23.0 และ override `fflate` จาก 0.7.4 เป็น patched 0.7.5 โดยคง React 19.2.8 ผลเต็มและ `--omit=optional` เหลือคำเตือนในเครื่องมือ shadcn/registry/ts-morph (`deepmerge`, `minimatch`) ซึ่งไม่ได้ใช้ประมวลผลข้อมูลเกมใน browser ยังไม่ force downgrade shadcn หรือบังคับ minimatch major เพราะอาจกระทบ tooling; audit จึงยัง exit 1 ไม่ใช่ clean audit
+- Dependency audit รอบ 31 ตุลาคมล่าสุด: 0 vulnerabilities (เดิม 28 → 6 → 0) ถอด runtime dependency `shadcn` ที่ใช้เพียง CSS และแพ็กเกจย่อยที่ติดมารวม 178 packages แทนการ force update major เก็บ `shadcn@4.23.0/dist/tailwind.css` แบบ verbatim พร้อม MIT notice ใน `app/vendor/shadcn-tailwind.css` เทียบเนื้อหากับไฟล์เดิมก่อนถอนแล้วตรงกัน และ exclude vendor CSS จาก Oxfmt `@shadcn/react` ที่ component catalog ใช้งานยังอยู่ ไม่มีการเปลี่ยน React/Vite/UI runtime versions รอบนี้
 - Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
 - Local UI smoke test ที่ 320px: Home, standings, schedule, settings และหน้าจัดการผู้เล่นไม่ล้นขอบ ปุ่มลบยังมองเห็นครบ ตัวเลือกตำแหน่งแบบ compact มีพื้นขาวทึบ และเปลี่ยนเมนูแล้ว scroll กลับด้านบน
 - Local browser smoke วันที่ 9 กันยายน: scorer popup, share card, tactics 5/7 คน, formation, animation, standings ที่ 320px และ tactics autosave หลังสลับหน้าผ่านทั้งหมด
@@ -281,10 +282,12 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 
 รูปแชร์ใช้ข้อความ “ก่อนเริ่มการแข่งขัน / ยังไม่มีผลการแข่งขัน” ตราบใดที่ยังไม่มีแมตช์ finished แม้ตารางอันดับจะเรียงทีมตั้งต้นได้อยู่แล้ว จึงไม่กล่าวอ้างว่าทีมแรกเป็นผู้นำทั้งที่ทุกทีมมี 0 แต้ม; หลังมีผลแข่งจะกลับไปใช้ข้อความผู้นำหรืออันดับหนึ่งตามสถานะเดิม
 
+การแสดงเกมเก่าใช้ `lib/football-game-age.ts` เปรียบเทียบวันในเวลา Bangkok และยกเว้นเกมข้ามเที่ยงคืนที่ยังไม่เลย scheduled end แสดง age notice ใน Home/ตาราง และป้าย “สร้างก่อนวันนี้” ในรายการเกม current match ของเกมเก่า/เกมปิดใช้ “ยังไม่จบ” แทน LIVE เป็น display hint เท่านั้น ไม่เขียน closedAt/status ไม่เปลี่ยนคะแนน/GK/fixtures และไม่ตัดเกมเก่าที่สร้างเตรียมไว้ล่วงหน้าออกจาก `/latest`
+
 ข้อจำกัดที่ยังตั้งใจคงไว้:
 
 - GitHub Pages ไม่มี server-side rewrite จริง จึงอาจตอบ 404 ชั่วครู่เมื่อเปิด game path ที่อยู่นอกชุด static pages ซึ่ง workflow เตรียมย้อนหลัง 1 วันและล่วงหน้า 45 วัน วันละ 12 Game ID; game ที่มีอยู่ใน Neon จะถูกสร้าง static page ทุกครั้งที่ deploy/nightly run
-- มี automated browser/E2E suite ผ่าน `npm run test:e2e` ใน local แล้ว; ตรวจเฉพาะ browser กับ mock contract ไม่ยืนยัน SQL/permissions ของ Neon, HTTP status ของ Pages หรือ touch/native share บนเครื่องจริง และยังไม่ได้เพิ่ม suite นี้ใน CI
+- มี automated browser/E2E suite ทั้ง local/CI แล้ว ตรวจ browser กับ mock contract และเพิ่ม WebKit จำลอง แต่ไม่ยืนยัน touch/keyboard/standalone/native share บน iPhone จริง คู่มือ `tests/e2e/REAL_DEVICE_CHECKLIST.md` ยังไม่ติ๊กผ่านจากผลจำลอง
 - แอปเปิดให้ทุกคนที่มีลิงก์แก้ไขและลบได้ตาม requirement กลุ่มเล็ก จึงไม่เหมาะกับข้อมูลสำคัญ
 - Backup ใน localStorage เป็นเพียง fallback; ระบบเก็บรายการที่ซิงก์แล้วล่าสุด 12 เกมเพื่อไม่ให้พื้นที่ browser โตไม่จำกัด แต่ข้อมูลหลักของเกมที่มี Game ID ยังคงอยู่ใน Neon
 - Local staging ที่ใช้ Neon Data API ต้องใช้ origin ที่อนุญาตใน Neon CORS; ปัจจุบัน `http://localhost:3000` ใช้ได้ ส่วน port อื่น เช่น 3100 ต้องเพิ่ม origin ก่อนจึงจะทดสอบการโหลด DB ได้
@@ -293,14 +296,11 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 
 ## 11. Recommended next work order
 
-| งานที่ยังเหลือ                                         | แนวทาง                                                                                          | สถานะ                         |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------- |
-| Dependency ของ CLI ยังมี 6 audit entries ระดับกลาง/ต่ำ | รอ upstream ที่แก้หรือแยก CSS ที่ใช้จริงออกจาก CLI อย่างมีการตรวจหน้าตา; ไม่ใช้ audit fix --force โดยไม่ทดสอบ | คงเหลือ ไม่ใช่ 0 vulnerabilities |
-| เกมเก่าที่ยังไม่ปิดแสดงเป็นกำลังแข่ง                        | ออกแบบสถานะจบทั้งวัน/ป้ายเกมเก่าแยกจาก current match                                                 | ยังไม่ทำ                        |
-| iPhone Add to Home Screen, touch และ native share  | ทดสอบบนอุปกรณ์จริง พร้อมกลับเข้าแอปหลังพักเครื่อง                                                         | ยังไม่ยืนยันจาก real device       |
-| CI ก่อน deploy                                      | เพิ่ม engine/DB/browser checks เป็น gate โดยแยกจากข้อมูลจริง                                          | ยังไม่ทำ                        |
-| HTTP 200 สำหรับทุก deep path                         | พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ                                                     | ข้อจำกัด GitHub Pages           |
-| ใช้นอกกลุ่มเพื่อน                                       | เพิ่ม rate limit/authentication ตามขอบเขตใหม่                                                      | ยังไม่อยู่ใน requirement          |
+| งานที่ยังเหลือ                                        | แนวทาง                                                                                 | สถานะ                                |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------- | ------------------------------------ |
+| iPhone Add to Home Screen, touch และ native share | ทำ REAL_DEVICE_CHECKLIST บนเครื่องจริง; WebKit 3 เคสจำลองผ่านแล้ว                           | ยังไม่ยืนยันจาก real device              |
+| HTTP 200 สำหรับทุก deep path                        | artifact checks ป้องกันไฟล์/redirect เสีย แต่ URL นอกชุด static pages ยังอาจ 404 ก่อน redirect | ข้อจำกัด GitHub Pages; ไม่เปลี่ยน hosting |
+| ใช้นอกกลุ่มเพื่อน                                      | auth/rate limit พักตามคำขอผู้ใช้                                                           | ยังไม่ทำ                               |
 
 ## 12. Rules for the next agent
 

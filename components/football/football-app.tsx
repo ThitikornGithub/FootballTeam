@@ -154,6 +154,7 @@ import {
 import { parseTournament } from '@/lib/football-schema';
 import { fixtureSelectionChanged } from '@/lib/football-settings';
 import { PAGES_PATH_PARAM, validPagesPath } from '@/lib/football-pages-path';
+import { isOlderOpenGame } from '@/lib/football-game-age';
 import {
   canonicalJson,
   describeUnsavedChanges,
@@ -921,12 +922,14 @@ function CurrentMatchControl({
   next,
   onOpen,
   onUpdate,
+  showAsLive = true,
 }: {
   tournament: Tournament;
   match: Match;
   next?: Match;
   onOpen: () => void;
   onUpdate: (value: Tournament) => void;
+  showAsLive?: boolean;
 }) {
   const displayMatch = getMatchDisplay(tournament, match);
   const displayNext = next ? getMatchDisplay(tournament, next) : undefined;
@@ -1001,8 +1004,12 @@ function CurrentMatchControl({
       <div className="mb-3 flex items-center justify-between">
         <div>
           <p className="font-black text-[#087632]">
-            {match.status === 'current' ? 'กำลังแข่ง' : 'เกมถัดไป'} ·{' '}
-            {displayTournamentTime(tournament, match.startTime)}
+            {match.status === 'current'
+              ? showAsLive
+                ? 'กำลังแข่ง'
+                : 'ยังไม่จบ'
+              : 'เกมถัดไป'}{' '}
+            · {displayTournamentTime(tournament, match.startTime)}
           </p>
           <p className="text-xs font-bold text-slate-400">
             เกม {match.matchNumber} · สนาม 1
@@ -1306,6 +1313,27 @@ function EmptyHome({
   );
 }
 
+function OlderGameNotice({ tournament }: { tournament: Tournament }) {
+  if (!isOlderOpenGame(tournament)) return null;
+  const date = new Date(tournament.createdAt).toLocaleDateString('th-TH', {
+    timeZone: 'Asia/Bangkok',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+  return (
+    <aside
+      aria-label="เกมจากวันก่อน"
+      className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-950"
+    >
+      <p className="font-black">เกมนี้สร้างไว้ก่อนวันนี้และยังไม่ปิด</p>
+      <p className="mt-1 text-xs font-semibold leading-5">
+        สร้างเมื่อ {date} · แก้ผลเดิมได้ตามปกติ หากเลิกเล่นแล้วให้กด “จบเกมวันนี้” ที่หน้าหลัก
+      </p>
+    </aside>
+  );
+}
+
 function HomeScreen({
   tournament,
   gameId,
@@ -1342,6 +1370,8 @@ function HomeScreen({
   onOpenWheel: () => void;
 }) {
   const [confirmingClose, setConfirmingClose] = useState(false);
+  const showAsLive =
+    !tournament.closedAt && (!gameId || !isOlderOpenGame(tournament));
   const current =
     tournament.matches.find((match) => match.status === 'current') ??
     tournament.matches.find((match) => match.status === 'upcoming');
@@ -1439,6 +1469,7 @@ function HomeScreen({
             <span className="shrink-0 text-[#087632]">เปิดเกมล่าสุด</span>
           </button>
         )}
+        {gameId && <OlderGameNotice tournament={tournament} />}
         {tournament.closedAt && (
           <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-100 p-3 text-sm font-black text-slate-700">
             <span className="min-w-0">
@@ -1481,7 +1512,9 @@ function HomeScreen({
               <p className="text-lg font-black">
                 {current
                   ? current.status === 'current'
-                    ? 'แข่งอยู่ตอนนี้'
+                    ? showAsLive
+                      ? 'แข่งอยู่ตอนนี้'
+                      : 'แมตช์ที่ยังไม่จบ'
                     : 'เกมถัดไป'
                   : 'การแข่งขันจบแล้ว'}
               </p>
@@ -1508,6 +1541,7 @@ function HomeScreen({
               next={next}
               onOpen={() => onOpenMatch(current.id)}
               onUpdate={onUpdate}
+              showAsLive={showAsLive}
             />
           ) : (
             <div className="rounded-3xl bg-[#e5f5e9] p-8 text-center">
@@ -3332,6 +3366,8 @@ function ScheduleScreen({
   refreshing: boolean;
   onRefresh: () => void;
 }) {
+  const showAsLive =
+    !tournament.closedAt && (!gameId || !isOlderOpenGame(tournament));
   const [quickScoreMatchId, setQuickScoreMatchId] = useState<string | null>(
     null,
   );
@@ -3396,6 +3432,7 @@ function ScheduleScreen({
         }
       />
       <div className="space-y-3 px-4 py-4 pb-6">
+        {gameId && <OlderGameNotice tournament={tournament} />}
         <div className="space-y-2">
           {sets.map((set) => {
             const expanded = !set.complete || expansion.open.has(set.number);
@@ -3439,7 +3476,11 @@ function ScheduleScreen({
                     <span className="flex items-center gap-2">
                       เซ็ต {set.number}
                       <span className="text-[10px]">
-                        {set.hasCurrent ? '● LIVE' : 'รอแข่งขัน'}
+                        {set.hasCurrent
+                          ? showAsLive
+                            ? '● LIVE'
+                            : 'ยังไม่จบ'
+                          : 'รอแข่งขัน'}
                       </span>
                     </span>
                     <span className="tabular-nums">
@@ -3591,7 +3632,9 @@ function ScheduleScreen({
                                       }`}
                                     >
                                       {match.status === 'current'
-                                        ? 'LIVE'
+                                        ? showAsLive
+                                          ? 'LIVE'
+                                          : 'ยังไม่จบ'
                                         : match.status === 'finished'
                                           ? 'จบ'
                                           : 'รอ'}
@@ -3599,7 +3642,7 @@ function ScheduleScreen({
                                   )}
                                   {hasScore && match.status === 'current' && (
                                     <span className="text-[9px] font-black leading-3 text-[#087632]">
-                                      LIVE
+                                      {showAsLive ? 'LIVE' : 'ยังไม่จบ'}
                                     </span>
                                   )}
                                 </span>
@@ -4293,6 +4336,11 @@ function GamesScreen({
                     {game.closed && (
                       <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-black text-slate-500">
                         จบแล้ว
+                      </span>
+                    )}
+                    {isOlderOpenGame(game) && (
+                      <span className="shrink-0 rounded-md bg-amber-50 px-1.5 py-0.5 text-[10px] font-black text-amber-800">
+                        สร้างก่อนวันนี้
                       </span>
                     )}
                   </p>

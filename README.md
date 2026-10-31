@@ -26,6 +26,7 @@ npm test
 npm run test:db
 npm run lint
 ./node_modules/.bin/tsc --noEmit
+npm run test:e2e
 GITHUB_PAGES=true \
 NEXT_PUBLIC_BASE_PATH=/FootballTeam \
 NEXT_PUBLIC_SITE_URL=https://thitikorngithub.github.io \
@@ -37,11 +38,13 @@ npm run build
 เพิ่มชุดทดสอบด้วยข้อมูลจำลองที่เปิดแอปเฉพาะ `localhost:3210` และบล็อกเครือข่ายภายนอก ทุก RPC ของ Neon ตอบจากข้อมูลในหน่วยความจำ ไม่มีการใช้ข้อมูลเกมจริงหรือ deploy อัตโนมัติ
 
 ```bash
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:e2e
 ```
 
-หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ ดูขอบเขตการทดสอบและการป้องกันเครือข่ายใน [tests/e2e/README.md](./tests/e2e/README.md) รอบล่าสุดผ่าน 30 เคส ไม่มี expected failures
+หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ (ยังต้องติดตั้ง WebKit) หรือเลือกเฉพาะ Chromium ด้วย `-- --project=chromium` ดูขอบเขตใน [tests/e2e/README.md](./tests/e2e/README.md) รอบล่าสุดผ่าน 35 เคส รวม WebKit มือถือจำลอง 3 เคส ไม่มี expected failures
+
+GitHub Actions รัน lint/typecheck, engine, DB ในหน่วยความจำ และ browser tests ก่อน build/deploy ทุกครั้ง หากตรวจไม่ผ่านจะไม่ deploy พร้อมเก็บรายงานเมื่อ browser tests ล้มเหลว PR จะตรวจชุดทดสอบโดยไม่ deploy หลังสร้าง static pages ยังมี `npm run check:pages` ตรวจไฟล์ assets, รูป OG และเส้นทาง fallback แบบ offline
 
 การทดสอบ SQL ใช้ PostgreSQL ในหน่วยความจำผ่าน `npm run test:db` และไม่เชื่อมต่อ Neon ดูขั้นตอนตรวจ/ติดตั้ง migration จริงใน [db/README.md](./db/README.md)
 
@@ -61,6 +64,7 @@ npm run test:e2e
 - วางแผนบนกระดาน tactic แบบตำแหน่งนิ่งหรือ Animation เลือก 5/6/7 คนและ formation ได้
 - แชร์รูปตารางคะแนนผ่าน Web Share API ดาวน์โหลด PNG หรือคัดลอกข้อความ; ก่อนมีผลแข่งจะไม่แสดงทีมใดเป็นผู้นำ
 - หน้ารวมเกมทั้งหมดที่ `/FootballTeam/allgames` พร้อมเปิดและลบเกม โดยป้องกันคำขอเก่าดึงผู้ใช้กลับเข้าเกมหลังจากกด Back
+- เกมสร้างก่อนวันนี้ที่ยังไม่ปิดมีป้ายเตือนและใช้ “ยังไม่จบ” แทน LIVE โดยไม่ปิดหรือเขียนข้อมูลเกมเอง เกมข้ามเที่ยงคืนยังแสดง LIVE ได้จนถึงเวลาจบตามแผน
 - เก็บ state ของเกมใน Neon Postgres ผ่าน Neon Data API พร้อม revision conflict protection; LocalStorage เป็นเพียง backup โดยเก็บเกมที่ซิงก์แล้วล่าสุดไม่เกิน 12 เกม และไม่ลบ backup ที่ยังรอซิงก์
 - การสร้างเกมใช้เลขคำขอประจำร่างผ่าน `create_football_game_v2`: ถ้า DB สร้างแล้วแต่คำตอบหาย การลองซ้ำจะคืนเกมเดิม การสร้างใหม่จากการตั้งค่าเดิมยังเป็นอีกเกมหนึ่งได้ ต้องติดตั้ง `20261031_idempotent_create.sql` ก่อน deploy client ใหม่นี้ตาม [db/README.md](./db/README.md)
 - ป้องกันผลลัพธ์รายการเกมเก่าทำให้เกมที่ลบแล้วกลับมาแสดงชั่วคราว
@@ -68,7 +72,9 @@ npm run test:e2e
 - เปิด game/allgames path ได้แม้ browser storage ถูกบล็อก โดยใช้ redirect hint ชั่วคราวแล้วคืน URL เดิม
 - F/A สามหลักไม่ล้นคอลัมน์บนจอ 320px; ค่าสูงตั้งแต่สี่หลักขึ้นไปเลื่อนเฉพาะตารางในแนวนอนได้
 
-รอบ 31 ตุลาคมอัปเดต dependency ที่เข้ากันได้แล้ว: audit เหลือ 0 high/critical แต่ยังมี 6 รายการ (2 low, 4 moderate) ในเครื่องมือ shadcn/registry/ts-morph ดูรายละเอียดและงานคงเหลือใน `PROJECT_HANDOFF.md` อย่าใช้ `npm audit fix --force` โดยไม่ตรวจ breaking changes
+ผล `npm audit` ล่าสุด 31 ตุลาคม: **0 vulnerabilities** ถอดแพ็กเกจ CLI `shadcn` ที่ไม่ได้ใช้ตอนรันแอป และเก็บ CSS เดิมแบบ verbatim พร้อม MIT license ใน `app/vendor/shadcn-tailwind.css` แทน ไม่มีการอัปเดต CSS/เปลี่ยนหน้าตาไปพร้อมกัน หากเพิ่ม UI components ในอนาคต ให้ตรวจ generator แยกก่อน ไม่เพิ่ม CLI กลับเข้า runtime โดยอัตโนมัติ
+
+การตรวจบน iPhone จริงยังแยกจากผล WebKit จำลอง ดู [รายการตรวจบนเครื่องจริง](./tests/e2e/REAL_DEVICE_CHECKLIST.md) GitHub Pages ยังอาจตอบ 404 ก่อน redirect สำหรับ URL นอกชุด static pages; ไม่มีการย้าย hosting หรือเพิ่มระบบ login ในรอบนี้
 
 แอปไม่มีหน้า login ตาม requirement ปัจจุบัน ผู้ใช้ที่เข้าถึงเว็บสามารถแก้ไขและลบเกมได้ โปรดอ่านข้อจำกัดและ known risks ใน `PROJECT_HANDOFF.md` ก่อนเปลี่ยน persistence หรือ security model
 

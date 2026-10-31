@@ -1,4 +1,4 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 
 // Intentionally fixed to loopback: never point this suite at a live website.
 const localOrigin = 'http://localhost:3210';
@@ -16,21 +16,39 @@ export default defineConfig({
     ['html', { open: 'never' }],
     ['json', { outputFile: 'test-results/results.json' }],
   ],
+  projects: [
+    {
+      name: 'chromium',
+      testIgnore: /mobile-webkit\.spec\.ts/,
+      use: {
+        browserName: 'chromium',
+        ...(process.env.PLAYWRIGHT_CHANNEL
+          ? { channel: process.env.PLAYWRIGHT_CHANNEL }
+          : {}),
+        launchOptions: {
+          args: [
+            '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
+          ],
+        },
+      },
+    },
+    {
+      name: 'webkit-mobile',
+      testMatch: /mobile-webkit\.spec\.ts/,
+      use: {
+        ...devices['iPhone 13'],
+        browserName: 'webkit',
+        // A closed loopback proxy also contains preconnect/DNS traffic that
+        // WebKit cannot block with Chromium's host-resolver flag. RPCs still
+        // go through the same memory fixture, never through this proxy.
+        proxy: { server: 'http://127.0.0.1:9', bypass: 'localhost,127.0.0.1' },
+      },
+    },
+  ],
   use: {
     baseURL: localOrigin,
-    browserName: 'chromium',
-    ...(process.env.PLAYWRIGHT_CHANNEL
-      ? { channel: process.env.PLAYWRIGHT_CHANNEL }
-      : {}),
     viewport: { width: 390, height: 844 },
     serviceWorkers: 'block',
-    // Also stop DNS/preconnects to external hosts, including the app's Neon
-    // preconnect hint. Mocked requests are fulfilled before DNS is needed.
-    launchOptions: {
-      args: [
-        '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1',
-      ],
-    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

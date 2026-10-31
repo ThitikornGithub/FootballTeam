@@ -7,7 +7,7 @@
 แนะนำ Node.js 24 ตาม GitHub Actions แล้วติดตั้ง dependency ด้วย `npm ci`
 
 ```bash
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:e2e
 ```
 
@@ -15,6 +15,8 @@ npm run test:e2e
 
 ```bash
 PLAYWRIGHT_CHANNEL=chrome npm run test:e2e
+# เฉพาะ Chromium เมื่อยังไม่มี WebKit
+PLAYWRIGHT_CHANNEL=chrome npm run test:e2e -- --project=chromium
 ```
 
 เปิดรายงานผลครั้งล่าสุด:
@@ -31,10 +33,10 @@ npm run test:e2e:report
 - Browser ทุก context ใช้ profile/localStorage ใหม่ และปิด service worker
 - `support/fixtures.ts` ติดตั้ง network guard ก่อนสร้าง page
 - อนุญาต HTTP ไปยัง origin ของ dev server เท่านั้น RPC ของ Neon ตอบจาก `MockFootballApi` ในหน่วยความจำ รวมทั้ง create/save/delete และ revision conflict ไม่มีการส่งต่อไป Neon
-- Host ภายนอกหรือ RPC ที่ไม่รู้จักถูกปิดกั้น และทำให้ test ล้ม Chromium ยังถูกกำหนดให้ไม่ resolve DNS ภายนอก เพื่อป้องกัน preconnect ของหน้าแอปด้วย
+- Host ภายนอกหรือ RPC ที่ไม่รู้จักถูกปิดกั้น และทำให้ test ล้ม Chromium ไม่ resolve DNS ภายนอก ส่วน WebKit ใช้ proxy loopback ที่ปิดอยู่และ bypass เฉพาะ localhost เพื่อจำกัด preconnect ไปยังเครื่องทดสอบ RPC ทั้งสอง project ตอบจาก memory fixture ก่อนถึงเครือข่าย
 - Deep link ใช้ `scripts/github-pages-404.html` ของโปรเจกต์ โดยเปลี่ยน base path เป็น local root ใน fixture เท่านั้น
 - ฐานข้อมูลจำลองใช้ชื่อ `Test green 1` ฯลฯ และ Game ID `game20260102-1` ข้อมูลจะหายเมื่อจบแต่ละ test
-- ตัว runner ไม่แก้แอป, SQL, migration หรือ deployment workflow และไม่ได้เปิด CI/deploy เพิ่ม
+- ตัว runner ไม่แก้ SQL, migration หรือข้อมูลจริง CI เรียกชุดนี้ก่อน build/deploy โดยไม่ใช้ DB credentials; รายงาน failures เก็บใน Actions 7 วัน PR รันเฉพาะ checks
 
 เมื่อเพิ่ม test ให้ import `test` และ `expect` จาก `./support/fixtures` เสมอ หากสร้าง context เพิ่ม ต้องเรียก `api.install(context)` **ก่อน** สร้าง page และปิด context ใน `finally` อย่าใช้ `APIRequestContext`, Node `fetch`, `route.fetch` หรือเครื่องมือ DB เพื่อส่งคำขอภายนอก เพราะคำขอนอก browser ไม่ผ่าน guard นี้
 
@@ -54,11 +56,15 @@ npm run test:e2e:report
 - เปิด game/allgames ได้เมื่อ browser storage ใช้ไม่ได้ โดยคืน query/hash และ clean path เดิม; redirect hint ภายนอกถูกปฏิเสธ
 - F/A สามหลักและผลต่างบวก/ลบต้องไม่ล้นช่องบนจอ 320px
 - เมนูมือถือ, กระดาน 14 ผู้เล่น + บอล และรูปแชร์ ที่ 320/480px
+- WebKit/iPhone 13 จำลอง: แตะเมนูหลังเลื่อน/เปลี่ยน viewport, popup ไม่ autofocus input, pageshow รับสกอร์ใหม่และ reload เก็บคะแนน, marker drag ไม่เลื่อน document และ canvas รูปแชร์
+- เกมเก่าไม่แสดง LIVE/ไม่ถูกแก้ข้อมูลจากการเปิดดู และเกมข้ามเที่ยงคืนยังแสดง LIVE ก่อนเวลาจบ
 - Network guard จำลอง RPC ได้โดยไม่ใช้ credential และบล็อกการเปิด production
 
 ## Results and remaining scope
 
-ผลรอบ 31 ตุลาคม: 30 เคสผ่านตามปกติ ไม่มี expected failures; เพิ่ม `create-game.spec.ts` 6 เคสสำหรับ create/retry ส่วนบั๊กเดิมอยู่ใน `data-integrity.spec.ts` และ `routing.spec.ts` สำหรับ storage ถูกบล็อก Pure assertions ของ `validPagesPath` ใน `scripts/verify-engine.ts` ตรวจทั้ง local root และ production base path `/FootballTeam`
+ผลรอบ 31 ตุลาคม: 35 เคสผ่านตามปกติ (Chromium 32 + WebKit mobile 3) ไม่มี expected failures; เพิ่ม `game-age.spec.ts` และ `mobile-webkit.spec.ts` ส่วน `create-game.spec.ts` 6 เคสตรวจ create/retry และบั๊กเดิมอยู่ใน `data-integrity.spec.ts`/`routing.spec.ts` Pure assertions ของ `validPagesPath` ใน `scripts/verify-engine.ts` ตรวจทั้ง local root และ production base path `/FootballTeam`
+
+WebKit จำลองไม่ใช่เครื่อง iPhone จริง การลาก marker ใช้ pointer/mouse ใน engine WebKit และตรวจ touch-action ส่วนเมนู/popup ใช้ touch tap ไม่ได้ยืนยัน native keyboard, ล็อกจอจริง หรือ share sheet ดู [REAL_DEVICE_CHECKLIST.md](./REAL_DEVICE_CHECKLIST.md) ซึ่งยังคงสถานะ “ยังไม่ตรวจ”
 
 ```bash
 # เฉพาะข้อมูลและ routing
