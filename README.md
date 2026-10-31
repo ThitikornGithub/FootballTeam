@@ -10,7 +10,7 @@ Mobile-first web app สำหรับจัดตารางฟุตบอ�
 
 ## Run locally
 
-ต้องใช้ Node.js 22.13 ขึ้นไป
+แนะนำ Node.js 24 (ตรงกับ GitHub Actions)
 
 ```bash
 npm install
@@ -41,7 +41,7 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ ดูขอบเขตการทดสอบ การป้องกันเครือข่าย และ expected failures ของบั๊กที่ยังไม่ได้แก้ใน [tests/e2e/README.md](./tests/e2e/README.md)
+หากมี Google Chrome แล้ว ใช้ `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` ได้ ดูขอบเขตการทดสอบและการป้องกันเครือข่ายใน [tests/e2e/README.md](./tests/e2e/README.md) รอบล่าสุดผ่าน 24 เคส ไม่มี expected failures
 
 การทดสอบ SQL ใช้ PostgreSQL ในหน่วยความจำผ่าน `npm run test:db` และไม่เชื่อมต่อ Neon ดูขั้นตอนตรวจ/ติดตั้ง migration จริงใน [db/README.md](./db/README.md)
 
@@ -63,6 +63,11 @@ npm run test:e2e
 - หน้ารวมเกมทั้งหมดที่ `/FootballTeam/allgames` พร้อมเปิดและลบเกม โดยป้องกันคำขอเก่าดึงผู้ใช้กลับเข้าเกมหลังจากกด Back
 - เก็บ state ของเกมใน Neon Postgres ผ่าน Neon Data API พร้อม revision conflict protection; LocalStorage เป็นเพียง backup โดยเก็บเกมที่ซิงก์แล้วล่าสุดไม่เกิน 12 เกม และไม่ลบ backup ที่ยังรอซิงก์
 - ป้องกันผลลัพธ์รายการเกมเก่าทำให้เกมที่ลบแล้วกลับมาแสดงชั่วคราว
+- เมื่อยืนยันว่าเกมถูกลบจากอีกเครื่อง จะหยุดแก้ไข/บันทึกและแสดงข้อความถาวร พร้อมเก็บ pending backup และให้เปิดข้อมูลที่ยังไม่บันทึกเป็นเกมร่างได้
+- เปิด game/allgames path ได้แม้ browser storage ถูกบล็อก โดยใช้ redirect hint ชั่วคราวแล้วคืน URL เดิม
+- F/A สามหลักไม่ล้นคอลัมน์บนจอ 320px; ค่าสูงตั้งแต่สี่หลักขึ้นไปเลื่อนเฉพาะตารางในแนวนอนได้
+
+รอบ 31 ตุลาคมอัปเดต dependency ที่เข้ากันได้แล้ว: audit เหลือ 0 high/critical แต่ยังมี 6 รายการ (2 low, 4 moderate) ในเครื่องมือ shadcn/registry/ts-morph ดูรายละเอียดและงานคงเหลือใน `PROJECT_HANDOFF.md` อย่าใช้ `npm audit fix --force` โดยไม่ตรวจ breaking changes
 
 แอปไม่มีหน้า login ตาม requirement ปัจจุบัน ผู้ใช้ที่เข้าถึงเว็บสามารถแก้ไขและลบเกมได้ โปรดอ่านข้อจำกัดและ known risks ใน `PROJECT_HANDOFF.md` ก่อนเปลี่ยน persistence หรือ security model
 

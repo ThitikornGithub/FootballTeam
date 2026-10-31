@@ -31,6 +31,7 @@ import {
 } from '../lib/football-tactics';
 import { parseTournament } from '../lib/football-schema';
 import { fixtureSelectionChanged } from '../lib/football-settings';
+import { validPagesPath } from '../lib/football-pages-path';
 import {
   canonicalJson,
   describeUnsavedChanges,
@@ -47,6 +48,38 @@ import {
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
+}
+
+for (const base of ['', '/FootballTeam']) {
+  for (const route of ['game20260906-2', 'allgames', 'latest/']) {
+    const path = `${base}/${route}?v=test#score`;
+    assert(
+      validPagesPath(path, base) === path,
+      'Deep links preserve path, query and hash',
+    );
+    assert(
+      validPagesPath(
+        `${base}/${route}?__football_path=bad&v=test#score`,
+        base,
+      ) === path,
+      'Restored routes remove internal redirect hints',
+    );
+  }
+  for (const path of [
+    null,
+    '//evil.invalid/allgames',
+    'https://evil.invalid/allgames',
+    '/unrelated/allgames',
+    `${base}/bad`,
+    `${base}/game20260906-0`,
+    `${base}/allgames\\evil`,
+    `${base}/allgames\n`,
+  ]) {
+    assert(
+      validPagesPath(path, base) === null,
+      'Invalid redirect hints must not be restored',
+    );
+  }
 }
 
 const expectedColorNames = [

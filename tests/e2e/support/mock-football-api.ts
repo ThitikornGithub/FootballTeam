@@ -169,7 +169,8 @@ export class MockFootballApi {
       if (this.failSaves)
         return json({ message: 'Simulated save failure' }, 503);
       const previous = this.games.get(id);
-      if (!previous) return json({ message: 'game not found' }, 404);
+      if (!previous)
+        return json({ code: 'P0002', message: 'game not found' }, 404);
       if (previous.revision !== body.p_expected_revision)
         return json({ ...previous, conflict: true });
       const game = {

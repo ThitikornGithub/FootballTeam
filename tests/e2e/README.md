@@ -4,7 +4,7 @@
 
 ## Run
 
-ใช้ Node.js 22.13 ขึ้นไปตามโปรเจกต์ แล้วติดตั้ง dependency ด้วย `npm ci`
+แนะนำ Node.js 24 ตาม GitHub Actions แล้วติดตั้ง dependency ด้วย `npm ci`
 
 ```bash
 npx playwright install chromium
@@ -49,22 +49,19 @@ npm run test:e2e:report
 - Refresh รับข้อมูลอีกเครื่อง และการสลับเกมรักษา Game ID/สกอร์แยกกัน
 - เปลี่ยนชื่อ/สลับสีเสื้อใน Settings โดยคู่แข่ง เวลา และลำดับผู้เล่น/GK ยังตรงเดิม
 - สำรองไม่สำเร็จต้องเตือนตามจริงและค้างไว้จนบันทึกออนไลน์สำเร็จ รวมถึงการสร้างเกมจาก draft
+- เกมถูกลบจากอีกเครื่องต้องหยุดแสดง saved/หยุดแก้ไข/หยุด retry และหายจากรายการ; pending backup ยังอยู่และเปิดเป็นเกมร่างได้แม้ storage เต็ม
+- เปิด game/allgames ได้เมื่อ browser storage ใช้ไม่ได้ โดยคืน query/hash และ clean path เดิม; redirect hint ภายนอกถูกปฏิเสธ
+- F/A สามหลักและผลต่างบวก/ลบต้องไม่ล้นช่องบนจอ 320px
 - เมนูมือถือ, กระดาน 14 ผู้เล่น + บอล และรูปแชร์ ที่ 320/480px
 - Network guard จำลอง RPC ได้โดยไม่ใช้ credential และบล็อกการเปิด production
 
-## Known issues
+## Results and remaining scope
 
-`known-issues.spec.ts` ยังมี expected failures จาก audit อยู่ 2 ข้อ: เกมถูกลบจากอีกเครื่องแล้วยังขึ้น saved และ F/A สามหลักล้นจอ 320px ส่วนปัญหาข้อความ backup ถูกแก้ในรอบ 31 ตุลาคมแล้ว จึงเป็น regression tests ปกติ 2 เคส
-
-เคสเหล่านี้เตรียมข้อมูลและเปิดหน้าให้สำเร็จก่อนเรียก `test.fail()` เฉพาะก่อน assertion ของบั๊ก ผลจึงแสดงเป็น **expected failure** โดยไม่ได้แก้แอปหรือซ่อนบั๊ก ถ้าแก้บั๊กแล้ว assertion ผ่าน runner จะรายงาน **unexpected pass** เพื่อให้เอา `test.fail()` ออกและเปลี่ยนเป็น regression test ปกติ
-
-ผลรอบ 31 ตุลาคม: 15 เคสผ่านตามปกติ และ 2 เคสยืนยันบั๊กเดิมได้ตามคาด ไม่มี unexpected result ตัว CLI อาจรวม expected failures ไว้ในสรุป `17 passed`; ดู `expectedStatus` และผลจริงใน HTML/JSON report เพื่อแยกสองกลุ่มนี้
+ผลรอบ 31 ตุลาคม: 24 เคสผ่านตามปกติ ไม่มี expected failures; ย้าย `known-issues.spec.ts` เป็น `data-integrity.spec.ts` แล้ว เพิ่ม `routing.spec.ts` สำหรับกรณี storage ถูกบล็อก ส่วน pure assertions ของ `validPagesPath` ใน `scripts/verify-engine.ts` ตรวจทั้ง local root และ production base path `/FootballTeam`
 
 ```bash
-# เฉพาะบั๊กที่ทราบ
-npm run test:e2e -- known-issues.spec.ts
-# เฉพาะการใช้งานปกติและ network guard
-npm run test:e2e -- --grep-invert 'known issue:'
+# เฉพาะข้อมูลและ routing
+npm run test:e2e -- data-integrity.spec.ts routing.spec.ts
 ```
 
-ผลทดสอบนี้ตรวจ browser กับ mock contract ไม่ยืนยัน SQL/permissions ของ Neon, HTTP status ของ GitHub Pages, iPhone จริง หรือ native share sheet ผลลัพธ์และ trace ใน `test-results/`/`playwright-report/` ถูก ignore; `test-results/results.json` เก็บสถานะจริงและ expected status ของแต่ละเคสเพื่อแยกเคสที่ผ่านกับ known issues
+ผลทดสอบนี้ตรวจ browser กับ mock contract ไม่ยืนยัน SQL/permissions ของ Neon, HTTP status ของ GitHub Pages, iPhone จริง หรือ native share sheet ผลลัพธ์และ trace ใน `test-results/`/`playwright-report/` ถูก ignore; `test-results/results.json` เก็บสถานะจริงและ expected status ของแต่ละเคส รอบปัจจุบันทุกเคสต้องผ่านตามปกติ

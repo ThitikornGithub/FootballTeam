@@ -1,12 +1,13 @@
 # FootballTeam — Project Handoff
 
 อัปเดตล่าสุด: 31 ตุลาคม 2026
-ขอบเขตรอบล่าสุด: แก้บั๊กระดับสูง 3 ข้อ ได้แก่ DB validator ที่รับ state ซึ่ง client อ่านไม่ได้, การใช้ Game ID ซ้ำหลังลบ และข้อความยืนยัน backup ที่เขียนไม่สำเร็จ เพิ่ม migration `20261031_data_integrity.sql`, ชุดทดสอบ PostgreSQL ในหน่วยความจำ และรวม browser suite ที่เตรียมไว้รอบ 30 ตุลาคม
-การจัดคิวแบบ B, การจับคู่/สลับทีม, สูตรคะแนน และลำดับ GK ไม่ถูกแก้ โค้ด frontend เปลี่ยนเฉพาะผลลัพธ์การสำรองและคำเตือนที่แสดงเมื่อ storage เขียนไม่ได้ ตราบใดที่ยังมีข้อมูลรอออนไลน์ คำเตือนจะไม่หายพร้อม toast
+ขอบเขตรอบล่าสุด: แก้ remote deletion, deep-link routing เมื่อ storage ใช้ไม่ได้, dependency ที่มีช่องโหว่ในช่วงเวอร์ชันที่เข้ากันได้ และ F/A สามหลักบนจอเล็ก ตามงานข้อ 1, 2, 4, 5 งานข้อ 3 (ป้องกันสร้างเกมซ้ำเมื่อคำตอบ create สูญหาย) ยังไม่รวมในรอบนี้ ไม่ต้องติดตั้ง migration ใหม่
+การจัดคิวแบบ B, การจับคู่/สลับทีม, สูตรคะแนน และลำดับ GK ไม่ถูกแก้
 ขอบเขต network ของ E2E: เปิด server ที่ `http://localhost:3210` เท่านั้น ทุก Neon RPC ตอบจาก memory fixture; host ภายนอกถูกบล็อก, ปิด service worker และ external DNS/preconnect ของ Chromium ใช้ browser profile ใหม่แต่ละ test ไม่ใช้ข้อมูลเกมจริงหรือเขียน Neon ส่วนคำสั่ง `db:check-hardening`/`db:apply-hardening` เป็น operational commands แยกต่างหาก ดู `db/README.md`
-ผลตรวจรอบ 31 ตุลาคม: browser 15 ordinary passes + 2 expected failures ไม่มี unexpected result; เพิ่มการยืนยันว่าเปลี่ยนชื่อ/สีเสื้อแล้ว matches และลำดับผู้เล่น/GK ตรงเดิม SQL ใน PGlite ผ่าน 37 กรณีผิดรูป, legacy compatibility, formations, ID หลังลบ/นำเข้า/รันซ้ำ, revision conflict และ anonymous RPC permissions
+ผลตรวจรอบ 31 ตุลาคมล่าสุด: browser 24 ordinary passes ไม่มี expected failures; รวม remote deletion ขณะมี pending edits/backup เต็ม, blocked storage routing, ตัวเลขสามหลักบนจอ 320px/เลื่อนตารางเมื่อสี่หลัก และการยืนยันว่าเปลี่ยนชื่อ/สีเสื้อแล้ว matches และลำดับผู้เล่น/GK ตรงเดิม SQL ใน PGlite ผ่าน 37 กรณีผิดรูป, legacy compatibility, formations, ID หลังลบ/นำเข้า/รันซ้ำ, revision conflict และ anonymous RPC permissions
 Neon migration วันที่ 31 ตุลาคมติดตั้งสำเร็จแล้ว: strict validator และ counter allocator ทำงาน เกมเดิมทั้ง 3 เกมอ่านได้ครบ และ fingerprint ของ records ก่อน/หลังตรงกันทุกเกม มี DDL backup ใน ignored `outputs/db-backups/`; ไม่ได้เขียนทับ state, scores, fixtures, GK order หรือ revisions ของเกมเดิม ผล engine checks, lint, TypeScript, Oxfmt และ local GitHub Pages production build ผ่านด้วย
-Known-issue tests ที่ยังไม่แก้มี 2 ข้อ: remote deletion ยังขึ้น saved และ F/A สามหลักล้นจอ 320px หากแก้บั๊กแล้วจะเป็น unexpected pass จนกว่าเอา `test.fail()` ออก ส่วน backup เป็น regression test ปกติแล้ว
+Known-issue tests เดิมเปลี่ยนเป็น regression tests ปกติใน `tests/e2e/data-integrity.spec.ts` แล้ว; routing เพิ่มใน `tests/e2e/routing.spec.ts`
+Static Pages artifact smoke รอบล่าสุดใช้ base path `/FootballTeam` กับ generated game/allgames entry และ 404 script จริง เมื่อ storage ถูกบล็อกยังคืน clean URL/query/hash ได้ ตรวจตัวเลข/ชื่อทีมที่ 320/360/390/480px ไม่ล้น ไม่พบ pageerror; ทุก RPC ตอบจาก mock รูป OG สร้างครบ 565 หน้า/48 รูปจากรายการเกม 3 เกมโดยอ่าน Neon เท่านั้น การกู้ pending state หลัง remote delete ทดสอบ reload ต่อได้และไม่สร้างเกมใหม่อัตโนมัติ
 ผลตรวจรอบ 30 ตุลาคม: `PLAYWRIGHT_CHANNEL=chrome npm run test:e2e` จบด้วย exit 0 โดย JSON report แยกเป็น 12 ordinary passes, 3 expected failures และ 0 unexpected results; รันยืนยันสองรอบผ่านตรงกัน `npm test`, lint, TypeScript, Oxfmt และ local GitHub Pages static build ผ่านด้วย ไม่มีการแก้ไข application source หรือ deploy
 ผลตรวจรอบ 23 ตุลาคม: `npm test`, `npm run lint`, TypeScript, Oxfmt และ GitHub Pages static build (Node 24, prerender 2 routes) ผ่าน; build รอบแรกติด sandbox `listen EPERM 127.0.0.1` แล้ว rerun ในบริบทที่เปิด loopback ได้จนผ่าน
 Browser QA รอบ 23 ตุลาคม: ใช้ local app กับ demo ใน browser context แยก (ไม่เขียน production) ที่ 320/360/390/480px ตรวจว่าตารางมี F/A, ชื่อทีมไม่ถูกตัด, ไม่มี horizontal overflow; รูปแชร์ขนาด 1080×1600 แสดง F/A ตรงช่องและไม่ชนคอลัมน์อื่น ไม่ได้ทดสอบการบันทึกสกอร์ตัวอย่างผ่าน UI เพราะเครื่องมือปฏิเสธการทดสอบที่อาจเขียน Neon และไม่ได้แก้ข้อมูลเกมจริง
@@ -70,30 +71,30 @@ Technology:
 
 ## 3. Source map
 
-| Path                                    | Responsibility                                                                                            |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `components/football/football-app.tsx`  | หน้าหลักทั้งหมด, navigation, setup, teams, schedule, score, settings, share, game list และ sync lifecycle |
-| `components/football/tactics-board.tsx` | กระดาน tactic และ pointer/touch interaction                                                               |
-| `components/football/shared.tsx`        | header, bottom navigation, team colors และ shared controls                                                |
-| `lib/football-engine.ts`                | scheduling, match status, score, scorers, standings, overtime และ GK assignment                           |
-| `lib/football-scheduling.ts`            | Method B bounded beam search: pair coverage, cumulative play/rest burden, deterministic pair order       |
-| `lib/football-tactics.ts`               | formation definitions, GK selection และ Auto placement จากตำแหน่งผู้เล่น                                  |
-| `lib/football-settings.ts`               | ตรวจว่าผู้ใช้เปลี่ยนคู่ที่เลือกจริงก่อนสั่งจัดคิวใหม่                                                       |
+| Path                                    | Responsibility                                                                                          |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `components/football/football-app.tsx`  | หน้าหลักทั้งหมด, navigation, setup, teams, schedule, score, settings, share, game list และ sync lifecycle   |
+| `components/football/tactics-board.tsx` | กระดาน tactic และ pointer/touch interaction                                                             |
+| `components/football/shared.tsx`        | header, bottom navigation, team colors และ shared controls                                              |
+| `lib/football-engine.ts`                | scheduling, match status, score, scorers, standings, overtime และ GK assignment                         |
+| `lib/football-scheduling.ts`            | Method B bounded beam search: pair coverage, cumulative play/rest burden, deterministic pair order      |
+| `lib/football-tactics.ts`               | formation definitions, GK selection และ Auto placement จากตำแหน่งผู้เล่น                                    |
+| `lib/football-settings.ts`              | ตรวจว่าผู้ใช้เปลี่ยนคู่ที่เลือกจริงก่อนสั่งจัดคิวใหม่                                                                     |
 | `lib/football-types.ts`                 | domain types ทั้งหมด                                                                                      |
-| `lib/football-team-labels.ts`           | ชื่อสีภาษาอังกฤษทั้ง 8 สี และชื่อทีมที่แสดงตามสีเสื้อ โดยไม่เปลี่ยนชื่อเก่าใน DB ตอนโหลด                  |
-| `lib/football-data-api.ts`              | Neon Data API endpoint, public credential และ RPC client                                                  |
+| `lib/football-team-labels.ts`           | ชื่อสีภาษาอังกฤษทั้ง 8 สี และชื่อทีมที่แสดงตามสีเสื้อ โดยไม่เปลี่ยนชื่อเก่าใน DB ตอนโหลด                                     |
+| `lib/football-data-api.ts`              | Neon Data API endpoint, public credential และ RPC client                                                |
 | `lib/football-schema.ts`                | Runtime validation ของ state ที่มาจาก DB/local backup                                                     |
-| `lib/standings-share-card.ts`           | วาดและ export PNG ตารางคะแนน                                                                              |
-| `app/layout.tsx`                        | metadata, favicon, Open Graph/X social preview และ Neon preconnect                                        |
-| `public/og*.jpg`                        | รูป preview เมื่อแชร์ลิงก์เว็บไซต์ผ่านแอปแชตหรือ social platform                                          |
-| `lib/demo-data.ts`                      | ข้อมูลตัวอย่าง 4 ทีม                                                                                      |
-| `db/neon-schema.sql`                    | table, RPC functions และ grants ของ Neon                                                                  |
-| `scripts/verify-engine.ts`              | engine smoke checks                                                                                       |
+| `lib/standings-share-card.ts`           | วาดและ export PNG ตารางคะแนน                                                                            |
+| `app/layout.tsx`                        | metadata, favicon, Open Graph/X social preview และ Neon preconnect                                      |
+| `public/og*.jpg`                        | รูป preview เมื่อแชร์ลิงก์เว็บไซต์ผ่านแอปแชตหรือ social platform                                                  |
+| `lib/demo-data.ts`                      | ข้อมูลตัวอย่าง 4 ทีม                                                                                         |
+| `db/neon-schema.sql`                    | table, RPC functions และ grants ของ Neon                                                                |
+| `scripts/verify-engine.ts`              | engine smoke checks                                                                                     |
 | `tests/e2e/` และ `playwright.config.ts` | local browser regression tests, in-memory RPC และ external network guard; คู่มืออยู่ใน `tests/e2e/README.md` |
 | `scripts/generate-game-share-pages.tsx` | สร้าง static game share/OG pages และ static entry สำหรับ `/allgames`                                      |
 | `scripts/github-pages-404.html`         | redirect deep path ของ GitHub Pages กลับเข้า SPA                                                          |
-| `.github/workflows/deploy-pages.yml`    | build และ deploy ทุกครั้งที่ push `main`                                                                  |
-| `next.config.ts`                        | static export และ `/FootballTeam` asset prefix                                                            |
+| `.github/workflows/deploy-pages.yml`    | build และ deploy ทุกครั้งที่ push `main`                                                                     |
+| `next.config.ts`                        | static export และ `/FootballTeam` asset prefix                                                          |
 
 `components/ui/` ส่วนใหญ่เป็น generated UI catalog ไม่ใช่ทุกไฟล์ที่ถูกใช้งานจริง หลีกเลี่ยงการแก้ทั้งโฟลเดอร์โดยไม่จำเป็น
 
@@ -138,8 +139,8 @@ RPC ที่ browser เรียกได้:
 2. เมื่อแก้ state แอปเขียน local backup แยกตาม Game ID ทันที เก็บ save queue และ debounce 450 ms เพื่อไม่ให้เกมหนึ่งทับ backup ของอีกเกม โดยเก็บ backup ที่ซิงก์แล้วล่าสุดไม่เกิน 12 เกม ส่วนรายการที่ `pendingSync` จะไม่ถูกล้างอัตโนมัติ
 3. การบันทึกใช้ `save_football_game_v2(p_expected_revision)` เพื่อป้องกันการเขียนทับข้ามเครื่อง
 4. เมื่อ page ถูกซ่อนหรือปิด มี keepalive flush เพื่อพยายามส่ง state ล่าสุด
-5. แอป poll Neon ทุก 15 วินาทีเฉพาะตอนหน้า visible และไม่ apply remote ขณะมี local dirty state
-6. ถ้า revision ชนกันจะแสดงตัวเลือก “ใช้ข้อมูลล่าสุด” หรือ “เก็บข้อมูลเครื่องนี้”
+5. แอปตรวจ poll ทุก 5 วินาทีเฉพาะตอนหน้า visible โดยถอยระยะเมื่อเชื่อมต่อล้มเหลว และไม่ apply remote ขณะมี local dirty state
+6. ถ้า revision ชนกันจะยึดข้อมูลล่าสุดจาก DB และแสดงสรุปสิ่งที่เครื่องนี้ส่งไม่สำเร็จ เพื่อไม่ให้กดครั้งเดียวทับประตูจากอีกเครื่อง
 7. สถานะบนหน้า Home คือ `กำลังบันทึก`, `บันทึกแล้ว`, `ซิงก์ไม่สำเร็จ`, `ข้อมูลชนกัน` หรือ `เฉพาะเครื่อง`
 8. รายการเกมใช้ stale-while-revalidate: แสดง cache อายุไม่เกิน 24 ชั่วโมงทันที แล้วอัปเดตจาก Neon เบื้องหลัง โดยหน้าเริ่มต้นจะ prefetch รายการไว้ล่วงหน้า
 9. Neon free compute อาจใช้เวลาหลายวินาทีเมื่อปลุกจากสถานะ idle; หลังตื่นแล้ว RPC ปกติอยู่ระดับหลักสิบถึงหลักร้อยมิลลิวินาที จึงไม่ควรตีความ cold start ว่าเป็นปัญหาจากจำนวนแถวหรือ React render
@@ -147,8 +148,9 @@ RPC ที่ browser เรียกได้:
 11. sync session แยกตามเกม คำตอบจาก request เก่าจึงไม่สามารถเปลี่ยน revision, queue หรือสถานะของเกมที่เปิดใหม่ได้
 12. รายการเกมมี mutation version และ request token แยกกัน คำตอบจาก list request ที่เริ่มก่อนการลบจึงไม่สามารถนำเกมที่ลบแล้วกลับเข้า cache หรือ UI ได้
 13. ทั้ง success และ failure ของ background poll ตรวจ Game ID และ sync session ก่อนเปลี่ยนสถานะ จึงไม่ทำให้เกมใหม่ขึ้น error จาก request ของเกมเก่า
+14. เมื่อ get คืน null หรือ save คืน PostgreSQL `P0002`/HTTP 404 จะยืนยันว่าเกมถูกลบ: invalidate session/cache, ยกเลิก retry, หยุดแก้ไขและแสดงข้อความถาวร โดยไม่ตีความ timeout/503 เป็นการลบ เก็บ pending backup เดิมและสำเนาใน memory; ผู้ใช้เปิดข้อมูลที่ยังไม่บันทึกเป็นเกมร่างได้โดยยังไม่สร้างเกมใหม่อัตโนมัติ หาก storage เต็มจะแจ้งให้เปิดร่างก่อนปิดหน้า
 
-Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql` และ `db/migrations/20260909_remove_legacy_save.sql`; migration ล่าสุดลบ RPC `save_football_game` ตัวเก่าที่ไม่มี revision check ออกจาก production แล้ว
+Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906_sync_integrity.sql`, `db/migrations/20260909_remove_legacy_save.sql` และ `db/migrations/20261031_data_integrity.sql`; legacy RPC ที่ไม่มี revision check ถูกลบแล้ว ส่วน migration วันที่ 31 เพิ่ม strict validator และ counter allocator ที่ไม่ใช้ ID ซ้ำ รอบ remote deletion/routing/UI/dependency ไม่ต้องเปลี่ยน DB เพิ่ม
 
 ## 6. URL และ routing
 
@@ -158,7 +160,7 @@ Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906
 - ปุ่มคัดลอกลิงก์ประกอบ URL จาก `window.location.origin` เท่านั้น ห้าม hardcode โดเมนอื่น
   มิฉะนั้นลิงก์ที่ส่งให้เพื่อนจะชี้ไป host ที่ไม่ได้ deploy
 - `/FootballTeam/allgames` มี static `allgames/index.html` redirect entry จึงเปิด bookmark นี้ได้โดยไม่ต้องเริ่มจาก HTTP 404
-- Game path ที่ไม่ได้ pre-generate ยังใช้ `404.html` เก็บ path ใน `sessionStorage`, redirect ไป root แล้ว React คืน path ก่อนอ่าน Game ID เพราะ GitHub Pages ไม่มี SPA rewrite จริง
+- ทั้ง static game/allgames/latest entry และ `404.html` ส่ง path+query+hash ผ่าน `__football_path` ชั่วคราวกลับ root; React ใช้ `validPagesPath` ตรวจเฉพาะเส้นทางใน base path ของแอปแล้ว `replaceState` คืน clean path ก่อนอ่าน Game ID จึงไม่ต้องพึ่ง storage และไม่ redirect ออกนอกเว็บ รองรับ sessionStorage hint แบบเก่าเพื่อความเข้ากันได้ด้วย GitHub Pages ยังไม่มี SPA rewrite จริง
 - มี `popstate` listener แล้ว ดังนั้น Back/Forward จะโหลด game หรือกลับ Home ให้ตรงกับ URL และจะ invalidate คำขอเปิดเกมเดิมเมื่อผู้ใช้กลับ Home หรือหน้าเกมทั้งหมด
 - เมื่อลบเกมปัจจุบันจากหน้าเกมทั้งหมด แอปจะคง URL `/FootballTeam/allgames` และหน้ารายการไว้; หากผู้ใช้เปลี่ยนหน้าไประหว่างลบจะยึด route ล่าสุดแทน
 
@@ -176,7 +178,7 @@ Migration ที่ apply แล้วอยู่ใน `db/migrations/20260906
 
 ## 8. Local development และ release
 
-ต้องใช้ Node.js 22.13 ขึ้นไป; GitHub Actions ใช้ Node 24
+แนะนำ Node.js 24 ตาม GitHub Actions (package engine ยังคง >=22.13)
 
 ```bash
 npm install
@@ -221,7 +223,7 @@ Automated checks ที่ผ่าน:
 - TypeScript `--noEmit`
 - Engine smoke checks: defaults, round-robin repeats, time window, score, scorers/Top 3, standings, overtime, GK fairness, tactics formation และ reopen match
 - GitHub Pages production build ด้วย Node 24 ในรอบ audit นี้
-- `npm audit --omit=optional`: 0 vulnerabilities หลังอัปเดต React 19.2.8, Vinext 1.0.0-beta.9, Vite 8.2.2, Cloudflare Vite plugin 1.54.7, Wrangler 4.131.0, Sharp 0.35.4 และ Cloudflare Workers Types 5.20260911.1
+- Dependency audit รอบ 31 ตุลาคม: จาก 28 รายการเหลือ 6 รายการ (0 critical/high, 4 moderate, 2 low) หลังใช้ Vinext 1.0.0, Vite 8.3.5, Cloudflare plugin 1.66.0, Wrangler 4.154.0, Workers Types 5.20261023.1, Oxfmt 0.75.0, Satori 0.63.2, Sharp 0.35.5, shadcn 4.23.0 และ override `fflate` จาก 0.7.4 เป็น patched 0.7.5 โดยคง React 19.2.8 ผลเต็มและ `--omit=optional` เหลือคำเตือนในเครื่องมือ shadcn/registry/ts-morph (`deepmerge`, `minimatch`) ซึ่งไม่ได้ใช้ประมวลผลข้อมูลเกมใน browser ยังไม่ force downgrade shadcn หรือบังคับ minimatch major เพราะอาจกระทบ tooling; audit จึงยัง exit 1 ไม่ใช่ clean audit
 - Neon transaction smoke test: save ด้วย revision ปัจจุบันคืน `conflict=false`, revision เก่าคืน `conflict=true` และ rollback แล้ว
 - Local UI smoke test ที่ 320px: Home, standings, schedule, settings และหน้าจัดการผู้เล่นไม่ล้นขอบ ปุ่มลบยังมองเห็นครบ ตัวเลือกตำแหน่งแบบ compact มีพื้นขาวทึบ และเปลี่ยนเมนูแล้ว scroll กลับด้านบน
 - Local browser smoke วันที่ 9 กันยายน: scorer popup, share card, tactics 5/7 คน, formation, animation, standings ที่ 320px และ tactics autosave หลังสลับหน้าผ่านทั้งหมด
@@ -282,13 +284,19 @@ Engine tests ตรวจทุกคู่เปิดสนามของ 4 �
 - Backup ใน localStorage เป็นเพียง fallback; ระบบเก็บรายการที่ซิงก์แล้วล่าสุด 12 เกมเพื่อไม่ให้พื้นที่ browser โตไม่จำกัด แต่ข้อมูลหลักของเกมที่มี Game ID ยังคงอยู่ใน Neon
 - Local staging ที่ใช้ Neon Data API ต้องใช้ origin ที่อนุญาตใน Neon CORS; ปัจจุบัน `http://localhost:3000` ใช้ได้ ส่วน port อื่น เช่น 3100 ต้องเพิ่ม origin ก่อนจึงจะทดสอบการโหลด DB ได้
 
-ผลย้อนหลังรอบ 11 กันยายน: `npm audit` รายงาน 0 vulnerabilities และ production build ผ่าน ไม่ได้รัน dependency audit ใหม่ในรอบ 1 ตุลาคม; ผล build ล่าสุดที่ rerun ผ่านระบุไว้ต้นเอกสาร
+ผลย้อนหลังรอบ 11 กันยายนเคย audit ได้ 0 vulnerabilities; ให้ใช้ผล audit รอบ 31 ตุลาคมด้านบนเป็นสถานะล่าสุด
 
 ## 11. Recommended next work order
 
-1. แก้ known issues ที่เหลือตามลำดับความสำคัญและเปลี่ยน expected failures เป็น regression tests ปกติ; พิจารณารัน suite ใน CI แยกจาก deployment เมื่อพร้อม
-2. พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ HTTP 200 สำหรับทุก game path และ preview bot
-3. เพิ่ม rate limit/authentication หากนำไปใช้นอกกลุ่มเพื่อน
+| งานที่ยังเหลือ                                                   | แนวทาง                                                                                                | สถานะ                            |
+| ------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | -------------------------------- |
+| ข้อ 3: create สำเร็จใน DB แต่ response หาย แล้วกดซ้ำกลายเป็นสองเกม | ให้ draft เดียวกันใช้ request ID เดิม และ RPC คืนเกมเดิมเมื่อ retry; ต้องออกแบบ migration/retention และทดสอบก่อน | อธิบายให้ผู้ใช้แล้ว ยังไม่อนุมัติให้ทำในรอบนี้ |
+| Dependency ของ CLI ยังมี 6 audit entries ระดับกลาง/ต่ำ           | รอ upstream ที่แก้หรือแยก CSS ที่ใช้จริงออกจาก CLI อย่างมีการตรวจหน้าตา; ไม่ใช้ audit fix --force โดยไม่ทดสอบ       | คงเหลือ ไม่ใช่ 0 vulnerabilities    |
+| เกมเก่าที่ยังไม่ปิดแสดงเป็นกำลังแข่ง                                  | ออกแบบสถานะจบทั้งวัน/ป้ายเกมเก่าแยกจาก current match                                                       | ยังไม่ทำ                           |
+| iPhone Add to Home Screen, touch และ native share            | ทดสอบบนอุปกรณ์จริง พร้อมกลับเข้าแอปหลังพักเครื่อง                                                               | ยังไม่ยืนยันจาก real device          |
+| CI ก่อน deploy                                                | เพิ่ม engine/DB/browser checks เป็น gate โดยแยกจากข้อมูลจริง                                                | ยังไม่ทำ                           |
+| HTTP 200 สำหรับทุก deep path                                   | พิจารณา hosting ที่รองรับ SPA rewrite หากต้องการ                                                           | ข้อจำกัด GitHub Pages              |
+| ใช้นอกกลุ่มเพื่อน                                                 | เพิ่ม rate limit/authentication ตามขอบเขตใหม่                                                            | ยังไม่อยู่ใน requirement             |
 
 ## 12. Rules for the next agent
 

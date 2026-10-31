@@ -140,6 +140,8 @@ import {
   CorruptGameStateError,
   createSharedGame,
   deleteSharedGame,
+  GameNotFoundError,
+  forgetCachedSharedGame,
   type FootballGameSummary,
   type StoredFootballGame,
   listSharedGames,
@@ -151,6 +153,7 @@ import {
 } from '@/lib/football-data-api';
 import { parseTournament } from '@/lib/football-schema';
 import { fixtureSelectionChanged } from '@/lib/football-settings';
+import { PAGES_PATH_PARAM, validPagesPath } from '@/lib/football-pages-path';
 import {
   canonicalJson,
   describeUnsavedChanges,
@@ -410,13 +413,20 @@ function syncBaseTournament(base: SyncBase) {
 }
 
 function restoreGitHubPagesPath() {
+  const url = new URL(window.location.href);
+  const queryHint = url.searchParams.get(PAGES_PATH_PARAM);
+  let storedHint: string | null = null;
   try {
-    const restoredPath = sessionStorage.getItem(PAGES_PATH_KEY);
-    if (!restoredPath) return;
+    storedHint = sessionStorage.getItem(PAGES_PATH_KEY);
     sessionStorage.removeItem(PAGES_PATH_KEY);
-    window.history.replaceState({}, '', restoredPath);
   } catch {
-    // Continue at the root route when storage is unavailable.
+    // The URL hint still works when all browser storage is unavailable.
+  }
+  const restoredPath = validPagesPath(queryHint ?? storedHint, BASE_PATH);
+  if (restoredPath) window.history.replaceState({}, '', restoredPath);
+  else if (queryHint !== null) {
+    url.searchParams.delete(PAGES_PATH_PARAM);
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
   }
 }
 
@@ -1090,105 +1100,131 @@ function CurrentMatchControl({
 
 function StandingsTable({ tournament }: { tournament: Tournament }) {
   const standings = calculateStandings(tournament);
+  const stats = standings.flatMap((standing) => [
+    standing.played,
+    standing.won,
+    standing.drawn,
+    standing.lost,
+    standing.goalsFor,
+    standing.goalsAgainst,
+    standing.goalDifference,
+    standing.points,
+  ]);
+  const wideStats = stats.some((value) => Math.abs(value) >= 1000);
+  const minWidth = wideStats
+    ? Math.max(520, ...stats.map((value) => String(value).length * 100))
+    : undefined;
   return (
     <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white">
-      <table className="w-full table-fixed text-center text-xs sm:text-sm">
-        <colgroup>
-          <col className="w-[34%]" />
-          <col className="w-[9%]" />
-          <col className="w-[6%]" />
-          <col className="w-[6%]" />
-          <col className="w-[6%]" />
-          <col className="w-[7%]" />
-          <col className="w-[7%]" />
-          <col className="w-[10%]" />
-          <col className="w-[15%]" />
-        </colgroup>
-        <thead className="bg-[#e5f5e9] text-[#087632]">
-          <tr>
-            <th className="px-2 py-3 text-left">ทีม</th>
-            <th className="px-1 py-3">แข่ง</th>
-            <th title="ชนะ" className="border-l border-emerald-100 px-0 py-3">
-              ช
-            </th>
-            <th title="เสมอ" className="border-l border-emerald-100 px-0 py-3">
-              ส
-            </th>
-            <th title="แพ้" className="border-l border-emerald-100 px-0 py-3">
-              พ
-            </th>
-            <th
-              title="ประตูที่ยิงได้"
-              aria-label="F ประตูที่ยิงได้"
-              className="border-l border-emerald-100 px-0 py-3"
-            >
-              F
-            </th>
-            <th
-              title="ประตูที่เสีย"
-              aria-label="A ประตูที่เสีย"
-              className="border-l border-emerald-100 px-0 py-3"
-            >
-              A
-            </th>
-            <th className="px-1 py-3">+/-</th>
-            <th className="px-2 py-3">แต้ม</th>
-          </tr>
-        </thead>
-        <tbody>
-          {standings.map((standing, index) => {
-            const team = tournament.teams.find(
-              (item) => item.id === standing.teamId,
-            )!;
-            return (
-              <tr key={standing.teamId} className="border-t border-slate-100">
-                <th
-                  scope="row"
-                  aria-label={`อันดับ ${index + 1} ทีม ${matchTeamLabel(tournament, team)}`}
-                  className="px-1 py-3 text-left min-[360px]:px-2"
-                >
-                  <div className="flex min-w-0 items-center gap-1 font-black min-[380px]:gap-1.5">
-                    <span className="w-4 shrink-0 text-center text-slate-400">
-                      {index + 1}
-                    </span>
-                    <TeamShirtIcon
-                      color={team.color}
-                      size="xs"
-                      className="max-[359px]:!h-5 max-[359px]:!w-5"
-                    />
-                    <span className="min-w-0 truncate">
-                      {matchTeamLabel(tournament, team)}
-                    </span>
-                  </div>
-                </th>
-                <td className="px-1 py-3 font-bold">{standing.played}</td>
-                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
-                  {standing.won}
-                </td>
-                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
-                  {standing.drawn}
-                </td>
-                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
-                  {standing.lost}
-                </td>
-                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
-                  {standing.goalsFor}
-                </td>
-                <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
-                  {standing.goalsAgainst}
-                </td>
-                <td className="px-1 py-3 font-bold">
-                  {standing.goalDifference > 0 ? '+' : ''}
-                  {standing.goalDifference}
-                </td>
-                <td className="px-2 py-3 text-base font-black text-[#087632]">
-                  {standing.points}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+      <div className="overflow-x-auto">
+        <table
+          style={{ minWidth }}
+          className="w-full table-fixed text-center text-xs sm:text-sm"
+        >
+          <colgroup>
+            <col className="w-[32%]" />
+            <col className="w-[8%]" />
+            <col className="w-[6%]" />
+            <col className="w-[6%]" />
+            <col className="w-[6%]" />
+            <col className="w-[9%]" />
+            <col className="w-[9%]" />
+            <col className="w-[10%]" />
+            <col className="w-[14%]" />
+          </colgroup>
+          <thead className="bg-[#e5f5e9] text-[#087632]">
+            <tr>
+              <th className="px-2 py-3 text-left">ทีม</th>
+              <th className="px-0 py-3 min-[380px]:px-1">แข่ง</th>
+              <th title="ชนะ" className="border-l border-emerald-100 px-0 py-3">
+                ช
+              </th>
+              <th
+                title="เสมอ"
+                className="border-l border-emerald-100 px-0 py-3"
+              >
+                ส
+              </th>
+              <th title="แพ้" className="border-l border-emerald-100 px-0 py-3">
+                พ
+              </th>
+              <th
+                title="ประตูที่ยิงได้"
+                aria-label="F ประตูที่ยิงได้"
+                className="border-l border-emerald-100 px-0 py-3"
+              >
+                F
+              </th>
+              <th
+                title="ประตูที่เสีย"
+                aria-label="A ประตูที่เสีย"
+                className="border-l border-emerald-100 px-0 py-3"
+              >
+                A
+              </th>
+              <th className="px-1 py-3">+/-</th>
+              <th className="px-2 py-3">แต้ม</th>
+            </tr>
+          </thead>
+          <tbody>
+            {standings.map((standing, index) => {
+              const team = tournament.teams.find(
+                (item) => item.id === standing.teamId,
+              )!;
+              return (
+                <tr key={standing.teamId} className="border-t border-slate-100">
+                  <th
+                    scope="row"
+                    aria-label={`อันดับ ${index + 1} ทีม ${matchTeamLabel(tournament, team)}`}
+                    className="px-1 py-3 text-left min-[360px]:px-2"
+                  >
+                    <div className="flex min-w-0 items-center gap-1 font-black min-[380px]:gap-1.5">
+                      <span className="w-4 shrink-0 text-center text-slate-400 max-[379px]:w-3">
+                        {index + 1}
+                      </span>
+                      <TeamShirtIcon
+                        color={team.color}
+                        size="xs"
+                        className="max-[379px]:!h-5 max-[379px]:!w-5"
+                      />
+                      <span className="min-w-0 truncate">
+                        {matchTeamLabel(tournament, team)}
+                      </span>
+                    </div>
+                  </th>
+                  <td className="px-0 py-3 font-bold min-[380px]:px-1">
+                    {standing.played}
+                  </td>
+                  <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                    {standing.won}
+                  </td>
+                  <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                    {standing.drawn}
+                  </td>
+                  <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                    {standing.lost}
+                  </td>
+                  <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                    {standing.goalsFor}
+                  </td>
+                  <td className="border-l border-slate-100 px-0 py-3 font-bold tabular-nums">
+                    {standing.goalsAgainst}
+                  </td>
+                  <td
+                    className={`px-0 py-3 font-bold min-[440px]:px-1 ${Math.abs(standing.goalDifference) >= 100 ? 'max-[359px]:text-[10px]' : ''}`}
+                  >
+                    {standing.goalDifference > 0 ? '+' : ''}
+                    {standing.goalDifference}
+                  </td>
+                  <td className="px-0 py-3 text-base font-black text-[#087632] min-[380px]:px-2">
+                    {standing.points}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
       <p className="border-t border-slate-100 px-2 py-1 text-right text-[10px] font-semibold text-slate-500">
         F ยิงได้ · A เสีย
       </p>
@@ -5092,6 +5128,11 @@ export default function FootballApp() {
   // True for a few seconds after an update from another phone lands.
   const [remoteUpdateVisible, setRemoteUpdateVisible] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [remoteDeletedGameId, setRemoteDeletedGameId] = useState('');
+  const [remoteDeletedDraft, setRemoteDeletedDraft] =
+    useState<Tournament | null>(null);
+  const [remoteDeletedBackupFailed, setRemoteDeletedBackupFailed] =
+    useState(false);
   const [backupProblem, setBackupProblem] = useState<{
     gameId: string;
     session: number;
@@ -5272,7 +5313,7 @@ export default function FootballApp() {
           game: newerGameThan(games, targetGameId),
         });
       if (!game) {
-        setNotice('ไม่พบเกมนี้ในฐานข้อมูลแล้ว');
+        markRemoteGameDeleted(targetGameId);
         return;
       }
       pollFailureCountRef.current = 0;
@@ -5377,7 +5418,9 @@ export default function FootballApp() {
         queuedStateRef.current,
         tournamentRef.current,
       );
-      if (error instanceof RevisionConflictError) {
+      if (error instanceof GameNotFoundError) {
+        markRemoteGameDeleted(targetGameId);
+      } else if (error instanceof RevisionConflictError) {
         settleWithRemote(
           {
             ...error.latest,
@@ -5487,8 +5530,7 @@ export default function FootballApp() {
               if (cancelled) return;
               setNotice('เกมจากลิงก์นี้ถูกลบแล้ว เปิดเกมล่าสุดให้แทน');
             } else {
-              if (backupForGame) setSyncStatus('error');
-              setNotice('ไม่พบเกมจากลิงก์นี้');
+              markRemoteGameDeleted(pathGameId);
             }
           }
         } catch (error) {
@@ -5627,6 +5669,10 @@ export default function FootballApp() {
           // The guards above ran when this pull started; by the time the
           // response lands the user may have switched games or started an edit.
           if (!requestStillActive()) return;
+          if (!game) {
+            markRemoteGameDeleted(gameId);
+            return;
+          }
           const recovered = pollFailedRef.current;
           pollFailureCountRef.current = 0;
           pollFailedRef.current = false;
@@ -5820,6 +5866,7 @@ export default function FootballApp() {
     setTournament(value);
   }
   async function publishTournament(value: Tournament, message: string) {
+    setRemoteDeletedGameId('');
     syncSessionRef.current += 1;
     const publishSession = syncSessionRef.current;
     publishSessionRef.current = publishSession;
@@ -5892,6 +5939,7 @@ export default function FootballApp() {
     }
   }
   function loadDemo() {
+    setRemoteDeletedGameId('');
     const demo = createDemoTournament();
     syncSessionRef.current += 1;
     cancelScheduledRetry();
@@ -5992,6 +6040,7 @@ export default function FootballApp() {
         return;
       }
       const backup = readLocalBackup(gameIdToOpen);
+      setRemoteDeletedGameId('');
       syncSessionRef.current += 1;
       gameIdRef.current = game.id;
       setGameId(game.id);
@@ -6013,12 +6062,47 @@ export default function FootballApp() {
       setNotice(blockingSyncNotice(error) || 'เปิดเกมไม่สำเร็จ กรุณาลองใหม่');
     }
   }
-  function handleDeletedGame(deletedGameId: string) {
-    if (deletedGameId !== gameId) return;
+  function markRemoteGameDeleted(deletedGameId: string) {
+    if (deletedGameId !== gameIdRef.current) return;
+    forgetCachedSharedGame(deletedGameId);
+    // Preserve unsent edits for recovery; a remote delete must not erase the
+    // only remaining backup or retry writes against a missing game forever.
+    const localState = queuedStateRef.current ?? tournamentRef.current;
+    const pendingDraft = dirtyRef.current ? localState : null;
+    const backedUp =
+      !localState ||
+      writeLocalBackup(
+        localState,
+        deletedGameId,
+        dirtyRef.current,
+        currentSyncBase(),
+      );
+    // Keep the unsent copy in memory too, even if browser storage is full.
+    setRemoteDeletedDraft(pendingDraft);
+    setRemoteDeletedBackupFailed(Boolean(pendingDraft && !backedUp));
+    handleDeletedGame(deletedGameId, true);
+    setUnsavedChanges(null);
+    setRemoteDeletedGameId(deletedGameId);
+  }
+  function recoverDeletedDraft() {
+    if (!remoteDeletedDraft) return;
+    // A fresh draft identity keeps draftAlreadyPublished from mistaking this
+    // explicitly recovered copy for the deleted game's old pre-create draft.
+    applyTournament({
+      ...remoteDeletedDraft,
+      id: crypto.randomUUID(),
+      createdAt: new Date().toISOString(),
+    });
+    setRemoteDeletedGameId('');
+    setRemoteDeletedDraft(null);
+    setView('home');
+  }
+  function handleDeletedGame(deletedGameId: string, preserveBackup = false) {
+    if (deletedGameId !== gameIdRef.current) return;
     const stayOnGameList = allGamesFromPath();
     syncSessionRef.current += 1;
     cancelScheduledRetry();
-    clearLocalBackup(deletedGameId);
+    if (!preserveBackup) clearLocalBackup(deletedGameId);
     setTournament(null);
     tournamentRef.current = null;
     gameIdRef.current = '';
@@ -6081,6 +6165,7 @@ export default function FootballApp() {
   }
   function recoverDraft() {
     if (!recoverableDraft) return;
+    setRemoteDeletedGameId('');
     tournamentRef.current = recoverableDraft;
     setTournament(recoverableDraft);
     setRecoverableDraft(null);
@@ -6193,14 +6278,59 @@ export default function FootballApp() {
                   title="Football Match Maker"
                   eyebrow="Ready when you are"
                 />
-                <EmptyHome
-                  onSetup={openNewSetup}
-                  onDemo={loadDemo}
-                  onGames={openAllGames}
-                  recoverableDraft={recoverableDraft}
-                  onRecover={recoverDraft}
-                  onDiscardDraft={discardDraft}
-                />
+                {remoteDeletedGameId ? (
+                  <div className="space-y-3 px-4 py-6">
+                    <section role="alert" className="settings-card space-y-2">
+                      <h2 className="section-title">เกมนี้ถูกลบจากอีกเครื่องแล้ว</h2>
+                      <p className="text-sm font-semibold text-slate-500">
+                        {remoteDeletedGameId} ไม่อยู่ในฐานข้อมูลแล้ว
+                        จึงหยุดการแก้ไขและการบันทึกเกมนี้
+                      </p>
+                      {remoteDeletedDraft && (
+                        <>
+                          <p className="text-sm font-semibold text-slate-500">
+                            ข้อมูลที่ยังไม่บันทึกสามารถเปิดเป็นเกมร่างได้
+                            โดยยังไม่สร้างเกมใหม่ในฐานข้อมูล
+                          </p>
+                          {remoteDeletedBackupFailed && (
+                            <p className="text-sm font-bold text-red-700">
+                              สำรองในเครื่องไม่สำเร็จ กรุณาเปิดข้อมูลร่างก่อนปิดหน้านี้
+                            </p>
+                          )}
+                          <Button
+                            onClick={recoverDeletedDraft}
+                            variant="outline"
+                            className="h-12 w-full rounded-xl font-black"
+                          >
+                            เปิดข้อมูลที่ยังไม่บันทึก
+                          </Button>
+                        </>
+                      )}
+                    </section>
+                    <Button
+                      onClick={openAllGames}
+                      className="h-12 w-full rounded-xl bg-[#11823b] font-black"
+                    >
+                      ดูเกมทั้งหมด
+                    </Button>
+                    <Button
+                      onClick={openNewSetup}
+                      variant="outline"
+                      className="h-12 w-full rounded-xl font-black"
+                    >
+                      สร้างตารางใหม่
+                    </Button>
+                  </div>
+                ) : (
+                  <EmptyHome
+                    onSetup={openNewSetup}
+                    onDemo={loadDemo}
+                    onGames={openAllGames}
+                    recoverableDraft={recoverableDraft}
+                    onRecover={recoverDraft}
+                    onDiscardDraft={discardDraft}
+                  />
+                )}
               </>
             )}
             {view === 'games' && (

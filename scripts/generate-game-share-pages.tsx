@@ -405,7 +405,7 @@ function sharePage(gameId: string, dateLabel: string, imageUrl: string) {
           location.pathname + location.search + location.hash,
         );
       } catch {}
-      location.replace(${JSON.stringify(redirectTarget)});
+      location.replace(${JSON.stringify(redirectTarget + '?__football_path=')} + encodeURIComponent(location.pathname + location.search + location.hash));
     </script>
   </head>
   <body>
@@ -456,7 +456,7 @@ function routePage({
           location.pathname + location.search + location.hash,
         );
       } catch {}
-      location.replace(${JSON.stringify(redirectTarget)});
+      location.replace(${JSON.stringify(redirectTarget + '?__football_path=')} + encodeURIComponent(location.pathname + location.search + location.hash));
     </script>
   </head>
   <body>

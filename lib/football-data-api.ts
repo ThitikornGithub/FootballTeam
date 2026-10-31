@@ -66,6 +66,13 @@ export class ClientOutdatedError extends Error {
   }
 }
 
+export class GameNotFoundError extends Error {
+  constructor() {
+    super('เกมนี้ถูกลบจากฐานข้อมูลแล้ว');
+    this.name = 'GameNotFoundError';
+  }
+}
+
 function parseStoredGame(value: unknown): StoredFootballGame | null {
   if (!value || typeof value !== 'object') return null;
   const game = value as Record<string, unknown>;
@@ -123,6 +130,8 @@ async function callRpc<T>(
     // older than the database. A 404 without it is a normal "not found" raise.
     if (response.status === 404 && message.includes('PGRST202'))
       throw new ClientOutdatedError();
+    if (response.status === 404 && message.includes('P0002'))
+      throw new GameNotFoundError();
     throw new Error(`Data API ${response.status}: ${message}`);
   }
 
@@ -231,6 +240,12 @@ export function readCachedSharedGames() {
 
 export function prefetchSharedGames() {
   return listSharedGames().then(() => undefined);
+}
+
+export function forgetCachedSharedGame(gameId: string) {
+  gameListMutationVersion += 1;
+  cacheGameList(readCachedSharedGames().filter((game) => game.id !== gameId));
+  markGameListStale();
 }
 
 export async function deleteSharedGame(gameId: string) {
